@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Landing PST Digital - Badan Pusat Statistik</title>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="../css/landing.css" />
+  </head>
+  <body>
+    <!-- =================NAVBAR======================== -->
+
+    <nav class="navbar navbar-expand-lg header navbar-dark">
+      <div class="container-fluid">
+        <div class="logo-section d-flex align-items-center">
+          <a
+            href="html/dashboard.html"
+            class="d-flex align-items-center text-decoration-none"
+          >
+            <img src="../img/pst digital.png" alt="PST Logo" class="nav-logo" />
+            <img
+              src="../img/logo bps.png"
+              alt="BPS Logo"
+              class="nav-logo ms-3 d-none d-sm-inline"
+            />
+            <img
+              src="../img/cbq.png"
+              alt="CBQ Logo"
+              class="nav-logo ms-3 d-none d-md-inline"
+            />
+          </a>
+        </div>
+
+        <button
+          class="navbar-toggler border-0"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#mainNavbar"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="mainNavbar">
+          <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-4">
+            <li class="nav-item dropdown">
+              <a
+                class="nav-link dropdown-toggle"
+                href="#"
+                role="button"
+                data-bs-toggle="dropdown"
+                >Layanan</a
+              >
+              <ul class="dropdown-menu shadow">
+                <li>
+                  <a class="dropdown-item" href="login.html"
+                    >Konsultasi Virtual</a
+                  >
+                </li>
+                <li><a class="dropdown-item" href="login.html">Chatbot</a></li>
+                <li>
+                  <a
+                    class="dropdown-item"
+                    href="https://perpustakaan.bps.go.id/opac/"
+                    >Katalog Publikasi</a
+                  >
+                </li>
+              </ul>
+            </li>
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="https://ppid.bps.go.id/app/konten/1600/Profil-BPS.html"
+                >Tentang Kami</a
+              >
+            </li>
+            <li class="nav-item mt-3 mt-lg-0">
+              <a
+                href="login.html"
+                class="btn-login-header d-inline-block text-center w-100 w-lg-auto"
+                >Masuk</a
+              >
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <!-- =================CAROUSEL=================== -->
+
+    <div
+      id="pstHeroCarousel"
+      class="carousel slide hero-section"
+      data-bs-ride="carousel"
+      data-bs-interval="5000"
+    >
+      <div class="carousel-indicators">
+        <button
+          type="button"
+          data-bs-target="#pstHeroCarousel"
+          data-bs-slide-to="0"
+          class="active"
+          aria-current="true"
+        ></button>
+        <button
+          type="button"
+          data-bs-target="#pstHeroCarousel"
+          data-bs-slide-to="1"
+        ></button>
+        <button
+          type="button"
+          data-bs-target="#pstHeroCarousel"
+          data-bs-slide-to="2"
+        ></button>
+      </div>
+
+      <div class="carousel-inner">
+        <div class="carousel-item active">
+          <img src="../img/slide=1.png" class="bg-overlay" alt="Slide 1" />
+          <div class="carousel-caption d-none d-md-block">
+            <div class="hero-badge">Selamat Datang di PST Digital</div>
+            <h1 class="hero-title">
+              Akses Data Statistik<br />Lebih Mudah dan Cepat
+            </h1>
+            <p class="hero-description">
+              Platform terintegrasi Badan Pusat Statistik untuk memenuhi
+              kebutuhan data masyarakat umum, konsultasi statistik, dan akses
+              publikasi terbaru
+            </p>
+          </div>
+        </div>
+        <div class="carousel-item">
+          <img src="../img/slide=2.png" class="bg-overlay" alt="Slide 2" />
+          <div class="carousel-caption d-none d-md-block">
+            <div class="hero-badge">Layanan Terintegrasi</div>
+            <h1 class="hero-title">
+              Konsultasi Data<br />Kapan Saja, Dimana Saja
+            </h1>
+            <p class="hero-description">
+              Akses mudah ke data statistik resmi BPS dengan dukungan konsultasi
+              virtual dan chatbot 24/7
+            </p>
+          </div>
+        </div>
+        <div class="carousel-item">
+          <img src="../img/slide=3.png" class="bg-overlay" alt="Slide 3" />
+          <div class="carousel-caption d-none d-md-block">
+            <div class="hero-badge">Publikasi Digital</div>
+            <h1 class="hero-title">Ribuan Publikasi<br />Tersedia Gratis</h1>
+            <p class="hero-description">
+              Jelajahi dan unduh publikasi statistik resmi BPS dalam format
+              digital secara gratis
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        class="carousel-control-prev"
+        type="button"
+        data-bs-target="#pstHeroCarousel"
+        data-bs-slide="prev"
+      >
+        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Previous</span>
+      </button>
+      <button
+        class="carousel-control-next"
+        type="button"
+        data-bs-target="#pstHeroCarousel"
+        data-bs-slide="next"
+      >
+        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Next</span>
+      </button>
+    </div>
+
+    <!-- ======================MAIN CONTENT======================== -->
+
+    <main class="main-content">
+      <div class="container-inner">
+        <div class="text-center mb-5">
+          <h2 class="fw-bold" style="color: var(--dark-blue); font-size: 31px">
+            Layanan Unggulan
+          </h2>
+          <p class="section-subtitle mx-auto">
+            Akses cepat ke tiga layanan kami untuk mempermudah kebutuhan data
+            dan konsultasi anda
+          </p>
+        </div>
+
+        <div class="row g-4 justify-content-center">
+          <div class="col-lg-4 col-md-6">
+            <div class="card service-card blue">
+              <div class="card-body d-flex flex-column align-items-center p-0">
+                <img
+                  src="../img/chatbot.png"
+                  class="service-icon"
+                  alt="Chatbot"
+                />
+                <div class="flex-grow-1">
+                  <h3 class="fw-bold">Chatbot</h3>
+                  <p class="text-muted mt-3">
+                    Konsultasi data statistik cepat dan mudah selama 24 jam di
+                    mana dikelola secara otomatis oleh robot
+                  </p>
+                </div>
+                <a href="login.html" class="btn btn-card btn-blue mt-4"
+                  >Mulai Chat Sekarang</a
+                >
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-4 col-md-6">
+            <div class="card service-card green">
+              <div class="card-body d-flex flex-column align-items-center p-0">
+                <img
+                  src="../img/konsultasi.png"
+                  class="service-icon"
+                  alt="Konsultasi"
+                />
+                <div class="flex-grow-1">
+                  <h3 class="fw-bold">Konsultasi Virtual</h3>
+                  <p class="text-muted mt-3">
+                    Konsultasi secara virtual untuk mendapatkan penjelasan
+                    terkait metodologi dan indikator statistik oleh operator
+                  </p>
+                </div>
+                <a href="login.html" class="btn btn-card btn-green mt-4"
+                  >Buat Janji Temu</a
+                >
+              </div>
+            </div>
+          </div>
+
+          <!-- ===============LAYANAN TAMBAHAN==================== -->
+
+          <div class="col-lg-4 col-md-6">
+            <div class="card service-card orange">
+              <div class="card-body d-flex flex-column align-items-center p-0">
+                <img
+                  src="../img/katalog.png"
+                  class="service-icon"
+                  alt="Katalog"
+                />
+                <div class="flex-grow-1">
+                  <h3 class="fw-bold">Katalog Publikasi</h3>
+                  <p class="text-muted mt-3">
+                    Akses dan unduh ribuan publikasi statistik resmi BPS dalam
+                    format digital secara gratis.
+                  </p>
+                </div>
+                <a
+                  href="https://perpustakaan.bps.go.id/opac/"
+                  class="btn btn-card btn-orange mt-4"
+                  >Jelajahi Katalog</a
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 pt-5">
+          <h2 class="text-center mb-5 fw-bold section-title-small">
+            Layanan Utama Tambahan
+          </h2>
+          <div class="row g-4">
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/perpustakaan.png"
+                    width="57"
+                    height="57"
+                    alt="Perpustakaan"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">
+                      Perpustakaan Digital
+                    </h6>
+                    <p class="small text-muted mb-2">
+                      Akses koleksi publikasi digital melalui
+                      perpustakaan.bps.go.id
+                    </p>
+                    <a
+                      href="https://perpustakaan.bps.go.id"
+                      class="small fw-bold text-decoration-none link-blue"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/silastik.png"
+                    width="57"
+                    height="57"
+                    alt="Silastik"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">Silastik</h6>
+                    <p class="small text-muted mb-2">
+                      Sistem layanan statistik terintegrasi melalui
+                      silastik.web.bps.go.id
+                    </p>
+                    <a
+                      href="https://silastik.web.bps.go.id"
+                      class="small fw-bold text-decoration-none link-green"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/romantik.png"
+                    width="57"
+                    height="57"
+                    alt="Romantik"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">Romantik</h6>
+                    <p class="small text-muted mb-2">
+                      Rujukan metadata statistik melalui romantik.web.bps.go.id
+                    </p>
+                    <a
+                      href="https://romantik.web.bps.go.id"
+                      class="small fw-bold text-decoration-none link-orange"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/pojok statistik.png"
+                    width="57"
+                    height="57"
+                    alt="Pojok Statistik"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">
+                      Pojok Statistik Sumsel
+                    </h6>
+                    <p class="small text-muted mb-2">
+                      Layanan pojok statistik virtual melalui
+                      pojokstatistik.bps.go.id
+                    </p>
+                    <a
+                      href="https://pojokstatistik.bps.go.id/"
+                      class="small fw-bold text-decoration-none link-blue"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/webapi.png"
+                    width="57"
+                    height="17"
+                    alt="WebAPI"
+                    style="object-fit: contain"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">WebAPI Sumsel</h6>
+                    <p class="small text-muted mb-2">
+                      Sistem layanan API terintegrasi BPS Provinsi Sumsel
+                    </p>
+                    <a
+                      href="#"
+                      class="small fw-bold text-decoration-none link-green"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/ppid.png"
+                    width="57"
+                    height="37"
+                    alt="PPID"
+                    style="object-fit: contain"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">PPID Sumsel</h6>
+                    <p class="small text-muted mb-2">
+                      Layanan Informasi Publik BPS Provinsi Sumsel
+                    </p>
+                    <a
+                      href="#"
+                      class="small fw-bold text-decoration-none link-orange"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="card additional-card">
+                <div class="d-flex align-items-center gap-3">
+                  <img
+                    src="../img/lapor.png"
+                    width="57"
+                    height="41"
+                    alt="Lapor"
+                    style="object-fit: contain"
+                  />
+                  <div>
+                    <h6 class="fw-bold mb-1 card-title-blue">Lapor!</h6>
+                    <p class="small text-muted mb-2">
+                      Layanan Aspirasi dan Pengaduan Online Rakyat
+                    </p>
+                    <a
+                      href="https://www.lapor.go.id/"
+                      class="small fw-bold text-decoration-none link-blue"
+                      >Kunjungi</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- =====================FOOTER======================= -->
+
+    <footer class="footer">
+      <div class="container">
+        <div class="row gy-4">
+          <div class="col-lg-7 d-flex flex-column justify-content-between">
+            <div>
+              <img
+                src="../img/pst digital.png"
+                alt="pst Logo"
+                class="footer-logo"
+              />
+              <div class="footer-social-icons">
+                <svg class="social-icon" viewBox="0 0 24 24">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                  <path
+                    d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 21 17">
+                  <path
+                    d="M20.92 2.01C20.15 2.35 19.32 2.58 18.46 2.69C19.34 2.16 20.02 1.32 20.34 0.31C19.51 0.81 18.59 1.16 17.62 1.36C16.83 0.5 15.72 0 14.46 0C12.11 0 10.19 1.92 10.19 4.29C10.19 4.63 10.23 4.96 10.3 5.27C6.74 5.09 3.57 3.38 1.46 0.79C1.09 1.42 0.88 2.16 0.88 2.94C0.88 4.43 1.63 5.75 2.79 6.5C2.08 6.5 1.42 6.3 0.84 6V6.03C0.84 8.11 2.32 9.85 4.28 10.24C3.65 10.41 2.98 10.44 2.34 10.31C2.88 12.01 4.48 13.26 6.35 13.29C4.89 14.45 3.06 15.13 1.08 15.13C0.72 15.13 0.36 15.11 0 15.07C1.9 16.29 4.16 17 6.58 17C14.46 17 18.79 10.46 18.79 4.79C18.79 4.6 18.79 4.42 18.78 4.23C19.62 3.63 20.34 2.88 20.92 2.01Z"
+                    fill="#EFEFEF"
+                  />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 20 14">
+                  <path
+                    d="M19.59 2.19C19.37 1.36 18.7 0.69 17.87 0.47C16.32 0 10 0 10 0C10 0 3.68 0 2.13 0.47C1.3 0.69 0.63 1.36 0.41 2.19C0 3.74 0 7 0 7C0 7 0 10.26 0.41 11.81C0.63 12.64 1.3 13.31 2.13 13.53C3.68 14 10 14 10 14C10 14 16.32 14 17.87 13.53C18.7 13.31 19.59 11.81 19.59 11.81C20 10.26 20 7 20 7C20 7 20 3.74 19.59 2.19ZM8 10V4L13 7L8 10Z"
+                    fill="#EFEFEF"
+                  />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 20 20">
+                  <circle
+                    cx="10"
+                    cy="10"
+                    r="3.5"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                  <rect
+                    x="1"
+                    y="1"
+                    width="18"
+                    height="18"
+                    rx="5"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                  <circle cx="15.5" cy="4.5" r="1" fill="#EFEFEF" />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 10.5 20">
+                  <path
+                    d="M9.5 11.5H7V20H3V11.5H0V7.5H3V4.74C3 1.55 4.93 0 7.82 0C9.24 0 10.74 0.29 10.74 0.29V3.5H9.08C7.45 3.5 7 4.49 7 5.5V7.5H10.5L9.5 11.5Z"
+                    fill="#EFEFEF"
+                  />
+                </svg>
+              </div>
+            </div>
+            <p class="mb-0 mt-4 opacity-75">
+              © 2022 BPS Provinsi Sumatera Selatan. All rights reserved.
+            </p>
+          </div>
+
+          <div class="col-lg-5">
+            <div class="row">
+              <div class="col-6">
+                <div class="footer-title">LAYANAN</div>
+                <a href="login.html" class="footer-link">Konsultasi Virtual</a>
+                <a href="login.html" class="footer-link">Chatbot</a>
+                <a
+                  href="https://perpustakaan.bps.go.id/opac/"
+                  class="footer-link"
+                  >Katalog Publikasi</a
+                >
+              </div>
+              <div class="col-6">
+                <div class="footer-title">BANTUAN</div>
+                <a href="#" class="footer-link">Kebijakan Privasi</a>
+                <a href="#" class="footer-link">Syarat Penggunaan</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+    <script>
+      // Memanggil file sidebar.html
+      fetch("sidebar.html")
+        .then((response) => response.text())
+        .then((data) => {
+          document.getElementById("sidebar-container").innerHTML = data;
+
+          // Inisialisasi logika tombol setelah HTML berhasil dimuat
+          const sidebar = document.getElementById("sidebarMenu");
+          const overlay = document.getElementById("sidebarOverlay");
+          const openBtn = document.querySelector(".profile-icon");
+          const closeBtn = document.getElementById("closeSidebarBtn");
+
+          if (openBtn) {
+            openBtn.onclick = (e) => {
+              e.preventDefault();
+              sidebar.classList.add("active");
+              overlay.classList.add("active");
+            };
+          }
+
+          const closeMenu = () => {
+            sidebar.classList.remove("active");
+            overlay.classList.remove("active");
+          };
+
+          if (closeBtn) closeBtn.onclick = closeMenu;
+          if (overlay) overlay.onclick = closeMenu;
+        });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>

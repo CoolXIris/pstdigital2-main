@@ -1,0 +1,448 @@
+/* ================= GLOBAL VARIABLES ================= */
+:root {
+  --primary-blue: #000080;
+  --dark-blue: #043277;
+  --accent-blue: #0093dd;
+  --accent-green: #68b92e;
+  --accent-orange: #eb891b;
+  --dark-blue-nav: #043277;
+  --accent-orange-nav: #eb891b;
+}
+
+body {
+  font-family: "Poppins", sans-serif;
+}
+
+/* ================= NAVBAR STYLING ================= */
+.header {
+  background-color: var(--dark-blue-nav) !important;
+  padding: 10px 50px !important;
+  position: sticky;
+  height: 80px;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.nav-link {
+  color: #ffffff !important;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 10px 0 !important;
+}
+
+.dropdown-menu {
+  background-color: #043277;
+  border-radius: 12px;
+  border: none;
+}
+
+.dropdown-item {
+  color: #ffffff;
+  font-size: 14px;
+  padding: 10px 20px;
+}
+
+.dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.btn-login-header {
+  background-color: var(--accent-orange-nav);
+  color: #ffffff !important;
+  padding: 8px 30px;
+  border-radius: 30px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: 0.3s;
+}
+
+.btn-login-header:hover {
+  background-color: #d17a17;
+  transform: scale(1.05);
+}
+
+.nav-logo {
+  height: 45px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+/* ================= CAROUSEL ================= */
+.hero-section {
+  margin-top: -76px;
+  position: relative;
+}
+
+.carousel-item {
+  background: linear-gradient(180deg, #0072c7 0%, #000986 98%);
+  height: 769px;
+  position: relative;
+  max-height: 90vh;
+}
+
+.carousel-item img.bg-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.7;
+  z-index: 1;
+}
+
+.carousel-caption {
+  text-align: left;
+  left: 94px;
+  right: auto;
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  max-width: 800px;
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 12px 20px;
+  background-color: #1a309b;
+  border: 1px solid #394da9;
+  border-radius: 25px;
+  color: white;
+  font-weight: 700;
+  margin-bottom: 20px;
+}
+
+.hero-title {
+  font-size: 48px;
+  font-weight: 600;
+  line-height: 1.1;
+  margin-bottom: 30px;
+  color: white;
+}
+
+.hero-description {
+  font-size: 20px;
+  font-weight: 700;
+  color: #cdcdcd;
+  line-height: 1.4;
+}
+
+.carousel-control-prev,
+.carousel-control-next {
+  width: 45px;
+  height: 45px;
+  background-color: rgba(255, 255, 255, 0.29);
+  backdrop-filter: blur(7px);
+  border-radius: 50%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0 30px;
+}
+
+.carousel-indicators {
+  bottom: 120px;
+}
+.carousel-indicators [data-bs-target] {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: none;
+}
+
+/* ================= MAIN CONTENT (Layanan Utama) ================= */
+.main-content {
+  background: #ffffff;
+  border-radius: 80px 80px 0 0;
+  margin-top: -100px;
+  position: relative;
+  z-index: 50;
+  padding: 60px 0 80px 0;
+  width: 100%;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.05);
+}
+
+.container-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 40px;
+}
+
+.service-card {
+  border: none;
+  border-radius: 25px;
+  padding: 40px 30px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  background: white;
+  min-height: 439px;
+  height: auto;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  text-align: center;
+}
+
+.service-card:hover {
+  transform: translateY(-10px);
+}
+.service-card.blue:hover {
+  box-shadow: 0 15px 45px rgba(0, 147, 221, 0.25);
+}
+.service-card.green:hover {
+  box-shadow: 0 15px 45px rgba(104, 185, 46, 0.25);
+}
+.service-card.orange:hover {
+  box-shadow: 0 15px 45px rgba(235, 137, 27, 0.25);
+}
+
+.service-icon {
+  width: 70px;
+  height: 70px;
+  object-fit: contain;
+  margin-bottom: 10px;
+}
+
+.service-card h3 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #000;
+}
+
+.service-card p {
+  font-size: 16px;
+  color: #777;
+  line-height: 1.6;
+}
+
+.btn-card {
+  width: 100%;
+  border-radius: 50px;
+  padding: 12px 0;
+  font-weight: 600;
+  color: white !important;
+  border: none !important;
+  text-decoration: none;
+  display: block;
+  text-align: center;
+  transition: none !important;
+  transform: none !important;
+}
+
+.btn-card:active {
+  filter: none !important;
+  transform: none !important;
+  box-shadow: none !important;
+  color: white !important;
+}
+
+.btn-blue {
+  background-color: var(--accent-blue) !important;
+}
+.btn-green {
+  background-color: var(--accent-green) !important;
+}
+.btn-orange {
+  background-color: var(--accent-orange) !important;
+}
+
+/* ================= LAYANAN UTAMA TAMBAHAN ================= */
+.section-title-small {
+  color: var(--dark-blue);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.additional-card {
+  background: #ffffff;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+  border-radius: 20px;
+  padding: 25px;
+  border: none;
+  transition: transform 0.3s ease, background-color 0.3s ease;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.additional-card:hover {
+  transform: translateY(-5px);
+  background-color: #f8f8f8;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+}
+
+.additional-card img {
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.additional-card h6 {
+  font-size: 16px;
+  color: var(--dark-blue);
+  margin-bottom: 4px;
+}
+
+.additional-card p {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.link-blue {
+  color: var(--accent-blue);
+  transition: opacity 0.2s;
+}
+.link-green {
+  color: var(--accent-green);
+  transition: opacity 0.2s;
+}
+.link-orange {
+  color: var(--accent-orange);
+  transition: opacity 0.2s;
+}
+
+.link-blue:hover,
+.link-green:hover,
+.link-orange:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* ================= FOOTER ================= */
+.footer {
+  background-color: #043277;
+  color: #fff7e0;
+  padding: 60px 0;
+  position: relative;
+  z-index: 40;
+}
+.footer-logo {
+  height: 81px;
+  width: auto;
+}
+.footer-social-icons {
+  display: flex;
+  gap: 28px;
+  margin-top: 50px;
+}
+.social-icon {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  cursor: pointer;
+}
+.footer-title {
+  font-weight: 700;
+  margin-bottom: 20px;
+  font-size: 16px;
+  color: #ffffff;
+}
+.footer-link {
+  color: #fff7e0;
+  text-decoration: none;
+  display: block;
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+/* ================= RESPONSIVE ================= */
+@media (max-width: 1440px) {
+  .carousel-caption {
+    zoom: 0.85;
+  }
+
+  .main-content {
+    zoom: 0.85;
+  }
+
+  .footer {
+    zoom: 0.85;
+  }
+}
+
+@media (max-width: 991px) {
+  /* header tetap */
+  .header {
+    padding: 10px 16px;
+  }
+
+  /* tombol burger */
+  .navbar-toggler {
+    border: none;
+    box-shadow: none;
+  }
+
+  .navbar-toggler-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  /* container dropdown */
+  .navbar-collapse {
+    position: absolute;
+    top: 100%;
+    right: 16px;
+    left: 16px;
+
+    background-color: #043277;
+    border-radius: 24px;
+    padding: 20px;
+    margin-top: 8px;
+
+    z-index: 999;
+  }
+
+  .profile-icon-svg {
+    display: none;
+  }
+
+  .profile-text {
+    display: inline;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .navbar-nav,
+  .navbar-nav .nav-item,
+  .navbar-nav .nav-link {
+    text-align: left !important;
+    justify-content: flex-start;
+  }
+  .nav-profile .nav-link {
+    text-align: left !important;
+    padding-left: 8px;
+  }
+}
+
+@media (max-width: 576px) {
+  .carousel-item {
+    height: 460px;
+  }
+
+  .carousel-caption {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: 55%;
+    transform: translateY(-50%);
+    text-align: center;
+  }
+
+  .hero-title {
+    font-size: 24px;
+    line-height: 1.25;
+  }
+
+  .hero-description {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .hero-badge {
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+}

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard PST DIGITAL</title>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+    />
+
+    <link rel="stylesheet" href="../css/admindashboard.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    <header class="mobile-navbar d-lg-none">
+      <button id="burgerToggle" class="btn-burger">
+        <i class="fas fa-bars"></i>
+      </button>
+
+      <img src="../img/pst1.png" alt="Logo" class="mobile-logo" />
+    </header>
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <div class="sidebar">
+      <div class="logo-wrapper">
+        <div class="logo">
+          <img src="../img/pst1.png" alt="PST Digital" />
+        </div>
+      </div>
+
+      <div class="sidebar-user-container">
+        <div class="sidebar-user">
+          <div class="avatar-initial">AS</div>
+          <div class="user-info">
+            <div class="user-name">Admin Statistik</div>
+            <div class="user-email">admin@bps.go.id</div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="menu">
+        <li class="active">
+          <a href="admindashboard.html">
+            <div class="icon-box"><img src="../img/dashboard.png" /></div>
+            Dashboard
+          </a>
+        </li>
+
+        <li>
+          <a href="admin_konsultasi.html">
+            <div class="icon-box"><img src="../img/konsultasi.png" /></div>
+            Manajemen Konsultasi
+          </a>
+        </li>
+
+        <li>
+          <a href="">
+            <div class="icon-box"><img src="../img/chatbot.png" /></div>
+            Statistik Chatbot
+          </a>
+        </li>
+
+        <li>
+          <a href="">
+            <div class="icon-box"><img src="../img/pengguna.png" /></div>
+            Manajemen Pengguna
+          </a>
+        </li>
+      </ul>
+
+      <div class="logout">
+        <div class="icon-box black"><img src="../img/keluar.png" /></div>
+        Keluar
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="header-container">
+        <div class="header">
+          <div>
+            <h4>Dashboard PST DIGITAL</h4>
+            <span class="text-muted small">Periode: Januari 2024</span>
+          </div>
+
+          <div class="filter">
+            <div class="filter-item">
+              <label>Jenis Periode</label>
+              <select class="form-select form-filter">
+                <option>Bulanan</option>
+                <option>Tahunan</option>
+              </select>
+            </div>
+
+            <div class="filter-item">
+              <label>Bulan</label>
+              <select class="form-select form-filter">
+                <option>Januari</option>
+                <option>Februari</option>
+                <option>Maret</option>
+                <option>April</option>
+                <option>Mei</option>
+                <option>Juni</option>
+                <option>Juli</option>
+                <option>Agustus</option>
+                <option>September</option>
+                <option>Oktober</option>
+                <option>November</option>
+                <option>Desember</option>
+              </select>
+            </div>
+
+            <div class="filter-item">
+              <label>Tahun</label>
+              <select class="form-select form-filter">
+                <option selected>2026</option>
+                <option>2025</option>
+                <option>2024</option>
+              </select>
+            </div>
+
+            <button class="btn btn-primary btn-terapkan">Terapkan</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div class="stat-grid mb-4">
+          <div class="stat-card">
+            <div class="stat-text">
+              <h3>299</h3>
+              <small>Pengguna Aktif</small>
+            </div>
+            <img src="../img/pengguna1.png" class="stat-icon bg-blue-light" />
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-text">
+              <h3>0</h3>
+              <small>Total Konsultasi</small>
+            </div>
+            <img src="../img/konsultasi2.png" class="stat-icon bg-blue-light" />
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-text">
+              <h3>0</h3>
+              <small>Konsultasi Menunggu Persetujuan</small>
+            </div>
+            <img src="../img/persetujuan.png" class="stat-icon bg-red-light" />
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-text">
+              <h3>0</h3>
+              <small>Konsultasi Terjadwal</small>
+            </div>
+            <img src="../img/jadwal.png" class="stat-icon bg-orange-light" />
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-text">
+              <h3>0</h3>
+              <small>Konsultasi Selesai</small>
+            </div>
+            <img src="../img/selesai.png" class="stat-icon bg-green-light" />
+          </div>
+        </div>
+
+        <div class="card mb-4 border-0 shadow-sm">
+          <div class="card-body">
+            <h6 class="fw-bold">Tren Aktivitas Layanan</h6>
+            <p class="text-muted small">
+              Perbandingan aktivitas konsultasi dan chatbot dalam 6 bulan
+              terakhir
+            </p>
+            <canvas id="lineChart" height="100"></canvas>
+            <div class="chart-legend mt-2">
+              <span class="dot blue"></span> <small>Konsultasi</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+              <div class="card-body">
+                <h6 class="fw-bold">Distribusi Konsultasi per Jenis</h6>
+                <p class="text-muted small">
+                  Konsultasi tahun ini berdasarkan kategori bidang
+                </p>
+                <canvas id="pie1"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+              <div class="card-body">
+                <h6 class="fw-bold">Distribusi Pengguna per Kategori</h6>
+                <p class="text-muted small">
+                  Pengguna aktif berdasarkan kategori pekerjaan
+                </p>
+                <canvas id="pie2"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mb-5">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <div>
+                <h6 class="fw-bold m-0">Kritik dan Saran Pengguna</h6>
+                <small class="text-warning"
+                  >⭐ 5.0
+                  <span class="text-muted">rata-rata dari 3 ulasan</span></small
+                >
+              </div>
+              <select class="form-select w-auto bg-light border-0 small">
+                <option>Terbaru</option>
+              </select>
+            </div>
+
+            <div class="filter-tabs mb-4">
+              <span class="active">Semua (8)</span>
+              <span>Bintang 5 (3)</span>
+              <span>Bintang 4 (0)</span>
+              <span>Bintang 3 (0)</span>
+            </div>
+
+            <div class="review-item">
+              <small class="text-muted">17 Sept 2025</small>
+              <div class="text-warning my-1">★★★★★</div>
+              <p class="m-0">
+                Cara baru untuk mendapatkan data, sudah bagus, semoga akan lebih
+                baik lagi
+              </p>
+            </div>
+            <div class="review-item">
+              <small class="text-muted">17 Juni 2025</small>
+              <div class="text-warning my-1">★★★★★</div>
+              <p class="m-0">Sudah lebih baik dan bermanfaat</p>
+            </div>
+            <div class="review-item">
+              <small class="text-muted">19 Maret 2025</small>
+              <div class="text-warning my-1">★★★★★</div>
+              <p class="m-0">Sudah mantap sekali</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Line Chart
+      new Chart(document.getElementById("lineChart"), {
+        type: "line",
+        data: {
+          labels: [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "Mei",
+            "Jun",
+            "Jul",
+            "Agu",
+            "Sep",
+            "Okt",
+            "Nov",
+            "Des",
+          ],
+          datasets: [
+            {
+              data: [], // DATA DIKOSONGKAN AGAR GARIS BIRU HILANG
+              borderColor: "#2563eb",
+              borderWidth: 2,
+              tension: 0.1,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            y: {
+              min: 0,
+              max: 240,
+              ticks: { stepSize: 60 },
+              grid: {
+                drawTicks: false,
+              },
+            },
+            x: {
+              grid: {
+                display: false, // Menghilangkan garis vertikal agar bersih seperti UI
+              },
+            },
+          },
+        },
+      });
+
+      // Bar Chart 1 (Label dibuat lurus)
+      new Chart(document.getElementById("pie1"), {
+        type: "doughnut",
+        data: {
+          labels: [
+            "Statistik Umum",
+            "Pojok Statistik",
+            "Kemiskinan",
+            "Metodologi Statistik",
+          ],
+          datasets: [
+            {
+              data: [32, 28, 22, 18],
+              backgroundColor: ["#2563eb", "#7c3aed", "#db2777", "#EA580C"],
+            },
+          ],
+        },
+        options: {
+          plugins: {
+            legend: { position: "bottom" },
+            tooltip: {
+              callbacks: {
+                label: function (context) {
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                  const value = context.raw;
+                  const percent = ((value / total) * 100).toFixed(1);
+                  return `${context.label}: ${percent}%`;
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Bar Chart 2
+      new Chart(document.getElementById("pie2"), {
+        type: "doughnut",
+        data: {
+          labels: ["ASN/TNI/POLRI", "Pelajar", "Dosen/Peneliti", "Umum"],
+          datasets: [
+            {
+              data: [45, 28, 18, 9],
+              backgroundColor: ["#0891b2", "#059669", "#d97706", "#64748b"],
+            },
+          ],
+        },
+        options: {
+          plugins: {
+            legend: { position: "bottom" },
+            tooltip: {
+              callbacks: {
+                label: function (context) {
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                  const value = context.raw;
+                  const percent = ((value / total) * 100).toFixed(1);
+                  return `${context.label}: ${percent}%`;
+                },
+              },
+            },
+          },
+        },
+      });
+
+      document.addEventListener("DOMContentLoaded", function () {
+        const burger = document.getElementById("burgerToggle");
+        const sidebar = document.querySelector(".sidebar");
+        const overlay = document.getElementById("sidebarOverlay");
+
+        if (!burger) return;
+
+        burger.addEventListener("click", () => {
+          sidebar.classList.toggle("active");
+          overlay.classList.toggle("active");
+        });
+
+        overlay.addEventListener("click", () => {
+          sidebar.classList.remove("active");
+          overlay.classList.remove("active");
+        });
+      });
+    </script>
+  </body>
+</html>

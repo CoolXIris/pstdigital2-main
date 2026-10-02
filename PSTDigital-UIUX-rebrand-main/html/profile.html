@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Profile</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/profile.css" />
+    <link rel="stylesheet" href="../css/sidebar.css" />
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg header navbar-dark">
+      <div class="container-fixed d-flex justify-content-between align-items-center w-100">
+        <a href="dashboard.html" class="d-flex align-items-center text-decoration-none">
+          <img src="../img/pst digital.png" class="nav-logo" />
+          <img src="../img/logo bps.png" class="nav-logo ms-3 d-none d-sm-inline" />
+          <img src="../img/cbq.png" class="nav-logo ms-3 d-none d-md-inline" />
+        </a>
+
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="mainNavbar">
+          <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-4">
+            <li class="nav-item">
+              <a class="nav-link" href="dashboard.html">Home</a>
+            </li>
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" style="cursor: pointer;">Layanan</a>
+              <ul class="dropdown-menu shadow">
+                <li><a class="dropdown-item" href="konsultasi.html">Konsultasi Virtual</a></li>
+                <li><a class="dropdown-item" href="chatbot.html">Chatbot</a></li>
+                <li><a class="dropdown-item" href="https://perpustakaan.bps.go.id/opac/">Katalog Publikasi</a></li>
+              </ul>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#">Tentang Kami</a>
+            </li>
+            <li>
+                <a href="#" class="nav-link profile-icon">
+                  <span class="profile-icon-svg">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" fill="currentColor" class="bi bi-person-circle" viewBox="0 0 16 16">
+                      <path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                      <path fill-rule="evenodd" d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z" />
+                    </svg>
+                  </span>
+                  <span class="profile-text">Profil</span>
+                </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container my-5">
+      <h4 class="mb-3 fw-bold">Edit Profile</h4>
+
+      <div id="alertProfile" class="alert alert-custom d-none">
+        Profil belum lengkap
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-body p-4">
+          <h5 class="mb-4">Edit Profile</h5>
+
+          <form id="profileForm">
+            <div class="mb-3">
+              <label class="form-label">Nama</label>
+              <input type="text" id="nama" class="form-control" placeholder="Nama Anda" />
+            </div>
+
+            <div class="row">
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Jenis Kelamin</label>
+                <select class="form-select">
+                  <option selected>Perempuan</option>
+                  <option>Laki-laki</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Tanggal Lahir</label>
+                <input type="date" id="tgl_lahir" class="form-control" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Pendidikan Terakhir</label>
+                <input type="text" id="pendidikan" class="form-control" placeholder="Pendidikan Anda" />
+              </div>
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Pekerjaan</label>
+                <select id="pekerjaan" class="form-select">
+                  <option disabled selected value="">Pilih Pekerjaan</option>
+                  <option>Pelajar/Mahasiswa</option>
+                  <option>PNS</option>
+                  <option>Swasta</option>
+                  <option>Wiraswasta</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Asal Provinsi</label>
+                <input type="text" id="provinsi" class="form-control" placeholder="Asal Provinsi" />
+              </div>
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Asal Kabupaten</label>
+                <input type="text" id="kabupaten" class="form-control" placeholder="Asal Kabupaten" />
+              </div>
+            </div>
+
+            <h6 class="mt-4 mb-3">Kontak Pengguna</h6>
+
+            <div class="row mb-4">
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Email</label>
+                <input type="text" id="email" class="form-control" placeholder="Email Anda" />
+              </div>
+              <div class="col-12 col-md-6 mb-3">
+                <label class="form-label">Nomor Handphone</label>
+                <input type="text" id="hp" class="form-control" placeholder="Nomor Handphone" />
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2 button-group-mobile">
+              <button type="submit" id="btnSave" class="btn btn-save-custom">
+                Save
+              </button>
+              <button type="button" class="btn btn-cancel-custom">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-wrapper" id="sidebarMenu">
+      <div class="sidebar-header-blue">
+        <button id="closeSidebarBtn"><i class="bi bi-x-lg"></i></button>
+      </div>
+
+      <div class="sidebar-user-profile text-center">
+        <div class="avatar-icon"><i class="bi bi-person-circle"></i></div>
+        <h6 class="name">Nadia Ramadhani</h6>
+        <p class="role">user</p>
+      </div>
+
+      <div class="sidebar-links">
+        <a href="profile.html" class="link-item active-link">Profil</a>
+        <a href="landing.html" class="link-item">Sign Out</a>
+      </div>
+    </div>
+
+    <div class="sidebar-dark-overlay" id="sidebarOverlay"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+      // LOGIKA FORM VALIDATION
+      document.getElementById("profileForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+
+        const fields = ["nama", "tgl_lahir", "pendidikan", "pekerjaan", "provinsi", "kabupaten", "email", "hp"];
+        const alertBox = document.getElementById("alertProfile");
+
+        const isEmpty = fields.some((id) => !document.getElementById(id).value.trim());
+
+        if (isEmpty) {
+          alertBox.classList.remove("d-none");
+          alertBox.scrollIntoView({ behavior: "smooth" });
+        } else {
+          alertBox.classList.add("d-none");
+          alert("Profil berhasil disimpan");
+        }
+      });
+
+      // LOGIKA SIDEBAR
+      const sidebar = document.getElementById("sidebarMenu");
+      const overlay = document.getElementById("sidebarOverlay");
+      const openBtn = document.querySelector(".profile-icon");
+      const closeBtn = document.getElementById("closeSidebarBtn");
+
+      openBtn.onclick = (e) => {
+        e.preventDefault();
+        sidebar.classList.add("active");
+        overlay.classList.add("active");
+      };
+
+      const closeMenu = () => {
+        sidebar.classList.remove("active");
+        overlay.classList.remove("active");
+      };
+
+      closeBtn.onclick = closeMenu;
+      overlay.onclick = closeMenu;
+    </script>
+  </body>
+</html>

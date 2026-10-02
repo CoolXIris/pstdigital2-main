@@ -1,0 +1,85 @@
+/* Container Utama: Fixed agar melayang */
+.sidebar-wrapper {
+    position: fixed;
+    top: 0;
+    right: -300px; 
+    width: 300px;
+    height: 100vh;
+    background-color: #ffffff;
+    z-index: 9999;
+    transition: 0.3s ease-in-out;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -5px 0 15px rgba(0,0,0,0.1);
+}
+
+/* Munculkan sidebar saat class .active ditambahkan */
+.sidebar-wrapper.active {
+    right: 0;
+}
+
+.sidebar-header-blue {
+    background-color: #043277; 
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 20px;
+}
+
+#closeSidebarBtn {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 28px;
+    cursor: pointer;
+}
+
+.sidebar-user-profile {
+    padding: 40px 20px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.avatar-icon i {
+    font-size: 70px;
+    color: #6B7280;
+}
+
+.name { font-weight: 600; margin-top: 15px; margin-bottom: 0; }
+.role { color: #9CA3AF; font-size: 14px; }
+
+.sidebar-links { padding: 15px; }
+
+.link-item {
+    display: block;
+    padding: 12px 20px;
+    color: #4B5563;
+    text-decoration: none;
+    border-radius: 8px;
+    margin-bottom: 5px;
+}
+
+.link-item.active-link {
+    background-color: #E5E7EB; 
+    color: #111827;
+    font-weight: 500;
+}
+
+.link-item:hover:not(.active-link) {
+    background-color: #f9fafb;
+}
+
+.sidebar-dark-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: none; 
+    z-index: 9998;
+}
+
+.sidebar-dark-overlay.active {
+    display: block;
+}

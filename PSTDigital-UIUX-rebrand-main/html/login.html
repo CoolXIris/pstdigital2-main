@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - PST Digital BPS</title>
+
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../css/login.css" />
+  </head>
+  <body>
+    <!-- ======================NAVBAR======================== -->
+
+    <nav class="navbar navbar-expand-lg header navbar-dark">
+      <div class="container-fluid">
+        <div class="logo-section d-flex align-items-center">
+          <a
+            href="html/dashboard.html"
+            class="d-flex align-items-center text-decoration-none"
+          >
+            <img src="../img/pst digital.png" alt="PST Logo" class="nav-logo" />
+            <img
+              src="../img/logo bps.png"
+              alt="BPS Logo"
+              class="nav-logo ms-3 d-none d-sm-inline"
+            />
+            <img
+              src="../img/cbq.png"
+              alt="CBQ Logo"
+              class="nav-logo ms-3 d-none d-md-inline"
+            />
+          </a>
+        </div>
+
+        <button
+          class="navbar-toggler border-0"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#mainNavbar"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="mainNavbar">
+          <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-4">
+            <li class="nav-item dropdown">
+              <a
+                class="nav-link dropdown-toggle"
+                href="#"
+                role="button"
+                data-bs-toggle="dropdown"
+                >Layanan</a
+              >
+              <ul class="dropdown-menu shadow">
+                <li>
+                  <a class="dropdown-item" href="login.html"
+                    >Konsultasi Virtual</a
+                  >
+                </li>
+                <li><a class="dropdown-item" href="login.html">Chatbot</a></li>
+                <li>
+                  <a
+                    class="dropdown-item"
+                    href="https://perpustakaan.bps.go.id/opac/"
+                    >Katalog Publikasi</a
+                  >
+                </li>
+              </ul>
+            </li>
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                href="https://ppid.bps.go.id/app/konten/1600/Profil-BPS.html"
+                >Tentang Kami</a
+              >
+            </li>
+            <li class="nav-item mt-3 mt-lg-0">
+              <a
+                href="login.html"
+                class="btn-login-header d-inline-block text-center w-100 w-lg-auto"
+                >Masuk</a
+              >
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <div class="hero-background">
+      <div class="hero-bg-image">
+        <img src="../img/login1.png" alt="Background" />
+      </div>
+      <div class="hero-overlay"></div>
+
+      <div class="login-container">
+        <div class="login-card">
+          <div class="login-image">
+            <img src="../img/login 2.png" alt="BPS Office" />
+          </div>
+
+          <div class="login-form-section">
+            <div class="text-center w-100" style="max-width: 400px">
+              <div class="lock-icon mx-auto">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                  <path
+                    d="M25.3334 14.6667H6.66669C5.19393 14.6667 4.00002 15.8606 4.00002 17.3334V26.6667C4.00002 28.1395 5.19393 29.3334 6.66669 29.3334H25.3334C26.8061 29.3334 28 28.1395 28 26.6667V17.3334C28 15.8606 26.8061 14.6667 25.3334 14.6667Z"
+                    stroke="white"
+                    stroke-width="2.6"
+                  />
+                  <path
+                    d="M10.6666 14.6667V9.33335C10.6666 7.56524 11.3691 5.86955 12.6193 4.61931C13.8696 3.36907 15.5652 2.66669 17.3333 2.66669C19.1014 2.66669 20.7971 3.36907 22.0474 4.61931C23.2976 5.86955 24 7.56524 24 9.33335V14.6667"
+                    stroke="white"
+                    stroke-width="2.6"
+                  />
+                </svg>
+              </div>
+              <h2 class="fw-bold h4 mb-2">Selamat Datang</h2>
+              <p class="text-muted mb-4">Masuk dengan akun Google Anda</p>
+
+              <button class="google-button">
+                <img
+                  src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg"
+                  width="20"
+                />
+                <span class="fw-bold" style="color: #364153"
+                  >Masuk dengan Google</span
+                >
+              </button>
+
+              <div class="mt-4 pt-3 border-top">
+                <p style="font-size: 13px; color: #6a7282">
+                  Dengan masuk, Anda menyetujui
+                  <a
+                    href="#"
+                    class="text-decoration-none"
+                    style="color: #043277"
+                    >Syarat & Ketentuan</a
+                  >
+                  dan
+                  <a
+                    href="#"
+                    class="text-decoration-none"
+                    style="color: #043277"
+                    >Kebijakan Privasi</a
+                  >
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =================FOOTER======================== -->
+
+    <footer class="footer">
+      <div class="container">
+        <div class="row gy-4">
+          <div class="col-lg-7 d-flex flex-column justify-content-between">
+            <div>
+              <img
+                src="../img/pst digital.png"
+                alt="pst Logo"
+                class="footer-logo"
+              />
+              <div class="footer-social-icons">
+                <svg class="social-icon" viewBox="0 0 24 24">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                  <path
+                    d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 21 17">
+                  <path
+                    d="M20.92 2.01C20.15 2.35 19.32 2.58 18.46 2.69C19.34 2.16 20.02 1.32 20.34 0.31C19.51 0.81 18.59 1.16 17.62 1.36C16.83 0.5 15.72 0 14.46 0C12.11 0 10.19 1.92 10.19 4.29C10.19 4.63 10.23 4.96 10.3 5.27C6.74 5.09 3.57 3.38 1.46 0.79C1.09 1.42 0.88 2.16 0.88 2.94C0.88 4.43 1.63 5.75 2.79 6.5C2.08 6.5 1.42 6.3 0.84 6V6.03C0.84 8.11 2.32 9.85 4.28 10.24C3.65 10.41 2.98 10.44 2.34 10.31C2.88 12.01 4.48 13.26 6.35 13.29C4.89 14.45 3.06 15.13 1.08 15.13C0.72 15.13 0.36 15.11 0 15.07C1.9 16.29 4.16 17 6.58 17C14.46 17 18.79 10.46 18.79 4.79C18.79 4.6 18.79 4.42 18.78 4.23C19.62 3.63 20.34 2.88 20.92 2.01Z"
+                    fill="#EFEFEF"
+                  />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 20 14">
+                  <path
+                    d="M19.59 2.19C19.37 1.36 18.7 0.69 17.87 0.47C16.32 0 10 0 10 0C10 0 3.68 0 2.13 0.47C1.3 0.69 0.63 1.36 0.41 2.19C0 3.74 0 7 0 7C0 7 0 10.26 0.41 11.81C0.63 12.64 1.3 13.31 2.13 13.53C3.68 14 10 14 10 14C10 14 16.32 14 17.87 13.53C18.7 13.31 19.37 12.64 19.59 11.81C20 10.26 20 7 20 7C20 7 20 3.74 19.59 2.19ZM8 10V4L13 7L8 10Z"
+                    fill="#EFEFEF"
+                  />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 20 20">
+                  <circle
+                    cx="10"
+                    cy="10"
+                    r="3.5"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                  <rect
+                    x="1"
+                    y="1"
+                    width="18"
+                    height="18"
+                    rx="5"
+                    stroke="#EFEFEF"
+                    stroke-width="2"
+                  />
+                  <circle cx="15.5" cy="4.5" r="1" fill="#EFEFEF" />
+                </svg>
+                <svg class="social-icon" viewBox="0 0 10.5 20">
+                  <path
+                    d="M9.5 11.5H7V20H3V11.5H0V7.5H3V4.74C3 1.55 4.93 0 7.82 0C9.24 0 10.74 0.29 10.74 0.29V3.5H9.08C7.45 3.5 7 4.49 7 5.5V7.5H10.5L9.5 11.5Z"
+                    fill="#EFEFEF"
+                  />
+                </svg>
+              </div>
+            </div>
+            <p class="mb-0 mt-4 opacity-75">
+              © 2022 BPS Provinsi Sumatera Selatan. All rights reserved.
+            </p>
+          </div>
+
+          <div class="col-lg-5">
+            <div class="row">
+              <div class="col-6">
+                <div class="footer-title">LAYANAN</div>
+                <a href="#" class="footer-link">Konsultasi Virtual</a>
+                <a href="#" class="footer-link">Chatbot</a>
+                <a href="#" class="footer-link">Katalog Publikasi</a>
+              </div>
+              <div class="col-6">
+                <div class="footer-title">BANTUAN</div>
+                <a href="#" class="footer-link">Kebijakan Privasi</a>
+                <a href="#" class="footer-link">Syarat Penggunaan</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>

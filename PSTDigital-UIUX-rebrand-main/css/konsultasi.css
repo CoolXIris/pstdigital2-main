@@ -1,0 +1,909 @@
+/* ================= ROOT & GLOBAL ================= */
+:root {
+  --primary-blue: #000080;
+  --dark-blue: #043277;
+  --accent-blue: #0093dd;
+  --accent-green: #68b92e;
+  --accent-orange: #eb891b;
+  --dark-blue-nav: #043277;
+}
+
+body {
+  background-color: #f8fafc;
+  font-family: "Poppins", sans-serif;
+  color: #171717;
+  overflow-x: hidden;
+}
+
+/* ================= NAVBAR ================= */
+.header {
+  background-color: var(--dark-blue-nav);
+  height: 80px;
+  padding: 10px 50px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.nav-link {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 10px 0;
+}
+
+.nav-logo {
+  height: 45px;
+  object-fit: contain;
+  display: block;
+}
+
+.profile-text {
+  display: none;
+}
+
+.profile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* Dropdown navbar */
+.dropdown-menu {
+  background-color: #043277;
+  border-radius: 12px;
+  border: none;
+}
+
+.dropdown-item {
+  color: #ffffff;
+  font-size: 14px;
+  padding: 10px 20px;
+}
+
+.dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Sidebar Wrapper */
+.sidebar-wrapper {
+  position: fixed;
+  top: 0;
+  right: -320px;
+  width: 300px;
+  height: 100vh;
+  background: #ffffff;
+  z-index: 2000;
+  transition: right 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-wrapper.active {
+  right: 0;
+}
+
+.sidebar-header-blue {
+  background-color: #043277;
+  padding: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.sidebar-header-blue button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.sidebar-user-profile {
+  padding: 30px 20px;
+}
+
+.avatar-icon {
+  font-size: 60px;
+  color: #043277;
+}
+
+.sidebar-user-profile .name {
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.sidebar-user-profile .role {
+  font-size: 14px;
+  color: #777;
+}
+
+.sidebar-links {
+  padding: 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.link-item {
+  text-decoration: none;
+  color: #043277;
+  font-weight: 600;
+  padding: 12px 16px;
+  border-radius: 10px;
+}
+
+.link-item:hover {
+  background: #f0f4ff;
+}
+
+.active-link {
+  background: #e8eeff;
+}
+
+/* Overlay */
+.sidebar-dark-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-dark-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ================= LAYOUT ================= */
+.container-inner {
+  margin: 30px 100px;
+}
+
+.header-section {
+  background-color: #ffffff;
+  padding: 56px 32px 1px;
+}
+
+/* ================= HEADER INFO ================= */
+.info-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.info-box h5 {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.info-box p {
+  font-size: 14px;
+  color: #525252;
+}
+
+.info-icon {
+  background-color: #eff6ff;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #155dfc;
+}
+
+/* ================= MAIN SECTION ================= */
+.main-section {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* White container behind button */
+.button-container-card {
+  background-color: #ffffff;
+  padding-left: 30px;
+  padding-top: 30px;
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+/* ================= BUTTON ================= */
+.add-card {
+  margin-bottom: 32px;
+}
+
+.add-card .btn {
+  background-color: #6159c9;
+  color: #ffffff;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  border: none;
+  transition: all 0.3s ease;
+}
+
+.add-card .btn:hover {
+  background-color: #4e46b4;
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(97, 89, 201, 0.3);
+}
+
+/* ================= SECTION ================= */
+.section {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.section h6 {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 120%;
+}
+
+.section small {
+  color: #525252;
+}
+
+/* ================= LIST ================= */
+.jadwal,
+.riwayat {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.riwayat-mobile {
+  display: none;
+}
+/* ================= FIXED SCHEDULE CARD ================= */
+
+.schedule-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease;
+  border-left: 6px solid transparent;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  overflow: hidden; /* Penting untuk animasi max-height */
+  user-select: none; /* Mencegah teks ter-highlight saat diklik cepat */
+}
+
+/* Warna Tema Samping */
+.schedule-card.confirmed { border-left-color: #1447e6; }
+.schedule-card.waiting { border-left-color: #eb891b; }
+
+/* Header Layout */
+.schedule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  /* Memastikan klik pada area kosong header tetap memicu toggle */
+  pointer-events: none; 
+}
+
+/* Membiarkan kartu utama menangkap semua klik */
+.schedule-card * {
+  pointer-events: none;
+}
+
+/* Kecuali tombol aksi di dalam dropdown agar tetap bisa diklik */
+.schedule-card .action-btn {
+  pointer-events: auto;
+}
+
+.schedule-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #171717;
+}
+
+.schedule-meta {
+  font-size: 13px;
+  color: #6b7280;
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* Icon & Badge Styling */
+.schedule-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+.confirmed .schedule-icon { background: #eff6ff; color: #1447e6; }
+.waiting .schedule-icon { background: #fff7e6; color: #eb891b; }
+
+.status-badge {
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.confirmed .status-badge { background: #eff6ff; color: #1447e6; }
+.waiting .status-badge { background: #fff7e6; color: #eb891b; }
+
+/* SISTEM DROPDOWN */
+.schedule-dropdown {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+}
+
+.schedule-content {
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+/* Styling teks status di sebelah chevron */
+.status-text {
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.3s ease;
+  margin-right: 4px; /* Memberi jarak ke ikon panah */
+}
+
+/* Warna otomatis berdasarkan tipe kartu */
+.confirmed .status-text {
+  color: #1447e6;
+}
+
+.waiting .status-text {
+  color: #eb891b;
+}
+
+/* Penyelarasan tombol toggle agar teks dan ikon sejajar */
+.toggle-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  display: flex;
+  align-items: center;
+  gap: 8px; /* Jarak antara teks dan ikon */
+  transition: all 0.3s ease;
+  pointer-events: none; /* Biarkan card yang menangani klik */
+}
+
+/* Rotasi hanya pada ikon panah, bukan teks status */
+.schedule-card.active .toggle-btn i {
+  transform: rotate(180deg);
+}
+
+/* Opsional: Sembunyikan teks status saat card dibuka agar lebih bersih */
+.schedule-card.active .status-text {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* State Saat Card Aktif */
+.schedule-card.active {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.schedule-card.active .schedule-dropdown {
+  max-height: 500px; /* Nilai harus lebih besar dari konten asli */
+  opacity: 1;
+}
+
+/* Rotasi Panah */
+.toggle-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  transition: transform 0.3s ease;
+}
+
+.schedule-card.active .toggle-btn {
+  transform: rotate(180deg);
+}
+
+/* Row & Button */
+.dropdown-row {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.waiting-info-alert {
+  background-color: #fffbeb;
+  border: 1px solid #fef3c7;
+  color: #92400e;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  display: flex;
+  gap: 10px;
+}
+
+.action-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  background-color: #1447e6;
+  color: white;
+}
+/* ================= IZIN MODAL ================= */
+
+.izin-modal {
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.izin-left {
+  width: 45%;
+}
+
+.izin-right {
+  width: 55%;
+}
+
+.izin-box {
+  background: #fff7e6;
+  border: 1px solid #ffe0a3;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.izin-box h6 {
+  color: #f59e0b;
+}
+
+/* ================= DROPDOWN DETAIL ================= */
+.toggle-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #a1a1a1;
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+
+.schedule-card.active .toggle-btn {
+  transform: rotate(180deg);
+}
+
+.schedule-dropdown {
+  display: none;
+  margin-top: 12px;
+  padding: 12px;
+  background: #f3f5f9;
+  border-top: 1px solid #e5e7eb;
+}
+
+.schedule-card.active .schedule-dropdown {
+  display: block;
+}
+
+.dropdown-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) 1fr;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.dropdown-row strong {
+  font-weight: 400;
+  color: #171717;
+}
+
+.join-btn {
+  margin-top: 12px;
+  background-color: #1447e6;
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.join-btn:hover {
+  background-color: #155dfc;
+}
+
+/* ================= TABLE ================= */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.history-table {
+  width: 100%;
+  min-width: 700px;
+}
+
+.history-table thead th {
+  background: #efefef;
+  font-weight: 500;
+}
+
+.history-table tbody td {
+  font-size: 14px;
+  color: #171717;
+}
+
+.detail-link {
+  color: #155dfc;
+  text-decoration: none;
+}
+
+/* ================= FOOTER ================= */
+.footer {
+  background-color: #043277;
+  color: #fff7e0;
+  padding: 60px 0;
+  position: relative;
+  z-index: 40;
+}
+.footer-logo {
+  height: 60px;
+  width: auto;
+}
+.footer-social-icons {
+  display: flex;
+  gap: 28px;
+  margin-top: 50px;
+}
+.social-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  cursor: pointer;
+}
+.footer-title {
+  font-weight: 700;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: #ffffff;
+}
+.footer-link {
+  color: #fff7e0;
+  text-decoration: none;
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+/* ================= RESPONSIVE (BOTTOM ONLY) ================= */
+@media (max-width: 991.98px) {
+  .header {
+    padding: 10px 20px;
+  }
+}
+@media (max-width: 991.98px) and (min-width: 577px) {
+  /* header tetap */
+  .header {
+    padding: 10px 16px;
+  }
+
+  /* tombol burger */
+  .navbar-toggler {
+    border: none;
+    box-shadow: none;
+  }
+
+  .navbar-toggler-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  /* container dropdown */
+  .navbar-collapse {
+    position: absolute;
+    top: 100%;
+    right: 16px;
+    left: 16px;
+
+    background-color: #043277;
+    border-radius: 24px;
+    padding: 20px;
+    margin-top: 8px;
+
+    z-index: 999;
+  }
+
+  .profile-icon-svg {
+    display: none;
+  }
+
+  .profile-text {
+    display: inline;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .navbar-nav,
+  .navbar-nav .nav-item,
+  .navbar-nav .nav-link {
+    text-align: left !important;
+    justify-content: flex-start;
+  }
+  .nav-profile .nav-link {
+    text-align: left !important;
+    padding-left: 8px;
+  }
+  .container-inner {
+    margin: 0;
+    padding: 24px 32px;
+  }
+
+  .header-section {
+    padding: 40px 32px 16px;
+  }
+
+  .button-container-card {
+    padding: 24px;
+  }
+
+  .schedule-card {
+    padding: 20px;
+  }
+
+  .schedule-title {
+    font-size: 16px;
+  }
+}
+@media (max-width: 576px) {
+  /* BODY */
+  body {
+    background-color: #f3f5f9;
+  }
+
+  /* header tetap */
+  .header {
+    padding: 10px 16px;
+  }
+
+  /* tombol burger */
+  .navbar-toggler {
+    border: none;
+    box-shadow: none;
+  }
+
+  .navbar-toggler-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  /* container dropdown */
+  .navbar-collapse {
+    position: absolute;
+    top: 100%;
+    right: 16px;
+    left: 16px;
+
+    background-color: #043277;
+    border-radius: 24px;
+    padding: 20px;
+    margin-top: 8px;
+
+    z-index: 999;
+  }
+
+  .profile-icon-svg {
+    display: none;
+  }
+
+  .profile-text {
+    display: inline;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .navbar-nav,
+  .navbar-nav .nav-item,
+  .navbar-nav .nav-link {
+    text-align: left !important;
+    justify-content: flex-start;
+  }
+  .nav-profile .nav-link {
+    text-align: left !important;
+    padding-left: 8px;
+  }
+
+  /* CONTAINER */
+  .container-inner {
+    margin: 0;
+    padding: 16px;
+  }
+
+  /* HEADER SECTION */
+  .header-section {
+    padding: 24px 16px 8px;
+    border-radius: 0;
+  }
+
+  .info-box h5 {
+    font-size: 18px;
+  }
+
+  .info-box p {
+    font-size: 13px;
+  }
+
+  /* BUTTON CARD */
+  .button-container-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .add-card {
+    width: 100%;
+    margin-bottom: 24px;
+  }
+
+  .add-card .btn {
+    width: 100%;
+    justify-content: center;
+    font-size: 14px;
+    padding: 12px;
+  }
+
+  /* SECTION TITLE */
+  .section h6 {
+    font-size: 18px;
+  }
+
+  /* LIST */
+  .jadwal {
+    gap: 16px;
+  }
+
+  /* CARD */
+  .schedule-card {
+    border-radius: 14px;
+    padding: 16px;
+  }
+
+  .schedule-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .schedule-title {
+    font-size: 15px;
+  }
+
+  .schedule-meta {
+    font-size: 12px;
+    gap: 8px;
+  }
+
+  .status-scheduled {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+
+  /* DROPDOWN */
+  .schedule-dropdown {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .dropdown-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  /* JOIN BUTTON */
+  .join-btn {
+    width: 100%;
+    text-align: center;
+    padding: 10px;
+  }
+
+  /* TABLE */
+  .table-responsive {
+    margin-top: 8px;
+  }
+
+  .riwayat .schedule-card {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  /* Sembunyikan header tabel / struktur desktop */
+  .history-table,
+  .history-table thead {
+    display: none;
+  }
+
+  /* sembunyikan versi desktop */
+  .riwayat,
+  .history-table {
+    display: none;
+  }
+
+  .riwayat-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 15px;
+  }
+
+  .history-card {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+
+  .history-title {
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: #171717;
+  }
+
+  .history-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+
+  .history-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+
+  .history-status.done {
+    color: #16a34a;
+  }
+
+  .history-status.cancel {
+    color: #dc2626;
+  }
+
+  .history-rating {
+    font-size: 14px;
+    color: #facc15;
+    margin-bottom: 8px;
+  }
+
+  .history-link {
+    font-size: 13px;
+    color: #155dfc;
+    text-decoration: none;
+  }
+  .modal-body {
+    flex-direction: column;
+  }
+
+  .izin-left,
+  .izin-right {
+    width: 100%;
+  }
+}

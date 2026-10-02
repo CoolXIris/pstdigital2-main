@@ -1,0 +1,215 @@
+/* ================= GLOBAL & VARIABLES ================= */
+:root {
+  --primary-blue: #000080;
+  --dark-blue: #043277;
+  --accent-blue: #0093dd;
+  --accent-green: #68b92e;
+  --accent-orange: #eb891b;
+  --dark-blue-nav: #043277;
+}
+
+body {
+  font-family: "Poppins", sans-serif;
+  overflow-x: hidden;
+  width: 100%;
+}
+
+/* ================= NAVBAR STYLING ================= */
+.header {
+  background-color: var(--dark-blue-nav) !important;
+  height: 80px;
+  padding: 10px 50px !important;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.nav-link {
+  color: #ffffff !important;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 10px 0 !important;
+}
+
+.dropdown-menu {
+  background-color: #043277;
+  border-radius: 12px;
+  border: none;
+}
+
+.dropdown-item {
+  color: #ffffff;
+  font-size: 14px;
+  padding: 10px 20px;
+}
+
+.dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.profile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.nav-logo {
+  height: 45px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.alert-custom {
+  background-color: #fef2f2;
+  border: 1px solid #ffcdcd;
+  color: #910000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-weight: 500;
+  width: 100%;
+}
+
+/* BUTTON */
+.btn-save-custom,
+.btn-cancel-custom {
+  padding: 10px 24px;
+  white-space: nowrap;
+}
+
+.btn-save-custom {
+  background-color: #14b8a6;
+  border: none;
+  color: #fff;
+  font-weight: 500;
+}
+.btn-save-custom:hover {
+  background-color: #0d9488;
+}
+
+.btn-cancel-custom {
+  background-color: #ef4444;
+  border: none;
+  color: #fff;
+  font-weight: 500;
+}
+.btn-cancel-custom:hover {
+  background-color: #dc2626;
+}
+
+/* FORM FONT */
+.form-label,
+h5,
+h6 {
+  font-weight: 500;
+}
+/* Tablet & Laptop Kecil */
+@media (max-width: 1024px) {
+  /* tombol burger */
+  .navbar-toggler {
+    border: none;
+    box-shadow: none;
+  }
+
+  .navbar-toggler-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  /* container dropdown */
+  .navbar-collapse {
+    position: absolute;
+    top: 100%;
+    right: 16px;
+    left: 16px;
+
+    background-color: #043277;
+    border-radius: 24px;
+    padding: 20px;
+    margin-top: 8px;
+
+    z-index: 999;
+  }
+
+  .profile-icon-svg {
+    display: none;
+  }
+
+  .profile-text {
+    display: inline;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .navbar-nav,
+  .navbar-nav .nav-item,
+  .navbar-nav .nav-link {
+    text-align: left !important;
+    justify-content: flex-start;
+  }
+  .nav-profile .nav-link {
+    text-align: left !important;
+    padding-left: 8px;
+  }
+}
+
+/* ================= RESPONSIVE ================= */
+@media (max-width: 768px) {
+  .navbar-toggler {
+    border: none;
+    box-shadow: none;
+  }
+
+  .navbar-toggler-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  .navbar-collapse {
+    position: absolute;
+    top: 100%;
+    right: 16px;
+    left: 16px;
+    background-color: #043277;
+    border-radius: 24px;
+    padding: 20px;
+    margin-top: 8px;
+    z-index: 999;
+  }
+
+  .profile-icon-svg {
+    display: none;
+  }
+
+  .profile-text {
+    display: inline;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+
+  .navbar-nav,
+  .navbar-nav .nav-item,
+  .navbar-nav .nav-link {
+    text-align: left !important;
+    justify-content: flex-start;
+  }
+
+  .header {
+    padding: 10px 20px;
+  }
+
+  .nav-logo {
+    height: 35px;
+  }
+
+  /* Penyesuaian Tombol di Mobile */
+  .button-group-mobile {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .btn-save-custom,
+  .btn-cancel-custom {
+    width: 100%;
+  }
+}

@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin - Manajemen Konsultasi</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link rel="stylesheet" href="../css/admin_konsultasi.css" />
+  </head>
+  <body>
+    <header class="mobile-navbar d-lg-none">
+      <button id="burgerToggle" class="btn-burger">
+        <i class="fas fa-bars"></i>
+      </button>
+
+      <img src="../img/pst1.png" alt="Logo" class="mobile-logo" />
+    </header>
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <div class="sidebar">
+      <div class="logo-wrapper">
+        <div class="logo">
+          <img src="../img/pst1.png" alt="PST Digita" />
+        </div>
+      </div>
+
+      <div class="sidebar-user-container">
+        <div class="sidebar-user">
+          <div class="avatar-initial">AS</div>
+          <div class="user-info">
+            <div class="user-name">Admin Statistik</div>
+            <div class="user-email">admin@bps.go.id</div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="menu">
+        <li>
+          <a href="admindashboard.html">
+            <div class="icon-box"><img src="../img/dashboard.png" /></div>
+            Dashboard
+          </a>
+        </li>
+
+        <li class="active">
+          <a href="admin_konsultasi.html">
+            <div class="icon-box"><img src="../img/konsultasi.png" /></div>
+            Manajemen Konsultasi
+          </a>
+        </li>
+
+        <li>
+          <a href="">
+            <div class="icon-box"><img src="../img/chatbot.png" /></div>
+            Statistik Chatbot
+          </a>
+        </li>
+
+        <li>
+          <a href="">
+            <div class="icon-box"><img src="../img/pengguna.png" /></div>
+            Manajemen Pengguna
+          </a>
+        </li>
+      </ul>
+
+      <div class="logout">
+        <div class="icon-box black"><img src="../img/keluar.png" /></div>
+        Keluar
+      </div>
+    </div>
+
+    <div class="main">
+      <header class="content-header">
+        <h1>Manajemen Konsultasi</h1>
+        <p>
+          Kelola dan verifikasi seluruh permintaan konsultasi data statistik
+          dari pengguna, lakukan konfirmasi, atau pembatalan sesuai kebutuhan
+          operasional.
+        </p>
+      </header>
+      <div class="main-content">
+        <div class="notifikasi">
+          <i class="fas fa-exclamation-circle"></i>
+          <div>
+            <strong>Konsultasi Membutuhkan Tindakan</strong>
+            <p>
+              Terdapat 2 konsultasi menunggu konfirmasi yang perlu
+              ditindaklanjuti.
+            </p>
+          </div>
+        </div>
+
+        <section class="section-admin">
+          <div class="request-card-minimal">
+            <div class="card-header-flex">
+              <h6 class="fw-bold">
+                Budi Santoso
+                <span class="badge-status-blue">Menunggu Konfirmasi Admin</span>
+              </h6>
+            </div>
+            <p class="text-muted small">Statistik secara umum</p>
+
+            <div class="info-row-minimal">
+              <div class="info-item-minimal">
+                <i class="far fa-calendar"></i>
+                <div>
+                  <small>Tanggal</small>
+                  <span>Sabtu, 10 Januari 2026</span>
+                </div>
+              </div>
+              <div class="info-item-minimal">
+                <i class="far fa-clock"></i>
+                <div>
+                  <small>Waktu</small>
+                  <span>10:00 - 11:30 WIB</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-actions-minimal">
+              <button
+                class="btn-confirm-minimal"
+                data-bs-toggle="modal"
+                data-bs-target="#modalKonfirmasi"
+              >
+                Konfirmasi Konsultasi
+              </button>
+              <button
+                class="btn-cancel-minimal"
+                data-bs-toggle="modal"
+                data-bs-target="#modalBatal"
+              >
+                Batalkan Konsultasi
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-admin mt-5">
+          <h6 class="section-subtitle">Konsultasi Mendatang</h6>
+          <p class="subtitle-desc">
+            Konsultasi yang telah dikonfirmasi dan akan berlangsung dalam waktu
+            dekat
+          </p>
+
+          <div class="row g-3">
+            <div class="col-lg-4 col-md-6">
+              <div class="upcoming-card">
+                <span class="badge-upcoming"
+                  ><i class="fas fa-check-circle"></i> Terkonfirmasi</span
+                >
+                <h6>Ir. Bambang Sutrisno</h6>
+                <p>Statistik secara umum</p>
+                <div class="schedule">
+                  <small
+                    ><i class="far fa-calendar-alt"></i> Kamis, 8 Jan
+                    2026</small
+                  >
+                  <small><i class="far fa-clock"></i> 11:00 - 12:00 WIB</small>
+                </div>
+                <button class="btn-meet">
+                  <i class="fas fa-video"></i> Gabung Google Meet
+                </button>
+                <button
+                  class="btn-finish"
+                  data-bs-toggle="modal"
+                  data-bs-target="#modalSelesai"
+                >
+                  Selesaikan Konsultasi
+                </button>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="upcoming-card">
+                <span class="badge-upcoming"
+                  ><i class="fas fa-check-circle"></i> Terkonfirmasi</span
+                >
+                <h6>Dr. Ratna Dewi</h6>
+                <p>Statistik secara umum</p>
+                <div class="schedule">
+                  <small
+                    ><i class="far fa-calendar-alt"></i> Jum'at, 9 Jan
+                    2026</small
+                  >
+                  <small><i class="far fa-clock"></i> 10:00 - 11:00 WIB</small>
+                </div>
+                <button class="btn-meet">
+                  <i class="fas fa-video"></i> Gabung Google Meet
+                </button>
+                <button
+                  class="btn-finish"
+                  data-bs-toggle="modal"
+                  data-bs-target="#modalSelesai"
+                >
+                  Selesaikan Konsultasi
+                </button>
+              </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+              <div class="upcoming-card">
+                <span class="badge-upcoming"
+                  ><i class="fas fa-check-circle"></i> Terkonfirmasi</span
+                >
+                <h6>Muhammad Hasan, S.E</h6>
+                <p>Statistik secara umum</p>
+                <div class="schedule">
+                  <small
+                    ><i class="far fa-calendar-alt"></i> Sabtu, 10 Jan
+                    2026</small
+                  >
+                  <small><i class="far fa-clock"></i> 15:00 - 16:00 WIB</small>
+                </div>
+                <button class="btn-meet">
+                  <i class="fas fa-video"></i> Gabung Google Meet
+                </button>
+                <button
+                  class="btn-finish"
+                  data-bs-toggle="modal"
+                  data-bs-target="#modalSelesai"
+                >
+                  Selesaikan Konsultasi
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-admin mt-5">
+          <h6 class="section-subtitle">Riwayat Konsultasi</h6>
+          <p class="subtitle-desc">
+            Daftar lengkap konsultasi yang telah selesai atau dibatalkan
+          </p>
+
+          <div class="history-table-container">
+            <div class="table-filter">
+              <button class="btn-filter">
+                <i class="fas fa-filter"></i> Filter Riwayat
+                <i class="fas fa-chevron-down ms-5"></i>
+              </button>
+            </div>
+            <div class="table-responsive">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Nama Pengguna</th>
+                    <th>Topik Konsultasi</th>
+                    <th>Tanggal</th>
+                    <th>Waktu</th>
+                    <th>Status Akhir</th>
+                    <th>Rating</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Dr. Andi Prasetyo</td>
+                    <td>Statistik secara umum</td>
+                    <td>5 Jan 2026</td>
+                    <td>10:00 - 11:00 WIB</td>
+                    <td><span class="status-selesai">Selesai</span></td>
+                    <td class="stars-container" data-rating="5"></td>
+                    <td>
+                      <a
+                        href="#"
+                        class="link-detail"
+                        data-bs-toggle="modal"
+                        data-bs-target="#modalDetailKonsultasi"
+                        >Lihat Detail</a
+                      >
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Dewi Lestari, M.</td>
+                    <td>Statistik secara umum</td>
+                    <td>4 Jan 2026</td>
+                    <td>14:00 - 15:00 WIB</td>
+                    <td><span class="status-selesai">Selesai</span></td>
+                    <td class="stars-container" data-rating="5"></td>
+                    <td><a href="#" class="link-detail">Lihat Detail</a></td>
+                  </tr>
+                  <tr>
+                    <td>Agus Setiawan</td>
+                    <td>Statistik secara umum</td>
+                    <td>3 Jan 2026</td>
+                    <td>09:00 - 10:00 WIB</td>
+                    <td><span class="status-batal">Dibatalkan</span></td>
+                    <td class="stars-container" data-rating="5"></td>
+                    <td><a href="#" class="link-detail">Lihat Detail</a></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-footer-admin">
+              <span>Menampilkan 1 - 10 dari 15 data</span>
+              <nav>
+                <ul class="pagination pagination-sm mb-0">
+                  <li class="page-item disabled">
+                    <a class="page-link" href="#"></a>
+                  </li>
+                  <li class="page-item active">
+                    <a class="page-link" href="#">1</a>
+                  </li>
+                  <li class="page-item"><a class="page-link" href="#">2</a></li>
+                  <li class="page-item"><a class="page-link" href="#">></a></li>
+                </ul>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ===============KONFIRMASI KONSULTASI============== -->
+
+    <div
+      class="modal fade"
+      id="modalKonfirmasi"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-body p-0">
+            <h2 class="modal-title">Konfirmasi Konsultasi</h2>
+            <p class="modal-description">
+              Silakan masukkan nama petugas yang akan melayani konsultasi ini.
+            </p>
+
+            <div class="info-field-box">
+              <label>User</label>
+              <div class="value-text">Suarna Dwi saputra</div>
+            </div>
+
+            <div class="info-field-box">
+              <label>Jenis Konsultasi</label>
+              <div class="value-text">Tenaga Kerja</div>
+            </div>
+
+            <div class="info-field-box">
+              <label>Deskripsi</label>
+              <p class="value-text">
+                Kak minta tolong saya ingin meminta beberapa data tentang TPAK
+                menurut (umur dan jenis kelamin),( pendidikan dan jenis
+                kelamin)(kabupaten/kota dan jenis kelamin)
+              </p>
+            </div>
+
+            <div class="label-section d-flex justify-content-between">
+              <span>Petugas yang Melayani</span>
+              <span class="text-danger">*</span>
+            </div>
+
+            <div class="custom-select-wrapper mb-4">
+              <select class="form-select form-select-custom shadow-none">
+                <option selected disabled>Petugas</option>
+                <option value="1">Admin Statistik 1</option>
+                <option value="2">Admin Statistik 2</option>
+              </select>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                class="btn btn-batal"
+                data-bs-dismiss="modal"
+              >
+                Batal
+              </button>
+              <button type="button" class="btn btn-konfirmasi">
+                Konfirmasi
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===============BATALKAN KONSULTASI============== -->
+
+    <div class="modal fade" id="modalBatal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-custom-size">
+        <div class="modal-content modal-batal-container">
+          <div class="modal-body p-4">
+            <div class="text-center mb-3">
+              <div class="icon-cancel-box mx-auto">
+                <div class="icon-bg-red">
+                  <i class="fas fa-times"></i>
+                </div>
+              </div>
+              <h6 class="modal-title-batal mt-3">Batalkan Konsultasi</h6>
+              <p class="modal-text-desc">
+                Berikan alasan pembatalan. Alasan ini akan dikirimkan kepada
+                pengguna sebagai informasi tambahan.
+              </p>
+            </div>
+
+            <div class="mb-4 text-start">
+              <label class="form-label fw-bold small mb-2"
+                >Alasan Pembatalan <span class="text-danger">*</span></label
+              >
+              <textarea
+                class="form-control shadow-none"
+                id="alasanPembatalan"
+                rows="3"
+                placeholder="Contoh: Petugas sedang ada rapat mendadak atau jadwal sudah penuh..."
+                style="font-size: 14px; border-radius: 8px"
+              ></textarea>
+            </div>
+
+            <div class="row g-3">
+              <div class="col-6">
+                <button
+                  type="button"
+                  class="btn btn-batal-gray w-100"
+                  data-bs-dismiss="modal"
+                >
+                  Kembali
+                </button>
+              </div>
+              <div class="col-6">
+                <button
+                  type="button"
+                  class="btn btn-danger w-100"
+                  style="
+                    border-radius: 8px;
+                    font-weight: 500;
+                    background-color: #dc3545;
+                    border: none;
+                    padding: 10px;
+                  "
+                  id="confirmCancelBtn"
+                >
+                  Konfirmasi Batal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===============SELESAIKAN KOSNULTASI======================== -->
+
+    <div
+      class="modal fade"
+      id="modalSelesai"
+      tabindex="-1"
+      aria-labelledby="modalSelesaiLabel"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header border-0 pb-0">
+            <div>
+              <h5 class="modal-title fw-bold" id="modalSelesaiLabel">
+                Selesaikan Konsultasi
+              </h5>
+              <p class="text-muted small mb-0">
+                Dokumentasikan hasil konsultasi sebelum menyelesaikan
+              </p>
+            </div>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <div class="user-info-box mb-4">
+              <div class="row">
+                <div class="col-12 mb-2">
+                  <label class="d-block text-primary small">Pengguna:</label>
+                  <span class="text-dark-blue">Ir. Bambang Sutrisno</span>
+                </div>
+                <div class="col-12 mb-2">
+                  <label class="d-block text-primary small">Topik:</label>
+                  <span class="text-dark-blue">Statistik secara umum</span>
+                </div>
+                <div class="col-12">
+                  <label class="d-block text-primary small">Jadwal:</label>
+                  <span class="text-dark-blue"
+                    >Kamis, 8 Januari 2026 • 11:00 - 12:00 WIB</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <form id="formSelesai">
+              <div class="mb-4">
+                <label class="form-label fw-bold"
+                  ><i class="far fa-file-alt me-2"></i>Hasil Konsultasi
+                  <span class="text-danger">*</span></label
+                >
+                <p class="text-muted extra-small mb-2">
+                  Dokumentasikan data/informasi yang diberikan...
+                </p>
+
+                <textarea
+                  name="hasil_konsultasi"
+                  id="hasil_konsultasi"
+                  class="form-control"
+                  rows="4"
+                  placeholder="Contoh: Telah diberikan data inflasi..."
+                ></textarea>
+
+                <div class="d-flex justify-content-between mt-1">
+                  <small class="text-muted"
+                    >Minimal 50 karakter untuk dokumentasi lengkap</small
+                  >
+                  <small class="text-muted">0 karakter</small>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="form-label fw-bold"
+                  ><i class="far fa-user me-2"></i>Petugas yang Menangani
+                  <span class="text-danger">*</span></label
+                >
+                <p class="text-muted extra-small mb-2">
+                  Masukkan nama lengkap dan jabatan petugas...
+                </p>
+
+                <input
+                  type="text"
+                  name="nama_petugas"
+                  id="nama_petugas"
+                  class="form-control"
+                  placeholder="Contoh: Ir. Siti Aminah, M.Si - Statistisi Ahli Muda"
+                />
+              </div>
+
+              <div class="mb-4">
+                <label class="form-label fw-bold"
+                  ><i class="fas fa-link me-2"></i>Link Dokumentasi
+                  <span class="text-muted fw-normal">(Opsional)</span></label
+                >
+                <p class="text-muted extra-small mb-1">
+                  Link ke dokumen pendukung seperti Google Drive...
+                </p>
+                <p class="text-primary extra-small fw-bold mb-2">
+                  Link ini hanya untuk arsip internal admin...
+                </p>
+
+                <input
+                  type="url"
+                  name="link_dokumentasi"
+                  id="link_dokumentasi"
+                  class="form-control"
+                  placeholder="https://drive.google.com/..."
+                />
+
+                <small class="text-muted d-block mt-1"
+                  >Contoh: Link Google Drive, Dropbox, atau sistem internal
+                  BPS</small
+                >
+              </div>
+
+              <div
+                class="alert alert-warning-custom d-flex align-items-start gap-3"
+              >
+                <i class="fas fa-exclamation-circle mt-1"></i>
+                <div>
+                  <strong class="d-block">Catatan Penting:</strong>
+                  <span>Hasil konsultasi dan nama petugas wajib diisi...</span>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer border-0">
+            <button
+              type="button"
+              class="btn btn-outline-secondary px-4"
+              data-bs-dismiss="modal"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              form="formSelesai"
+              class="btn btn-success px-4 bg-success-bps"
+            >
+              Selesaikan Konsultasi
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===============LIHAT DETAIL============================ -->
+    <div
+      class="modal fade"
+      id="modalDetailKonsultasi"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg modal-dialog-centered shadow-lg">
+        <div class="modal-content border-0" style="border-radius: 12px">
+          <div class="modal-header border-bottom pt-4 px-4 pb-3">
+            <h5 class="modal-title-detail mb-0">Detail Konsultasi</h5>
+            <button
+              type="button"
+              class="btn-close shadow-none"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+
+          <div class="modal-body px-4 pb-4 pt-4">
+            <div class="mb-4">
+              <label class="lbl-detail">Nama Pengguna</label>
+              <div class="val-detail" id="db-nama-pengguna">
+                Dr. Andi Prasetyo
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label class="lbl-detail">Topik Konsultasi</label>
+              <div class="val-detail" id="db-topik-konsultasi">
+                Analisis Data Inflasi Regional
+              </div>
+            </div>
+
+            <div class="row mb-4">
+              <div class="col-6">
+                <label class="lbl-detail">Tanggal</label>
+                <div class="val-detail-icon">
+                  <i class="far fa-calendar-alt me-2"></i>
+                  <span id="db-tanggal">Senin, 5 Januari 2026</span>
+                </div>
+              </div>
+              <div class="col-6">
+                <label class="lbl-detail">Waktu</label>
+                <div class="val-detail-icon">
+                  <i class="far fa-clock me-2"></i>
+                  <span id="db-waktu">10:00 - 11:00 WIB</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label class="lbl-detail">Status Akhir</label>
+              <div>
+                <span class="badge-selesai-status" id="db-status">Selesai</span>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label class="lbl-detail">Rating Pengguna</label>
+              <div class="d-flex align-items-center gap-1">
+                <div id="db-rating-stars">
+                  <i class="fas fa-star text-warning"></i>
+                  <i class="fas fa-star text-warning"></i>
+                  <i class="fas fa-star text-warning"></i>
+                  <i class="fas fa-star text-warning"></i>
+                  <i class="fas fa-star text-warning"></i>
+                </div>
+                <span class="ms-1 val-detail-sm" id="db-rating-value"
+                  >(5/5)</span
+                >
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label class="lbl-detail">Ulasan Pengguna</label>
+              <div class="box-ulasan" id="db-ulasan">
+                Sangat membantu dan penjelasan sangat detail. Tim BPS sangat
+                profesional dalam memberikan konsultasi.
+              </div>
+            </div>
+
+            <div class="mt-4 pt-4 border-top">
+              <label class="lbl-detail">
+                <i class="fas fa-external-link-alt me-1"></i> Link Dokumentasi
+              </label>
+              <a href="#" id="db-link-url" target="_blank" class="link-doc-url">
+                https://drive.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/view
+                <i
+                  class="fas fa-external-link-alt ms-1"
+                  style="font-size: 11px"
+                ></i>
+              </a>
+              <p class="text-footer-internal">
+                Link ini hanya untuk arsip internal dan tidak ditampilkan kepada
+                pengguna
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const burger = document.getElementById("burgerToggle");
+        const sidebar = document.querySelector(".sidebar");
+        const overlay = document.getElementById("sidebarOverlay");
+
+        if (!burger) return;
+
+        burger.addEventListener("click", () => {
+          sidebar.classList.add("active");
+          overlay.classList.add("show");
+        });
+
+        overlay.addEventListener("click", () => {
+          sidebar.classList.remove("active");
+          overlay.classList.remove("show");
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+/* Styling Form di dalam Modal */
+.custom-input {
+    border: 1px solid #EAEAEA;
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+}
+
+.custom-input:focus {
+    border-color: #1447E6;
+    box-shadow: 0 0 0 3px rgba(20, 71, 230, 0.1);
+}
+
+.form-label {
+    color: #333;
+    font-size: 0.9rem;
+}
+
+/* Button Styling (Menyesuaikan warna biru PST) */
+.btn-primary {
+    background-color: #1447E6;
+    border: none;
+    border-radius: 8px;
+    transition: all 0.3s;
+}
+
+.btn-primary:hover {
+    background-color: #0d36b3;
+    transform: translateY(-1px);
+}
+
+.btn-light {
+    background-color: #F8F9FA;
+    border: 1px solid #EAEAEA;
+    border-radius: 8px;
+}
+
+/* Success Icon Styling */
+.success-icon-wrapper {
+    display: flex;
+    justify-content: center;
+}
+
+.success-icon {
+    width: 72px;
+    height: 72px;
+    background-color: #DCFCE7; 
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.success-icon i {
+    font-size: 36px;
+    color: #00A63E;
+}
+
+/* Animasi scale */
+@keyframes scaleIn {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+/* Responsif Modal */
+@media (max-width: 576px) {
+    .modal-dialog {
+        margin: 1rem;
+    }
+}
