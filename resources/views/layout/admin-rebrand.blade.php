@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="id">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,6 +19,7 @@
     </script>
     @yield('styles')
 </head>
+
 <body class="pstd-admin-page">
     <div class="admin-shell">
         <div class="admin-scrim" data-admin-scrim></div>
@@ -29,9 +31,9 @@
 
             <div class="admin-identity">
                 @if (Auth::user()->picture)
-                    <img class="admin-avatar" src="{{ Auth::user()->picture }}" alt="">
+                <img class="admin-avatar" src="{{ Auth::user()->picture }}" alt="">
                 @else
-                    <span class="admin-avatar admin-avatar-initial">{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}</span>
+                <span class="admin-avatar admin-avatar-initial">{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}</span>
                 @endif
                 <span class="admin-identity-copy"><strong>{{ Auth::user()->name }}</strong><small>{{ Auth::user()->getRoleNames()->first() ?? 'Admin' }}</small></span>
                 <span class="admin-online-dot" aria-label="Aktif"></span>
@@ -75,7 +77,9 @@
             <main class="admin-content">
                 @if (session('message'))<div class="alert alert-success admin-alert" role="status">{{ session('message') }}</div>@endif
                 @if (session('error'))<div class="alert alert-danger admin-alert" role="alert">{{ session('error') }}</div>@endif
-                @if (isset($errors) && $errors->any())<div class="alert alert-danger admin-alert" role="alert"><strong>Periksa kembali data yang dikirim.</strong><ul class="mb-0 mt-2">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
+                @if (isset($errors) && $errors->any())<div class="alert alert-danger admin-alert" role="alert"><strong>Periksa kembali data yang dikirim.</strong>
+                    <ul class="mb-0 mt-2">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
+                </div>@endif
                 @yield('content')
             </main>
             <footer class="admin-footer"><span>PST Digital · Badan Pusat Statistik Provinsi Sumatera Selatan</span><span>Portal Administrasi</span></footer>
@@ -99,7 +103,9 @@
             themeToggle?.addEventListener('click', () => {
                 const isDark = document.documentElement.dataset.theme !== 'dark';
                 document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-                try { localStorage.setItem('pst-color-mode', isDark ? 'dark' : 'light'); } catch (error) {}
+                try {
+                    localStorage.setItem('pst-color-mode', isDark ? 'dark' : 'light');
+                } catch (error) {}
                 syncThemeToggle();
             });
             syncThemeToggle();
@@ -127,4 +133,5 @@
     </script>
     @yield('scripts')
 </body>
+
 </html>

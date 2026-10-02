@@ -71,7 +71,7 @@ class ChatbotController extends Controller
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], 'admin-test-'.Auth::id(), $knowledge);
+        return $this->sendMessageToService($validated['message'], 'admin-test-' . Auth::id(), $knowledge);
     }
 
     public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge): JsonResponse
@@ -91,7 +91,7 @@ class ChatbotController extends Controller
             $context = $knowledge->contextFor($validated['message']);
             $response = $knowledge->askWithContext($validated['message'], $sessionKey, $context);
             if (!$response->successful()) {
-                return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
+                return response()->json(['message' => 'Layanan chatbot merespons dengan status ' . $response->status() . '.'], 502);
             }
 
             $reply = $response->json('data');
@@ -141,7 +141,7 @@ class ChatbotController extends Controller
             $context = $knowledge->contextFor($message);
             $response = $knowledge->askWithContext($message, $sessionId, $context);
             if (!$response->successful()) {
-                return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
+                return response()->json(['message' => 'Layanan chatbot merespons dengan status ' . $response->status() . '.'], 502);
             }
 
             $reply = $response->json('data');

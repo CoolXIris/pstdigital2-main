@@ -85,7 +85,7 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertOk()
             ->assertJsonPath('knowledge_used', true);
 
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'Garis kemiskinan') && str_contains($request['text'], 'PERTANYAAN:'));
+        Http::assertSent(fn($request) => str_contains($request['text'], 'Garis kemiskinan') && str_contains($request['text'], 'PERTANYAAN:'));
     }
 
     public function test_admin_can_confirm_assign_and_complete_a_consultation(): void
@@ -232,7 +232,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $conversation = DB::table('chatbot_conversations')->where('id', $conversationId)->first();
         $this->assertNotSame((string) $user->id, $conversation->session_key);
-        Http::assertSent(fn ($request) => $request['session_id'] === $conversation->session_key);
+        Http::assertSent(fn($request) => $request['session_id'] === $conversation->session_key);
     }
 
     public function test_user_cannot_read_another_users_chatbot_conversation(): void
@@ -350,7 +350,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $authenticatedRequester = $requester;
         $meeting = $this->createMeeting(['user_id' => $requester->id, 'status' => 1]);
 
-        $this->actingAs($authenticatedRequester)->post('/konsultasi_rating/'.$meeting->id, ['rating' => 5, 'kritik' => 'Layanan sangat membantu.'])
+        $this->actingAs($authenticatedRequester)->post('/konsultasi_rating/' . $meeting->id, ['rating' => 5, 'kritik' => 'Layanan sangat membantu.'])
             ->assertRedirect()->assertSessionHas('message');
         $this->assertDatabaseHas('meeting', ['id' => $meeting->id, 'rating' => 5]);
 
@@ -359,7 +359,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $otherUser->assignRole('user');
         /** @var Authenticatable $authenticatedOther */
         $authenticatedOther = $otherUser;
-        $this->actingAs($authenticatedOther)->post('/konsultasi_rating/'.$meeting->id, ['rating' => 1])->assertNotFound();
+        $this->actingAs($authenticatedOther)->post('/konsultasi_rating/' . $meeting->id, ['rating' => 1])->assertNotFound();
     }
 
     public function test_admin_can_complete_a_session_with_an_optimized_private_image(): void

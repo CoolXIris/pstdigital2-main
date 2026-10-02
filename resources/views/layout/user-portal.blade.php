@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="id">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,6 +19,7 @@
     </script>
     @yield('styles')
 </head>
+
 <body class="user-portal">
     <div class="portal-shell">
         <div class="portal-scrim" data-portal-scrim></div>
@@ -28,9 +30,9 @@
             </a>
             <div class="portal-member">
                 @if (Auth::user()->picture)
-                    <img class="portal-avatar" src="{{ Auth::user()->picture }}" alt="">
+                <img class="portal-avatar" src="{{ Auth::user()->picture }}" alt="">
                 @else
-                    <span class="portal-avatar portal-avatar-initial">{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}</span>
+                <span class="portal-avatar portal-avatar-initial">{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}</span>
                 @endif
                 <span class="portal-member-copy"><strong>{{ Auth::user()->name }}</strong><small>{{ Auth::user()->email }}</small></span>
             </div>
@@ -57,7 +59,9 @@
             <main class="portal-content">
                 @if (session('message'))<div class="alert alert-success portal-alert" role="status"><i class="bi bi-check-circle"></i>{{ session('message') }}</div>@endif
                 @if (session('error'))<div class="alert alert-danger portal-alert" role="alert"><i class="bi bi-exclamation-circle"></i>{{ session('error') }}</div>@endif
-                @if ($errors->any())<div class="alert alert-danger portal-alert" role="alert"><strong>Mohon periksa kembali isian Anda.</strong><ul class="mb-0 mt-2">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
+                @if ($errors->any())<div class="alert alert-danger portal-alert" role="alert"><strong>Mohon periksa kembali isian Anda.</strong>
+                    <ul class="mb-0 mt-2">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
+                </div>@endif
                 @yield('content')
             </main>
             <footer class="portal-footer"><span>PST Digital · Badan Pusat Statistik Provinsi Sumatera Selatan</span><span>Pelayanan Statistik Terpadu</span></footer>
@@ -78,7 +82,9 @@
             themeToggle?.addEventListener('click', () => {
                 const isDark = document.documentElement.dataset.theme !== 'dark';
                 document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-                try { localStorage.setItem('pst-color-mode', isDark ? 'dark' : 'light'); } catch (error) {}
+                try {
+                    localStorage.setItem('pst-color-mode', isDark ? 'dark' : 'light');
+                } catch (error) {}
                 syncThemeToggle();
             });
             syncThemeToggle();
@@ -99,9 +105,12 @@
                 toggle.setAttribute('aria-expanded', String(open));
             });
             scrim?.addEventListener('click', close);
-            document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') close();
+            });
         })();
     </script>
     @yield('scripts')
 </body>
+
 </html>
