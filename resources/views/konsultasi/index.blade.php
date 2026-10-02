@@ -46,9 +46,17 @@
     <section>
         <div class="portal-panel-head px-0 pb-2"><div><h2>Riwayat Konsultasi</h2><p>Sesi yang telah selesai atau dibatalkan.</p></div></div>
         <div class="portal-table-wrap">
-            <table class="portal-table"><thead><tr><th>Jenis konsultasi</th><th>Tanggal</th><th>Waktu</th><th>Petugas</th><th>Status</th><th>Hasil</th><th>Rating</th></tr></thead><tbody>
+            <table class="portal-table"><thead><tr><th>Jenis konsultasi</th><th>Tanggal</th><th>Waktu</th><th>Petugas</th><th>Status</th><th>Rating</th><th>Detail</th></tr></thead><tbody>
                 @forelse ($data_riwayat as $meeting)
-                    <tr><td><strong>{{ $meeting->name }}</strong><small class="d-block text-muted mt-1">{{ \Illuminate\Support\Str::limit($meeting->description, 90) }}</small></td><td>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}</td><td>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }}</td><td>{{ $meeting->assigned_staff ?: '—' }}</td><td><span class="portal-status {{ (int) $meeting->status === 1 ? 'is-done' : 'is-cancelled' }}">{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}</span>@if ((int) $meeting->status === 9 && $meeting->cancellation_reason)<small class="d-block text-muted mt-1">{{ \Illuminate\Support\Str::limit($meeting->cancellation_reason, 70) }}</small>@endif</td><td>{{ \Illuminate\Support\Str::limit($meeting->ringkasan ?: '—', 95) }}@if ($meeting->documentation_path || $meeting->link_dokumentasi)<a class="d-block mt-1" href="{{ $meeting->link_dokumentasi ?: route('konsultasi.documentation', $meeting) }}" target="_blank" rel="noopener">Buka dokumentasi</a>@endif</td><td>@if ((int) $meeting->status === 1 && !$meeting->rating)<button class="portal-rate-button" type="button" data-bs-toggle="modal" data-bs-target="#ratingModal{{ $meeting->id }}"><i class="bi bi-star"></i> Beri rating</button>@elseif ($meeting->rating)<span style="color:#bd771a">{{ str_repeat('★', (int) $meeting->rating) }}</span>@else<span class="text-muted">—</span>@endif</td></tr>
+                    <tr>
+                        <td><strong>{{ $meeting->name }}</strong></td>
+                        <td>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}</td>
+                        <td>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }}</td>
+                        <td>{{ $meeting->assigned_staff ?: '—' }}</td>
+                        <td><span class="portal-status {{ (int) $meeting->status === 1 ? 'is-done' : 'is-cancelled' }}">{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}</span></td>
+                        <td>@if ((int) $meeting->status === 1 && !$meeting->rating)<button class="portal-rate-button" type="button" data-bs-toggle="modal" data-bs-target="#ratingModal{{ $meeting->id }}"><i class="bi bi-star"></i> Beri rating</button>@elseif ($meeting->rating)<span style="color:#bd771a" aria-label="Rating {{ $meeting->rating }} dari 5">{{ str_repeat('★', (int) $meeting->rating) }}</span>@else<span class="text-muted">—</span>@endif</td>
+                        <td><button class="portal-detail-button" type="button" data-bs-toggle="modal" data-bs-target="#historyDetailModal{{ $meeting->id }}"><i class="bi bi-eye"></i> Detail</button></td>
+                    </tr>
                 @empty
                     <tr><td colspan="7" class="text-center py-4 text-muted">Riwayat konsultasi akan tampil setelah sesi selesai atau dibatalkan.</td></tr>
                 @endforelse
@@ -58,6 +66,37 @@
     </section>
 
     @foreach ($data_riwayat as $meeting)
+        <div class="modal fade portal-modal" id="historyDetailModal{{ $meeting->id }}" tabindex="-1" aria-labelledby="historyDetailTitle{{ $meeting->id }}" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
+                <div class="modal-header"><div><span class="portal-eyebrow">Arsip layanan</span><h2 class="modal-title" id="historyDetailTitle{{ $meeting->id }}">Detail Riwayat Konsultasi</h2><p class="portal-panel-head p-0 m-0">{{ $meeting->name }}</p></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6"><small class="text-muted d-block">Tanggal</small><strong>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('l, d F Y') }}</strong></div>
+                        <div class="col-sm-6"><small class="text-muted d-block">Waktu</small><strong>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</strong></div>
+                        <div class="col-sm-6"><small class="text-muted d-block">Petugas</small><strong>{{ $meeting->assigned_staff ?: '—' }}</strong></div>
+                        <div class="col-sm-6"><small class="text-muted d-block">Status</small><span class="portal-status {{ (int) $meeting->status === 1 ? 'is-done' : 'is-cancelled' }}">{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}</span></div>
+                    </div>
+                    <div class="mb-3"><small class="text-muted d-block">Deskripsi kebutuhan</small><p class="mb-0">{{ $meeting->description ?: '—' }}</p></div>
+                    @if ((int) $meeting->status === 9)
+                        <div class="mb-3"><small class="text-muted d-block">Alasan pembatalan</small><p class="mb-0">{{ $meeting->cancellation_reason ?: 'Tidak ada keterangan.' }}</p></div>
+                    @else
+                        <div class="mb-3"><small class="text-muted d-block">Hasil konsultasi</small><p class="mb-0">{{ $meeting->ringkasan ?: 'Belum ada ringkasan.' }}</p></div>
+                        @if ($meeting->documentation_path || $meeting->link_dokumentasi)
+                            <div class="mb-3"><a href="{{ $meeting->link_dokumentasi ?: route('konsultasi.documentation', $meeting) }}" target="_blank" rel="noopener"><i class="bi bi-file-earmark-text me-1"></i>Buka dokumentasi konsultasi</a></div>
+                        @endif
+                    @endif
+                    <div class="mb-0"><small class="text-muted d-block">Rating dan kritik/saran</small>
+                        @if ($meeting->rating)
+                            <strong style="color:#bd771a">{{ str_repeat('★', (int) $meeting->rating) }}{{ str_repeat('☆', max(0, 5 - (int) $meeting->rating)) }}</strong>
+                            <p class="mb-0 mt-1">{{ $meeting->kritik_saran ?: 'Tidak ada kritik atau saran.' }}</p>
+                        @else
+                            <p class="mb-0">Belum ada penilaian.</p>
+                        @endif
+                    </div>
+                </div>
+                <div class="modal-footer"><button class="portal-btn portal-btn-outline" type="button" data-bs-dismiss="modal">Tutup</button></div>
+            </div></div>
+        </div>
         @if ((int) $meeting->status === 1 && !$meeting->rating)
             <div class="modal fade portal-modal" id="ratingModal{{ $meeting->id }}" tabindex="-1" aria-labelledby="ratingTitle{{ $meeting->id }}" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="POST" action="{{ url('konsultasi_rating/'.$meeting->id) }}">@csrf
                 <div class="modal-header"><div><span class="portal-eyebrow">Umpan balik layanan</span><h2 class="modal-title" id="ratingTitle{{ $meeting->id }}">Nilai konsultasi</h2><p class="portal-panel-head p-0 m-0">{{ $meeting->name }}</p></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>

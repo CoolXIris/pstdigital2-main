@@ -11,6 +11,11 @@
     <link rel="stylesheet" href="{{ url('zanex/plugins/bootstrap/css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ url('zanex/css/icons.css') }}">
     <link rel="stylesheet" href="{{ url('admin-rebrand.css') }}">
+    <script>
+        try {
+            if (localStorage.getItem('pst-color-mode') === 'dark') document.documentElement.dataset.theme = 'dark';
+        } catch (error) {}
+    </script>
     @yield('styles')
 </head>
 <body class="pstd-admin-page">
@@ -59,6 +64,7 @@
                 <button class="admin-menu-toggle" type="button" data-admin-toggle aria-label="Buka menu" aria-expanded="false"><i class="fe fe-menu" aria-hidden="true"></i></button>
                 <div class="admin-topbar-context"><span class="admin-topbar-kicker">PST DIGITAL / ADMINISTRASI</span><strong>@yield('topbar_title', 'Pusat kendali layanan')</strong></div>
                 <div class="admin-topbar-actions">
+                    <button class="admin-theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Aktifkan mode gelap" title="Aktifkan mode gelap"><i class="fe fe-moon" aria-hidden="true"></i></button>
                     <span class="admin-date"><i class="fe fe-calendar" aria-hidden="true"></i>{{ now()->translatedFormat('l, d F Y') }}</span>
                     <a class="admin-profile" href="{{ route('profile') }}" aria-label="Buka profil {{ Auth::user()->name }}">
                         @if (Auth::user()->picture)<img src="{{ Auth::user()->picture }}" alt="">@else<span>{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}</span>@endif
@@ -80,6 +86,25 @@
     <script src="{{ url('zanex/plugins/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
     <script src="{{ url('zanex/plugins/chart/Chart.bundle.js') }}"></script>
     <script>
+        (() => {
+            const themeToggle = document.querySelector('[data-theme-toggle]');
+            const themeIcon = themeToggle?.querySelector('i');
+            const syncThemeToggle = () => {
+                const isDark = document.documentElement.dataset.theme === 'dark';
+                themeToggle?.setAttribute('aria-pressed', String(isDark));
+                themeToggle?.setAttribute('aria-label', isDark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+                themeToggle?.setAttribute('title', isDark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+                if (themeIcon) themeIcon.className = isDark ? 'fe fe-sun' : 'fe fe-moon';
+            };
+            themeToggle?.addEventListener('click', () => {
+                const isDark = document.documentElement.dataset.theme !== 'dark';
+                document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+                try { localStorage.setItem('pst-color-mode', isDark ? 'dark' : 'light'); } catch (error) {}
+                syncThemeToggle();
+            });
+            syncThemeToggle();
+        })();
+
         (() => {
             const sidebar = document.querySelector('[data-admin-sidebar]');
             const scrim = document.querySelector('[data-admin-scrim]');

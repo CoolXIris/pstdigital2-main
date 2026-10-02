@@ -201,6 +201,61 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($authenticatedUser)->get('/chatbot')->assertOk()->assertSee('Konsultasi Chatbot')->assertSee('Katalog Publikasi');
     }
 
+    public function test_user_chatbot_saves_and_reopens_conversation_turns(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+        Http::fake(['pst-chat.bpssumsel.com/*' => Http::response(['data' => 'Jawaban chatbot.'], 200)]);
+
+        $firstResponse = $this->actingAs($authenticatedUser)
+            ->postJson(route('chatbot.message'), ['message' => 'Bagaimana membaca inflasi?'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Jawaban chatbot.')
+            ->assertJsonPath('title', 'Bagaimana membaca inflasi?');
+        $conversationId = $firstResponse->json('conversation_id');
+
+        $this->postJson(route('chatbot.message'), [
+            'message' => 'Bisa beri contoh?',
+            'conversation_id' => $conversationId,
+        ])->assertOk();
+
+        $this->assertDatabaseCount('chatbot_messages', 2);
+        $this->getJson(route('chatbot.conversation', $conversationId))
+            ->assertOk()
+            ->assertJsonCount(2, 'messages')
+            ->assertJsonPath('messages.0.prompt', 'Bagaimana membaca inflasi?')
+            ->assertJsonPath('messages.1.response', 'Jawaban chatbot.');
+        $this->get('/chatbot')->assertOk()->assertSee('Bagaimana membaca inflasi?')->assertSee('tanya jawab');
+
+        $conversation = DB::table('chatbot_conversations')->where('id', $conversationId)->first();
+        $this->assertNotSame((string) $user->id, $conversation->session_key);
+        Http::assertSent(fn ($request) => $request['session_id'] === $conversation->session_key);
+    }
+
+    public function test_user_cannot_read_another_users_chatbot_conversation(): void
+    {
+        /** @var User $owner */
+        $owner = User::factory()->create();
+        /** @var User $otherUser */
+        $otherUser = User::factory()->create();
+        /** @var Authenticatable $authenticatedOtherUser */
+        $authenticatedOtherUser = $otherUser;
+        $conversationId = DB::table('chatbot_conversations')->insertGetId([
+            'user_id' => $owner->id,
+            'session_key' => (string) \Illuminate\Support\Str::uuid(),
+            'title' => 'Percakapan privat',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($authenticatedOtherUser)
+            ->getJson(route('chatbot.conversation', $conversationId))
+            ->assertNotFound();
+    }
+
     public function test_admin_must_provide_a_reason_when_cancelling(): void
     {
         $meeting = $this->createMeeting();

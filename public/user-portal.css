@@ -116,6 +116,7 @@
 .portal-table td { padding: 12px 13px; color: #43556a; border-bottom: 1px solid #edf1f5; font-size: 9px; vertical-align: middle; }
 .portal-table tr:last-child td { border-bottom: 0; }
 .portal-rate-button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: #9b691b; background: #fff8e9; border: 1px solid #efdfbd; border-radius: 4px; font-size: 8px; }
+.portal-detail-button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: #52647a; background: #fff; border: 1px solid #d8e1eb; border-radius: 4px; font-size: 8px; }
 .portal-rating-fieldset { padding: 0; border: 0; }
 .portal-rating-fieldset legend { color: #5e7086; font-size: 9px; font-weight: 600; }
 .portal-star-picker { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 4px; }
@@ -167,6 +168,28 @@
 .portal-send { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; color: #fff; background: var(--portal-blue); border: 0; border-radius: 5px; font-size: 15px; }
 .portal-send:disabled { opacity: .55; }
 .portal-chat-aside { padding: 15px; background: #fff; border: 1px solid var(--portal-line); border-radius: 7px; }
+.portal-chat-history { display: flex; min-height: 0; max-height: min(690px, calc(100vh - 155px)); flex-direction: column; gap: 12px; }
+.portal-chat-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.portal-chat-history-heading .portal-eyebrow { margin-bottom: 3px; }
+.portal-chat-history-heading h2 { margin: 0; }
+.portal-chat-new { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; color: #fff; background: var(--portal-green); border: 0; border-radius: 5px; font-size: 16px; transition: background .16s ease, transform .16s ease; }
+.portal-chat-new:hover { background: #3d742c; transform: translateY(-1px); }
+.portal-chat-history-list { display: grid; gap: 5px; overflow: auto; min-height: 70px; max-height: 330px; padding: 2px; }
+.portal-chat-history-item { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 9px; color: #43556a; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 5px; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.portal-chat-history-item:hover { background: #edf4fb; border-color: #d6e3f0; }
+.portal-chat-history-item.is-active { color: var(--portal-blue); background: #eaf1fa; border-color: #c7d9eb; box-shadow: inset 3px 0 0 #d9ad22; }
+.portal-chat-history-icon { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; color: var(--portal-blue); background: #eaf1fa; border-radius: 5px; }
+.portal-chat-history-copy { display: grid; min-width: 0; gap: 3px; }
+.portal-chat-history-copy strong { overflow: hidden; color: inherit; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.portal-chat-history-copy small { color: #78899b; font-size: 9px; }
+.portal-chat-history-empty { display: grid; justify-items: center; gap: 7px; padding: 18px 10px; color: #718096; text-align: center; font-size: 11px; }
+.portal-chat-history-empty i { color: #d0a51c; font-size: 21px; }
+.portal-chat-topics { color: #566d83; border-top: 1px solid var(--portal-line); font-size: 11px; }
+.portal-chat-topics summary { padding: 9px 0 2px; color: var(--portal-blue); font-weight: 600; cursor: pointer; }
+.portal-chat-topics summary i { margin-right: 5px; color: #c49a13; }
+.portal-chat-topics ul { padding-left: 20px; margin: 8px 0 2px; line-height: 1.8; }
+.portal-chat-topics li::marker { color: #d1a51d; }
+.portal-chat-new:focus-visible, .portal-chat-history-item:focus-visible, .portal-chat-topics summary:focus-visible { outline: 3px solid #e1b92d; outline-offset: 2px; }
 .portal-chat-aside h2 { margin: 0 0 7px; color: var(--portal-ink); font-size: 10px; font-weight: 600; }
 .portal-chat-aside p, .portal-chat-aside li { color: #77879a; font-size: 8px; line-height: 1.8; }
 .portal-chat-aside ul { padding-left: 16px; margin: 9px 0 0; }
@@ -179,7 +202,10 @@
 .portal-modal .form-control, .portal-modal .form-select { min-height: 38px; border-color: #dce4ed; font-size: 9px; }
 .portal-modal textarea.form-control { min-height: 95px; }
 .portal-scrim { display: none; }
-@media (max-width: 1050px) { .portal-chat-layout { grid-template-columns: minmax(0,1fr); } .portal-chat-aside { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; } .portal-chat-note { grid-column: 1 / -1; } }
+.portal-theme-toggle { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; color: var(--portal-blue); background: #edf3f9; border: 1px solid #d5e1ec; border-radius: 5px; font-size: 17px; transition: color .16s ease, background .16s ease, border-color .16s ease, transform .16s ease; }
+.portal-theme-toggle:hover { color: #765b0e; background: #fff2bd; border-color: #e5cb70; transform: rotate(-8deg); }
+.portal-theme-toggle:focus-visible { outline: 3px solid #e1b92d; outline-offset: 2px; }
+@media (max-width: 1050px) { .portal-chat-layout { grid-template-columns: minmax(0,1fr); } .portal-chat-aside { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; } .portal-chat-history { display: flex; } .portal-chat-note { grid-column: 1 / -1; } }
 @media (max-width: 1050px) { .portal-room-layout { grid-template-columns: minmax(0,1fr); } .portal-room-aside { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; } .portal-room-aside .portal-chat-note { grid-column: 1/-1; } }
 @media (max-width: 991px) {
     .portal-sidebar { transform: translateX(-100%); transition: transform .2s ease; box-shadow: 10px 0 30px rgba(14,31,54,.12); }
@@ -210,8 +236,209 @@
     .portal-chat-log { padding: 13px; }
     .portal-bubble { max-width: 90%; }
     .portal-chat-aside { display: block; }
+    .portal-chat-history { max-height: none; }
+    .portal-chat-history-list { max-height: 250px; }
     .portal-chat-note { margin-top: 9px; }
     .portal-room-stage { min-height: 58vh; }
     .portal-room-stage > #remote-video { min-height: 58vh; height: 58vh; }
     .portal-room-aside { display: block; }
 }
+
+/* BPS palette and legibility refinements for the user portal. */
+.user-portal { font-size: 15px; }
+.portal-sidebar { background: linear-gradient(180deg, #fff 0%, #f4f8fd 100%); border-right-color: #cbd9e9; }
+.portal-brand { border-bottom: 2px solid var(--portal-blue); }
+.portal-brand strong { font-size: 15px; }
+.portal-brand small { color: #526b87; font-size: 10px; }
+.portal-member { background: #edf5ea; border-color: #d5e7cc; }
+.portal-member-copy strong { font-size: 12px; }
+.portal-member-copy small { color: #5d7186; font-size: 10px; }
+.portal-nav-label { color: #61758d; font-size: 10px; }
+.portal-nav-link { min-height: 44px; font-size: 13px; transition: color .18s ease, background .18s ease, transform .18s ease, box-shadow .18s ease; }
+.portal-nav-link > i:first-child { color: var(--portal-green); font-size: 17px; }
+.portal-nav-link:hover { color: var(--portal-blue) !important; background: #eaf1fa; transform: translateX(3px); }
+.portal-nav-link.is-active { color: var(--portal-blue) !important; background: #e5eef9; box-shadow: inset 3px 0 0 #e6b72e; }
+.portal-nav-link.is-active > i:first-child { color: var(--portal-blue); }
+.portal-logout { min-height: 43px; color: #7d3d3d !important; border-top-color: #e8d8cf; font-size: 12px; }
+.portal-logout:hover { color: #a13232 !important; background: #fbefec; }
+.portal-bps-note { color: #294c35; background: #e9f2e5; font-size: 11px; }
+.portal-bps-note small { color: #55745c; font-size: 10px; }
+.portal-bps-seal { background: var(--portal-green); box-shadow: inset 0 -3px 0 rgba(0,0,0,.12); }
+.portal-topbar { border-bottom-color: #d5e0ec; box-shadow: 0 2px 10px rgba(23,37,59,.04); }
+.portal-topbar-title span { color: #58728e; font-size: 10px; }
+.portal-topbar-title strong { font-size: 15px; }
+.portal-topbar-date { font-size: 12px; }
+.portal-topbar-date i { color: #d6a91b; }
+.portal-content { font-size: 14px; }
+.portal-footer { color: #5f7184; background: #f8fafc; border-top-color: #d8e2ed; font-size: 10px; }
+.portal-alert { font-size: 13px; }
+.portal-eyebrow { color: #27713a; font-size: 10px; }
+.portal-heading h1 { font-size: 28px; }
+.portal-heading p { color: #596d83; font-size: 13px; }
+.portal-panel-head h2, .portal-form-section h2 { font-size: 16px; }
+.portal-panel-head p, .portal-form-section > p { color: #62758a; font-size: 12px; }
+.portal-btn { min-height: 40px; font-size: 12px; transition: background .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.portal-btn-primary { background: var(--portal-blue); border-color: var(--portal-blue); box-shadow: 0 2px 5px rgba(4,50,119,.16); }
+.portal-btn-primary:hover { background: #0b4b91; box-shadow: 0 4px 11px rgba(4,50,119,.22); transform: translateY(-1px); }
+.portal-btn-outline:hover { color: var(--portal-blue) !important; background: #edf4fb; border-color: #9eb7d4; }
+.portal-profile-hero { background: linear-gradient(110deg, #e9f1fa 0%, #f5f8fb 63%, #eff6e9 100%); border-color: #cbdced; }
+.portal-profile-photo { background: var(--portal-blue); box-shadow: 0 0 0 4px #e7bf43, 0 3px 10px rgba(4,50,119,.17); }
+.portal-profile-hero h2 { font-size: 18px; }
+.portal-profile-hero p { color: #566d83; font-size: 12px; }
+.portal-completion-label { color: #52677e; font-size: 11px; }
+.portal-completion-label strong { color: var(--portal-blue); font-size: 13px; }
+.portal-completion-track { height: 8px; background: #dbe6d5; }
+.portal-completion-track span { background: linear-gradient(90deg, #4f8b37, #8cae35, #e0b629); transition: width .5s ease; }
+.portal-form-section { border-color: #d5e1ec; box-shadow: 0 2px 8px rgba(23,37,59,.035); transition: border-color .18s ease, box-shadow .18s ease; }
+.portal-form-section:hover { border-color: #b6cce1; box-shadow: 0 4px 14px rgba(23,37,59,.07); }
+.portal-form-section h2 i { color: var(--portal-green); }
+.portal-form-section .form-label, .portal-modal .form-label { color: #405a76; font-size: 12px; }
+.portal-form-section .form-control, .portal-form-section .form-select, .portal-modal .form-control, .portal-modal .form-select { min-height: 43px; font-size: 13px; }
+.portal-form-section .form-control:focus, .portal-form-section .form-select:focus, .portal-modal .form-control:focus, .portal-modal .form-select:focus { border-color: #5b8fc4; box-shadow: 0 0 0 3px rgba(4,50,119,.12); }
+.portal-sticky-actions { border-color: #d1deeb; }
+.portal-stat { border-top: 3px solid var(--portal-blue); transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.portal-stat:nth-child(2) { border-top-color: var(--portal-green); }
+.portal-stat:nth-child(3) { border-top-color: #d9ad22; }
+.portal-stat:hover { box-shadow: 0 5px 15px rgba(23,37,59,.08); transform: translateY(-2px); }
+.portal-stat span { color: #5c7086; font-size: 11px; }
+.portal-stat strong { font-size: 22px; }
+.portal-meeting { border-color: #dce5ee; border-left: 4px solid #d8ad24; transition: box-shadow .18s ease, border-color .18s ease; }
+.portal-meeting:hover { border-color: #c5d6e7; box-shadow: 0 4px 13px rgba(23,37,59,.07); }
+.portal-meeting.is-confirmed { border-left-color: var(--portal-green); }
+.portal-meeting h3 { font-size: 15px; }
+.portal-meeting-description { color: #586e84; font-size: 12px; }
+.portal-meeting-meta { color: #536a81; font-size: 12px; }
+.portal-meeting-meta i { color: var(--portal-blue); }
+.portal-status { padding: 6px 9px; color: #76560a; background: #fff4cd; font-size: 11px; }
+.portal-status.is-confirmed, .portal-status.is-done { color: #28632e; background: #e6f2e2; }
+.portal-status.is-cancelled { color: #963c3c; background: #fae9e7; }
+.portal-empty { color: #5d7186; background: linear-gradient(135deg, #fff 0%, #f0f6fc 100%); }
+.portal-empty i { color: #d0a51c; font-size: 26px; }
+.portal-empty strong { color: #314d69; font-size: 13px; }
+.portal-empty span { font-size: 12px; }
+.portal-table-wrap { border-color: #d1deea; }
+.portal-table th { color: #385675; background: #eaf1f8; border-bottom-color: #cad9e8; font-size: 11px; }
+.portal-table td { color: #354d65; font-size: 12px; }
+.portal-table tbody tr { transition: background .16s ease; }
+.portal-table tbody tr:hover { background: #f1f7ed; }
+.portal-rate-button, .portal-detail-button { min-height: 34px; align-items: center; padding: 6px 9px; font-size: 11px; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease, transform .16s ease; }
+.portal-rate-button { color: #76560a; background: #fff5d6; border-color: #e9d27e; }
+.portal-rate-button:hover { color: #594000; background: #ffedaa; border-color: #d7b947; transform: translateY(-1px); }
+.portal-detail-button:hover { color: var(--portal-blue); background: #eaf1fa; border-color: #a9bfd8; transform: translateY(-1px); }
+.portal-rating-fieldset legend { color: #405a76; font-size: 12px; }
+.portal-star-picker label { font-size: 31px; }
+.portal-chat-card { border-color: #cbd9e8; box-shadow: 0 4px 16px rgba(4,50,119,.07); }
+.portal-chat-header { background: linear-gradient(90deg, #eaf1fa, #f2f7ed); border-bottom-color: #d5e1ec; }
+.portal-chat-avatar { color: #fff; background: var(--portal-blue); box-shadow: 0 0 0 4px #e2edda; }
+.portal-chat-header strong { font-size: 13px; }
+.portal-chat-header small { color: #586e84; font-size: 11px; }
+.portal-online { background: #57933c; box-shadow: 0 0 0 3px rgba(87,147,60,.13); }
+.portal-chat-log { background: #f0f5fa; }
+.portal-bubble { padding: 12px 14px; color: #354d65; background: #fff; border-color: #dce6ef; font-size: 13px; box-shadow: 0 2px 5px rgba(23,37,59,.035); }
+.portal-bubble.is-user { color: #fff; background: var(--portal-blue); border-color: var(--portal-blue); }
+.portal-bubble-meta { color: #72869a; font-size: 10px; }
+.portal-bubble.is-user .portal-bubble-meta { color: #d9e8f8; }
+.portal-chat-compose { border-top-color: #d5e1ec; }
+.portal-chat-compose textarea { min-height: 46px; border-color: #cbd9e8; font-size: 13px; }
+.portal-chat-compose textarea:focus { border-color: #5b8fc4; box-shadow: 0 0 0 3px rgba(4,50,119,.11); }
+.portal-send { background: var(--portal-green); transition: background .16s ease, transform .16s ease; }
+.portal-send:hover:not(:disabled) { background: #3d742c; transform: translateY(-1px); }
+.portal-chat-aside { background: linear-gradient(155deg, #fff 0%, #f3f7fb 100%); border-color: #d3dfeb; }
+.portal-chat-aside h2 { color: #294866; font-size: 14px; }
+.portal-chat-aside p, .portal-chat-aside li { color: #566d83; font-size: 12px; }
+.portal-chat-aside li::marker { color: #d1a51d; }
+.portal-chat-note { color: #4c647c; background: #eaf1f8; border-left: 3px solid var(--portal-blue); font-size: 11px; }
+.portal-chat-note:nth-last-child(1) { background: #edf5e9; border-left-color: var(--portal-green); }
+.portal-chat-note a { color: var(--portal-blue); font-weight: 600; }
+.portal-modal .modal-content { border-color: #cbd9e8; box-shadow: 0 14px 45px rgba(13,37,66,.18); }
+.portal-modal .modal-header, .portal-modal .modal-footer { border-color: #d9e3ed; }
+.portal-modal .modal-title { font-size: 16px; }
+.portal-modal .modal-body { font-size: 13px; }
+.portal-modal .modal-body small { font-size: 11px; }
+.portal-modal .modal-body p { line-height: 1.65; }
+.portal-action-icon:focus-visible, .portal-menu-toggle:focus-visible, .portal-nav-link:focus-visible, .portal-btn:focus-visible, .portal-send:focus-visible, .portal-rate-button:focus-visible, .portal-detail-button:focus-visible { outline: 3px solid #e1b92d; outline-offset: 2px; }
+@media (max-width: 640px) {
+    .portal-heading h1 { font-size: 24px; }
+    .portal-heading p { font-size: 13px; }
+    .portal-topbar-title strong { font-size: 14px; }
+    .portal-stat span { font-size: 12px; }
+    .portal-table th { font-size: 10px; }
+    .portal-table td { font-size: 12px; }
+    .portal-chat-aside p, .portal-chat-aside li { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .user-portal *, .user-portal *::before, .user-portal *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+html[data-theme="dark"] .user-portal { --portal-ink: #edf3f8; --portal-muted: #b5c2cf; --portal-line: #3b4a59; --portal-bg: #1b232b; --portal-white: #252f39; color: #edf3f8; background: #1b232b; color-scheme: dark; }
+html[data-theme="dark"] .portal-sidebar { background: linear-gradient(180deg, #252f39, #202a33); border-right-color: #3c4d5d; }
+html[data-theme="dark"] .portal-brand { color: #f0f4f8; border-bottom-color: #4a6d91; }
+html[data-theme="dark"] .portal-brand small, html[data-theme="dark"] .portal-member-copy small { color: #b6c4d2; }
+html[data-theme="dark"] .portal-member, html[data-theme="dark"] .portal-bps-note { color: #d9e8d2; background: #2e3c34; border-color: #4b604e; }
+html[data-theme="dark"] .portal-nav-label { color: #a8b6c4; }
+html[data-theme="dark"] .portal-nav-link { color: #c8d3dd !important; }
+html[data-theme="dark"] .portal-nav-link > i:first-child { color: #8fbd78; }
+html[data-theme="dark"] .portal-nav-link:hover, html[data-theme="dark"] .portal-nav-link.is-active { color: #fff !important; background: #34475a; }
+html[data-theme="dark"] .portal-nav-link.is-active { box-shadow: inset 3px 0 0 #e1b92d; }
+html[data-theme="dark"] .portal-nav-link.is-active > i:first-child { color: #f0ce54; }
+html[data-theme="dark"] .portal-logout { color: #e3b1a9 !important; border-top-color: #4a4142; }
+html[data-theme="dark"] .portal-logout:hover { color: #ffd1c9 !important; background: #493536; }
+html[data-theme="dark"] .portal-topbar, html[data-theme="dark"] .portal-footer { color: #dce5ed; background: rgba(37,47,57,.97); border-color: #3b4a59; }
+html[data-theme="dark"] .portal-topbar-title span, html[data-theme="dark"] .portal-topbar-date { color: #b8c6d3; }
+html[data-theme="dark"] .portal-topbar-title strong { color: #f0f4f8; }
+html[data-theme="dark"] .portal-topbar-profile { border-color: #536577; }
+html[data-theme="dark"] .portal-theme-toggle { color: #f2d35d; background: #34404b; border-color: #536577; }
+html[data-theme="dark"] .portal-theme-toggle:hover { color: #fff; background: #53603e; }
+html[data-theme="dark"] .portal-heading h1, html[data-theme="dark"] .portal-panel-head h2, html[data-theme="dark"] .portal-form-section h2, html[data-theme="dark"] .portal-stat strong, html[data-theme="dark"] .portal-meeting h3, html[data-theme="dark"] .portal-profile-hero h2 { color: #edf3f8; }
+html[data-theme="dark"] .portal-heading p, html[data-theme="dark"] .portal-panel-head p, html[data-theme="dark"] .portal-form-section > p, html[data-theme="dark"] .portal-profile-hero p, html[data-theme="dark"] .portal-stat span, html[data-theme="dark"] .portal-meeting-description, html[data-theme="dark"] .portal-meeting-meta { color: #b7c4d0; }
+html[data-theme="dark"] .portal-profile-hero { background: linear-gradient(110deg, #29394a, #29372f); border-color: #46596c; }
+html[data-theme="dark"] .portal-form-section, html[data-theme="dark"] .portal-stat, html[data-theme="dark"] .portal-meeting, html[data-theme="dark"] .portal-table-wrap, html[data-theme="dark"] .portal-chat-card, html[data-theme="dark"] .portal-chat-aside { color: #e4ebf1; background: #252f39; border-color: #3b4a59; }
+html[data-theme="dark"] .portal-meeting { border-left-color: #dfb92f; }
+html[data-theme="dark"] .portal-meeting.is-confirmed { border-left-color: #75a85c; }
+html[data-theme="dark"] .portal-form-section:hover, html[data-theme="dark"] .portal-meeting:hover, html[data-theme="dark"] .portal-stat:hover { border-color: #5c748b; }
+html[data-theme="dark"] .portal-form-section .form-control, html[data-theme="dark"] .portal-form-section .form-select, html[data-theme="dark"] .portal-modal .form-control, html[data-theme="dark"] .portal-modal .form-select, html[data-theme="dark"] .portal-chat-compose textarea { color: #edf3f8; background-color: #1e2831; border-color: #536372; }
+html[data-theme="dark"] .portal-form-section .form-control::placeholder, html[data-theme="dark"] .portal-modal .form-control::placeholder, html[data-theme="dark"] .portal-chat-compose textarea::placeholder { color: #98a9b8; }
+html[data-theme="dark"] .portal-form-section .form-control:disabled { color: #b9c5d0; background: #303b45; }
+html[data-theme="dark"] .portal-form-section .form-label, html[data-theme="dark"] .portal-modal .form-label { color: #d0dbe4; }
+html[data-theme="dark"] .portal-sticky-actions { background: rgba(37,47,57,.96); border-color: #465564; }
+html[data-theme="dark"] .portal-btn-outline { color: #d8e2ea !important; background: #303b45; border-color: #586a79; }
+html[data-theme="dark"] .portal-btn-outline:hover { color: #fff !important; background: #3c4c5b; }
+html[data-theme="dark"] .portal-status.is-confirmed, html[data-theme="dark"] .portal-status.is-done { color: #d5edc9; background: #304a34; }
+html[data-theme="dark"] .portal-status.is-cancelled { color: #ffd3cc; background: #523638; }
+html[data-theme="dark"] .portal-status:not(.is-confirmed):not(.is-done):not(.is-cancelled) { color: #ffe8a1; background: #51472c; }
+html[data-theme="dark"] .portal-empty { color: #bdc9d4; background: linear-gradient(135deg, #252f39, #293644); border-color: #536272; }
+html[data-theme="dark"] .portal-empty strong { color: #ecf2f7; }
+html[data-theme="dark"] .portal-table th { color: #d5e2ed; background: #303c47; border-bottom-color: #465564; }
+html[data-theme="dark"] .portal-table td { color: #d1dbe4; border-bottom-color: #394753; }
+html[data-theme="dark"] .portal-table tbody tr:hover { background: #2c3b35; }
+html[data-theme="dark"] .portal-rate-button { color: #ffe49a; background: #51472c; border-color: #776634; }
+html[data-theme="dark"] .portal-rate-button:hover { color: #fff1c3; background: #64562f; }
+html[data-theme="dark"] .portal-detail-button { color: #d5e4f2; background: #303c47; border-color: #536474; }
+html[data-theme="dark"] .portal-detail-button:hover { color: #fff; background: #3a5064; }
+html[data-theme="dark"] .portal-chat-header { background: linear-gradient(90deg, #29394a, #2d3b31); border-bottom-color: #3b4a59; }
+html[data-theme="dark"] .portal-chat-header strong, html[data-theme="dark"] .portal-chat-aside h2 { color: #edf3f8; }
+html[data-theme="dark"] .portal-chat-header small, html[data-theme="dark"] .portal-chat-aside p, html[data-theme="dark"] .portal-chat-aside li { color: #bac7d2; }
+html[data-theme="dark"] .portal-chat-log { background: #1e2831; }
+html[data-theme="dark"] .portal-bubble { color: #e4ebf1; background: #303b45; border-color: #465564; }
+html[data-theme="dark"] .portal-bubble.is-user { color: #fff; background: #14529a; border-color: #2868ad; }
+html[data-theme="dark"] .portal-bubble.is-error { color: #ffd4ce; background: #523638; border-color: #704447; }
+html[data-theme="dark"] .portal-chat-compose { background: #252f39; border-top-color: #3b4a59; }
+html[data-theme="dark"] .portal-chat-aside { background: linear-gradient(155deg, #252f39, #293644); }
+html[data-theme="dark"] .portal-chat-history-heading h2 { color: #edf3f8; }
+html[data-theme="dark"] .portal-chat-history-item { color: #d1dce5; }
+html[data-theme="dark"] .portal-chat-history-item:hover { background: #303d48; border-color: #465564; }
+html[data-theme="dark"] .portal-chat-history-item.is-active { color: #fff; background: #34475a; border-color: #536779; box-shadow: inset 3px 0 0 #dfbd4c; }
+html[data-theme="dark"] .portal-chat-history-icon { color: #d5e7f8; background: #3a5064; }
+html[data-theme="dark"] .portal-chat-history-copy small, html[data-theme="dark"] .portal-chat-history-empty { color: #aebdca; }
+html[data-theme="dark"] .portal-chat-topics { color: #c3ced8; border-top-color: #465564; }
+html[data-theme="dark"] .portal-chat-topics summary { color: #a9cef1; }
+html[data-theme="dark"] .portal-chat-new { color: #fff; background: #4f853b; }
+html[data-theme="dark"] .portal-chat-new:hover { background: #609c48; }
+html[data-theme="dark"] .portal-chat-note, html[data-theme="dark"] .portal-chat-note:nth-last-child(1) { color: #d1dce5; background: #303d48; border-left-color: #5a8ec2; }
+html[data-theme="dark"] .portal-chat-note:nth-last-child(1) { background: #304236; border-left-color: #75a85c; }
+html[data-theme="dark"] .portal-chat-note a { color: #9fc8f4; }
+html[data-theme="dark"] .portal-modal .modal-content { color: #e4ebf1; background: #252f39; border-color: #536272; }
+html[data-theme="dark"] .portal-modal .modal-header, html[data-theme="dark"] .portal-modal .modal-footer { border-color: #465564; }
+html[data-theme="dark"] .portal-modal .modal-title { color: #edf3f8; }
+html[data-theme="dark"] .portal-modal .btn-close { filter: invert(1) grayscale(1); }
+html[data-theme="dark"] .portal-modal .text-muted { color: #aebdca !important; }
+html[data-theme="dark"] .portal-scrim.is-visible { background: rgba(5,10,15,.68); }

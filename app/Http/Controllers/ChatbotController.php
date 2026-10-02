@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\ChatbotKnowledgeSource;
+use App\Models\ChatbotConversation;
 use App\Services\ChatbotKnowledgeService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -17,10 +19,13 @@ class ChatbotController extends Controller
      */
     public function index()
     {
-        //
         $user  = Auth::user();
+        $conversations = ChatbotConversation::where('user_id', $user->id)
+            ->withCount('messages')
+            ->latest('updated_at')
+            ->get(['id', 'title', 'updated_at']);
 
-        return view('chatbot.index', compact('user'));
+        return view('chatbot.index', compact('user', 'conversations'));
     }
 
     public function management(): View
@@ -73,9 +78,61 @@ class ChatbotController extends Controller
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
+            'conversation_id' => ['nullable', 'integer'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], (string) Auth::id(), $knowledge);
+        $user = Auth::user();
+        $conversation = isset($validated['conversation_id'])
+            ? ChatbotConversation::where('user_id', $user->id)->findOrFail($validated['conversation_id'])
+            : null;
+        $sessionKey = $conversation?->session_key ?? (string) Str::uuid();
+
+        try {
+            $context = $knowledge->contextFor($validated['message']);
+            $response = $knowledge->askWithContext($validated['message'], $sessionKey, $context);
+            if (!$response->successful()) {
+                return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
+            }
+
+            $reply = $response->json('data');
+            if (!is_string($reply) || trim($reply) === '') {
+                return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
+            }
+
+            $conversation ??= ChatbotConversation::create([
+                'user_id' => $user->id,
+                'session_key' => $sessionKey,
+                'title' => Str::limit(trim($validated['message']), 180, '...'),
+            ]);
+            $conversation->messages()->create([
+                'prompt' => $validated['message'],
+                'response' => $reply,
+                'knowledge_used' => $context !== null,
+            ]);
+            $conversation->touch();
+
+            return response()->json([
+                'reply' => $reply,
+                'knowledge_used' => $context !== null,
+                'conversation_id' => $conversation->id,
+                'title' => $conversation->title,
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json(['message' => 'Tidak dapat menghubungi layanan chatbot.'], 502);
+        }
+    }
+
+    public function conversation(ChatbotConversation $conversation): JsonResponse
+    {
+        abort_unless($conversation->user_id === Auth::id(), 404);
+
+        return response()->json([
+            'id' => $conversation->id,
+            'title' => $conversation->title,
+            'messages' => $conversation->messages()->oldest()->get(['prompt', 'response', 'knowledge_used', 'created_at']),
+        ]);
     }
 
     private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge): JsonResponse

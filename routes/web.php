@@ -78,6 +78,7 @@ Route::group(['middleware' => ['auth']], function () {
     Route::get('konsultasi/{meeting}/documentation', [KonsultasiAdminController::class, 'documentation'])->name('konsultasi.documentation');
     Route::get('chatbot', [ChatbotController::class, 'index']);
     Route::post('chatbot/message', [ChatbotController::class, 'sendMessage'])->name('chatbot.message');
+    Route::get('chatbot/conversations/{conversation}', [ChatbotController::class, 'conversation'])->name('chatbot.conversation');
 });
 
 

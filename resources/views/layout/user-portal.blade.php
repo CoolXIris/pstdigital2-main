@@ -11,6 +11,11 @@
     <link rel="stylesheet" href="{{ url('bootstrap.min.css') }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="{{ url('user-portal.css') }}">
+    <script>
+        try {
+            if (localStorage.getItem('pst-color-mode') === 'dark') document.documentElement.dataset.theme = 'dark';
+        } catch (error) {}
+    </script>
     @yield('styles')
 </head>
 <body class="user-portal">
@@ -47,7 +52,7 @@
             <header class="portal-topbar">
                 <button class="portal-menu-toggle" type="button" data-portal-toggle aria-label="Buka navigasi" aria-expanded="false"><i class="bi bi-list"></i></button>
                 <div class="portal-topbar-title"><span>PORTAL PENGGUNA</span><strong>@yield('topbar_title', 'Layanan PST Digital')</strong></div>
-                <div class="portal-topbar-actions"><span class="portal-topbar-date"><i class="bi bi-calendar3"></i>{{ now()->translatedFormat('d F Y') }}</span><a href="{{ route('profile') }}" class="portal-topbar-profile" aria-label="Profil saya">@if (Auth::user()->picture)<img src="{{ Auth::user()->picture }}" alt="">@else{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}@endif</a></div>
+                <div class="portal-topbar-actions"><button class="portal-theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Aktifkan mode gelap" title="Aktifkan mode gelap"><i class="bi bi-moon-stars" aria-hidden="true"></i></button><span class="portal-topbar-date"><i class="bi bi-calendar3"></i>{{ now()->translatedFormat('d F Y') }}</span><a href="{{ route('profile') }}" class="portal-topbar-profile" aria-label="Profil saya">@if (Auth::user()->picture)<img src="{{ Auth::user()->picture }}" alt="">@else{{ strtoupper(substr(Auth::user()->name, 0, 1)) }}@endif</a></div>
             </header>
             <main class="portal-content">
                 @if (session('message'))<div class="alert alert-success portal-alert" role="status"><i class="bi bi-check-circle"></i>{{ session('message') }}</div>@endif
@@ -60,6 +65,25 @@
     </div>
     <script src="{{ url('bootstrap.bundle.min.js') }}"></script>
     <script>
+        (() => {
+            const themeToggle = document.querySelector('[data-theme-toggle]');
+            const themeIcon = themeToggle?.querySelector('i');
+            const syncThemeToggle = () => {
+                const isDark = document.documentElement.dataset.theme === 'dark';
+                themeToggle?.setAttribute('aria-pressed', String(isDark));
+                themeToggle?.setAttribute('aria-label', isDark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+                themeToggle?.setAttribute('title', isDark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+                if (themeIcon) themeIcon.className = isDark ? 'bi bi-sun' : 'bi bi-moon-stars';
+            };
+            themeToggle?.addEventListener('click', () => {
+                const isDark = document.documentElement.dataset.theme !== 'dark';
+                document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+                try { localStorage.setItem('pst-color-mode', isDark ? 'dark' : 'light'); } catch (error) {}
+                syncThemeToggle();
+            });
+            syncThemeToggle();
+        })();
+
         (() => {
             const sidebar = document.querySelector('[data-portal-sidebar]');
             const scrim = document.querySelector('[data-portal-scrim]');
