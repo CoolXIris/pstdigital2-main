@@ -1,7 +1,13 @@
-@extends('layout.user-portal')
+@extends($isAdmin ? 'layout.admin-rebrand' : 'layout.user-portal')
 
 @section('title', 'Profil Saya | PST Digital')
 @section('topbar_title', 'Profil saya')
+
+@section('styles')
+    @if ($isAdmin)
+        <link rel="stylesheet" href="{{ url('user-portal.css') }}">
+    @endif
+@endsection
 
 @section('content')
     @php
@@ -44,7 +50,7 @@
             </div>
         </section>
 
-        <div class="portal-sticky-actions"><a class="portal-btn portal-btn-outline" href="{{ url('/') }}">Batal</a><button class="portal-btn portal-btn-primary" type="submit"><i class="bi bi-check2"></i> Simpan profil</button></div>
+        <div class="portal-sticky-actions"><a class="portal-btn portal-btn-outline" href="{{ $isAdmin ? route('dashboard') : url('/') }}">Batal</a><button class="portal-btn portal-btn-primary" type="submit"><i class="bi bi-check2"></i> Simpan profil</button></div>
     </form>
 @endsection
 

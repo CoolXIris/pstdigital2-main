@@ -15,7 +15,12 @@ class ProfileController extends Controller
      */
     public function index(): View
     {
-        return view('profile.show', ['data' => Auth::user()]);
+        $user = Auth::user();
+
+        return view('profile.show', [
+            'data' => $user,
+            'isAdmin' => $user->hasRole(['admin', 'super_admin']),
+        ]);
     }
 
     /**
@@ -44,7 +49,9 @@ class ProfileController extends Controller
         }
 
         $data = Auth::user();
-        return view('profile.show', compact('data'));
+        $isAdmin = $data->hasRole(['admin', 'super_admin']);
+
+        return view('profile.show', compact('data', 'isAdmin'));
     }
 
     /**
@@ -75,7 +82,7 @@ class ProfileController extends Controller
         $user = Auth::user();
         $user->fill($validated)->save();
 
-        if (Auth::user()->hasRole('admin|super_admin')) {
+        if (Auth::user()->hasRole(['admin', 'super_admin'])) {
             return redirect()->route('dashboard')->with('message', 'Profil berhasil diperbarui.');
         }
 

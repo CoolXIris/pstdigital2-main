@@ -25,8 +25,8 @@
         <div class="admin-scrim" data-admin-scrim></div>
         <aside class="admin-sidebar" data-admin-sidebar aria-label="Navigasi administrasi">
             <a class="admin-brand" href="{{ route('dashboard') }}">
-                <img src="{{ url('img/pst1.png') }}" alt="PST Digital BPS">
-                <span><strong>PST DIGITAL</strong><small>BADAN PUSAT STATISTIK</small></span>
+                <img src="{{ url('img/perpustakaan.png') }}" alt="PST Digital BPS">
+                <span><strong>PST DIGITAL</strong><small>BPS PROVINSI SUMATERA SELATAN</small></span>
             </a>
 
             <div class="admin-identity">

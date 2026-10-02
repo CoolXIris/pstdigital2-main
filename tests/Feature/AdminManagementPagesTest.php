@@ -48,6 +48,33 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
     }
 
+    public function test_admin_profile_keeps_the_admin_layout_and_returns_to_dashboard(): void
+    {
+        /** @var User $admin */
+        $admin = User::findOrFail($this->admin->getAuthIdentifier());
+
+        $this->actingAs($admin)
+            ->get(route('profile'))
+            ->assertOk()
+            ->assertSee('RUANG KERJA')
+            ->assertSee('user-portal.css')
+            ->assertDontSee('Katalog Publikasi');
+
+        $this->actingAs($admin)
+            ->put(route('profile.update', $admin), [
+                'name' => $admin->name,
+                'pekerjaan' => 'ASN/TNI/Polri',
+                'jenis_kelamin' => '1',
+                'tanggal_lahir' => '1980-01-01',
+                'asal_prov' => 'Sumatera Selatan',
+                'asal_kab' => 'Palembang',
+                'no_hp' => '08123456789',
+                'pendidikan' => 'S1 Statistik',
+            ])
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionHas('message');
+    }
+
     public function test_regular_user_cannot_open_admin_management_pages(): void
     {
         /** @var User $user */

@@ -25,7 +25,7 @@
         <div class="portal-scrim" data-portal-scrim></div>
         <aside class="portal-sidebar" data-portal-sidebar aria-label="Navigasi layanan">
             <a class="portal-brand" href="{{ url('/') }}">
-                <img src="{{ url('img/pst digital.png') }}" alt="PST Digital">
+                <img src="{{ url('img/perpustakaan.png') }}" alt="PST Digital">
                 <span><strong>PST DIGITAL</strong><small>BPS PROVINSI SUMATERA SELATAN</small></span>
             </a>
             <div class="portal-member">
