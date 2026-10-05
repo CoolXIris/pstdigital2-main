@@ -71,7 +71,12 @@
                         <h3>{{ $meeting->user?->name ?? 'Pengguna dihapus' }}</h3>
                         <p class="admin-confirmed-topic">{{ $meeting->name }}</p>
                         <div class="admin-confirmed-detail"><span><i class="fe fe-calendar"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('D, d M Y') }}</span><span><i class="fe fe-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span><span><i class="fe fe-user"></i>{{ $meeting->assigned_staff ?: 'Petugas belum ditentukan' }}</span></div>
-                        @if ($meeting->room_open)<a class="admin-btn admin-btn-primary admin-confirmed-button" href="{{ route('konsultasi.room', $meeting) }}"><i class="fe fe-video"></i> Gabung ruang konsultasi</a>@endif
+                        @if ($meeting->room_open)
+                            <div class="admin-room-actions">
+                                <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kehadiran...</span>
+                                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}"><button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button></form>
+                            </div>
+                        @endif
                         @unless ($meeting->room_open)<p class="admin-room-window-note">Ruang aktif hanya pada tanggal dan jam sesi.</p>@endunless
                         <button class="admin-btn admin-btn-success admin-confirmed-button" type="button" data-bs-toggle="modal" data-bs-target="#completeMeetingModal" data-meeting-id="{{ $meeting->id }}" data-topic="{{ $meeting->name }}"><i class="fe fe-check"></i> Selesaikan konsultasi</button>
                     </article>
@@ -201,6 +206,31 @@
             const documentWrap = document.getElementById('detail-document-wrap');
             documentWrap.hidden = !data.docUrl;
             if (data.docUrl) document.getElementById('detail-document-link').href = data.docUrl;
+        });
+    })();
+</script>
+<script>
+    (() => {
+        const indicators = document.querySelectorAll('[data-presence-url]');
+        const updatePresence = async (indicator) => {
+            try {
+                const response = await fetch(indicator.dataset.presenceUrl, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+                if (!response.ok) throw new Error('presence unavailable');
+                const { peer_present: present } = await response.json();
+                indicator.classList.toggle('is-present', present);
+                indicator.innerHTML = present
+                    ? '<i class="fe fe-user-check"></i> Pengguna sudah masuk ruang'
+                    : '<i class="fe fe-clock"></i> Belum ada pengguna di ruang';
+            } catch {
+                indicator.classList.remove('is-present');
+                indicator.innerHTML = '<i class="fe fe-refresh-cw"></i> Status ruang belum tersedia';
+            }
+        };
+        indicators.forEach((indicator) => {
+            updatePresence(indicator);
+            window.setInterval(() => {
+                if (!document.hidden) updatePresence(indicator);
+            }, 5000);
         });
     })();
 </script>

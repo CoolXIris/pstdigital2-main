@@ -75,6 +75,7 @@ Route::group(['middleware' => ['auth']], function () {
     Route::post('konsultasi_rating/{id}', [KonsultasiController::class, 'rating_post']);
     Route::get('konsultasi/{meeting}/room', [KonsultasiAdminController::class, 'room'])->name('konsultasi.room');
     Route::get('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.poll');
+    Route::get('konsultasi/{meeting}/presence', [KonsultasiAdminController::class, 'presence'])->middleware('throttle:120,1')->name('konsultasi.presence');
     Route::post('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.send');
     Route::get('konsultasi/{meeting}/documentation', [KonsultasiAdminController::class, 'documentation'])->name('konsultasi.documentation');
     Route::get('chatbot', [ChatbotController::class, 'index']);

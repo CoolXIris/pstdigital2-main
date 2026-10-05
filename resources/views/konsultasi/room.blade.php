@@ -53,6 +53,19 @@
         const pendingCandidates = [];
         const remoteStream = new MediaStream();
 
+        const refreshRemotePlayback = () => {
+            const tracks = peer.getReceivers()
+                .map((receiver) => receiver.track)
+                .filter((track) => track && track.readyState === 'live');
+            if (!tracks.some((track) => track.kind === 'video')) return;
+            remoteVideo.pause();
+            remoteVideo.srcObject = null;
+            window.requestAnimationFrame(() => {
+                remoteVideo.srcObject = new MediaStream(tracks);
+                remoteVideo.play().catch(() => {});
+            });
+        };
+
         const sendSignal = async (type, payload) => {
             const response = await fetch(room.dataset.signalsUrl, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
@@ -87,14 +100,27 @@
             while (polling) {
                 try {
                     const response = await fetch(`${room.dataset.pollUrl}?after=${lastSignal}&session_id=${encodeURIComponent(roomSession)}`, { headers: { 'Accept': 'application/json' } });
+                    if (response.status === 409) {
+                        polling = false;
+                        status.textContent = 'Ruang diperbarui. Bergabung kembali...';
+                        remotePlaceholder.hidden = false;
+                        remotePlaceholder.querySelector('strong').textContent = 'Menghubungkan kembali';
+                        window.setTimeout(() => window.location.reload(), 500);
+                        break;
+                    }
                     if (!response.ok) {
                         polling = false;
-                        status.textContent = response.status === 409 ? 'Koneksi ruang diperbarui. Muat ulang halaman untuk bergabung kembali.' : 'Sesi konsultasi telah berakhir.';
+                        status.textContent = 'Sesi konsultasi telah berakhir.';
                         remotePlaceholder.hidden = false;
                         remotePlaceholder.querySelector('strong').textContent = 'Sesi telah ditutup';
                         break;
                     }
-                    const { signals } = await response.json();
+                    const { signals, peer_present: peerPresent } = await response.json();
+                    if (!peerPresent && peer.connectionState !== 'closed') {
+                        status.textContent = requester ? 'Menunggu petugas bergabung' : 'Menunggu pengguna bergabung';
+                        remotePlaceholder.hidden = false;
+                        remoteVideo.srcObject = null;
+                    }
                     for (const signal of signals) {
                         lastSignal = Math.max(lastSignal, Number(signal.id));
                         signalChain = signalChain.then(async () => {
@@ -111,6 +137,8 @@
                                     await peer.setLocalDescription(await peer.createAnswer());
                                     await sendSignal('description', peer.localDescription.toJSON());
                                 }
+                            } else if (signal.type === 'media-state') {
+                                refreshRemotePlayback();
                             } else if (signal.type === 'candidate' && signal.payload?.candidate) {
                                 if (!remoteDescriptionReady) pendingCandidates.push(signal.payload);
                                 else await peer.addIceCandidate(signal.payload);
@@ -173,16 +201,23 @@
             event.currentTarget.classList.toggle('is-muted', !track.enabled);
             event.currentTarget.setAttribute('aria-label', track.enabled ? 'Matikan kamera' : 'Nyalakan kamera');
         });
+        const stopScreenShare = async () => {
+            const activeScreen = screenStream;
+            if (!activeScreen) return;
+            screenStream = null;
+            activeScreen.getTracks().forEach((track) => track.stop());
+            const cameraTrack = localStream?.getVideoTracks()[0] || null;
+            await videoTransceiver.sender.replaceTrack(cameraTrack);
+            sendSignal('media-state', { source: 'camera' }).catch(() => {});
+            localVideo.srcObject = localStream || null;
+            const shareButton = document.getElementById('share-screen');
+            shareButton.classList.remove('is-muted');
+            shareButton.setAttribute('aria-label', 'Bagikan layar');
+        };
         document.getElementById('share-screen').addEventListener('click', async (event) => {
             const shareButton = event.currentTarget;
             if (screenStream) {
-                screenStream.getTracks().forEach((track) => track.stop());
-                screenStream = null;
-                const cameraTrack = localStream?.getVideoTracks()[0] || null;
-                await videoTransceiver.sender.replaceTrack(cameraTrack);
-                localVideo.srcObject = localStream || null;
-                shareButton.classList.remove('is-muted');
-                shareButton.setAttribute('aria-label', 'Bagikan layar');
+                await stopScreenShare();
                 return;
             }
             try {
@@ -193,15 +228,14 @@
                 screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
                 const screenTrack = screenStream.getVideoTracks()[0];
                 await videoTransceiver.sender.replaceTrack(screenTrack);
+                sendSignal('media-state', { source: 'screen' }).catch(() => {});
                 localVideo.srcObject = screenStream;
                 shareButton.classList.add('is-muted');
                 shareButton.setAttribute('aria-label', 'Hentikan berbagi layar');
-                screenTrack.addEventListener('ended', async () => {
-                    screenStream = null;
-                    await videoTransceiver.sender.replaceTrack(localStream?.getVideoTracks()[0] || null);
-                    localVideo.srcObject = localStream || null;
-                    shareButton.classList.remove('is-muted');
-                    shareButton.setAttribute('aria-label', 'Bagikan layar');
+                screenTrack.addEventListener('ended', () => {
+                    stopScreenShare().catch((error) => {
+                        status.textContent = 'Gagal kembali ke kamera: ' + error.message;
+                    });
                 }, { once: true });
             } catch (error) {
                 status.textContent = error.name === 'NotAllowedError' ? 'Izin berbagi layar dibatalkan.' : 'Berbagi layar tidak tersedia.';
@@ -215,8 +249,9 @@
                 status.textContent = 'Mode layar penuh tidak tersedia pada browser ini.';
             }
         });
-        document.getElementById('leave-room').addEventListener('click', () => {
+        document.getElementById('leave-room').addEventListener('click', async () => {
             polling = false;
+            await sendSignal('leave', null).catch(() => {});
             localStream?.getTracks().forEach((track) => track.stop());
             screenStream?.getTracks().forEach((track) => track.stop());
             peer.close();

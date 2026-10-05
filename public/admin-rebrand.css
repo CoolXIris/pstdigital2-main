@@ -519,3 +519,8 @@ html[data-theme="dark"] .admin-menu-toggle { color: #e3edf7; background: #34404b
 html[data-theme="dark"] .admin-scrim.is-visible { background: rgba(5,10,15,.68); }
 html[data-theme="dark"] .admin-pagination .page-link { color: #c8def3; background: #303b45; border-color: #536372; }
 html[data-theme="dark"] .admin-pagination .page-item.active .page-link { color: #fff; background: var(--bps-blue); border-color: #3c7bc0; }
+
+.admin-room-actions { margin-top: 8px; }
+.admin-room-presence { display: flex; justify-content: center; min-height: 24px; }
+.admin-room-presence.is-present { color: #16734a; }
+.admin-room-presence.is-present i { color: #1c9b62; }

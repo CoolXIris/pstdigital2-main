@@ -194,7 +194,11 @@ class KonsultasiAdminController extends Controller
             $protocolChanged = $lockedMeeting->room_protocol_version !== self::ROOM_PROTOCOL_VERSION;
             $leaseExpired = !$lockedMeeting->room_last_seen_at
                 || Carbon::parse($lockedMeeting->room_last_seen_at)->lt(now()->subSeconds(90));
-
+            $existingParticipant = DB::table('meeting_room_participants')
+                ->where('meeting_id', $meeting->id)
+                ->where('user_id', Auth::id())
+                ->lockForUpdate()
+                ->first();
             if (!$lockedMeeting->room_session_id || $leaseExpired || $protocolChanged) {
                 $lockedMeeting->room_session_id = (string) Str::uuid();
                 DB::table('meeting_signals')->where('meeting_id', $meeting->id)->delete();
@@ -204,14 +208,21 @@ class KonsultasiAdminController extends Controller
             $lockedMeeting->room_last_seen_at = now();
             $lockedMeeting->save();
 
+            DB::table('meeting_room_participants')->updateOrInsert(
+                ['meeting_id' => $meeting->id, 'user_id' => Auth::id()],
+                ['joined_at' => now(), 'last_seen_at' => now(), 'left_at' => null, 'updated_at' => now(), 'created_at' => $existingParticipant?->created_at ?? now()]
+            );
+
             return $lockedMeeting->room_session_id;
         });
+        $peerPresent = $this->peerIsPresent($meeting);
 
         return view('konsultasi.room', [
             'meeting' => $meeting->load('user:id,name'),
             'isRequester' => (int) $meeting->user_id === (int) Auth::id(),
             'returnUrl' => Auth::user()->hasRole(['admin', 'super_admin']) ? route('admin.konsultasi') : url('konsultasi'),
             'roomSessionId' => $sessionId,
+            'peerPresent' => $peerPresent,
             'iceServers' => config('pst.ice_servers', []),
         ]);
     }
@@ -226,7 +237,14 @@ class KonsultasiAdminController extends Controller
                 'after' => ['nullable', 'integer', 'min:0'],
                 'session_id' => ['required', 'uuid'],
             ]);
-            abort_unless(hash_equals((string) $meeting->room_session_id, $validated['session_id']), 409, 'Sesi ruang telah diperbarui. Muat ulang halaman meeting.');
+            if (!hash_equals((string) $meeting->room_session_id, $validated['session_id'])) {
+                return response()->json([
+                    'session_changed' => true,
+                    'session_id' => $meeting->room_session_id,
+                ], 409);
+            }
+            $this->touchRoomParticipant($meeting);
+            $peerPresent = $this->peerIsPresent($meeting);
             Meeting::whereKey($meeting->id)->update(['room_last_seen_at' => now()]);
             $signals = DB::table('meeting_signals')->where('meeting_id', $meeting->id)
                 ->where('session_id', $validated['session_id'])
@@ -234,7 +252,7 @@ class KonsultasiAdminController extends Controller
                 ->where('id', '>', $validated['after'] ?? 0)
                 ->orderBy('id')->limit(100)->get(['id', 'signal_type', 'payload']);
 
-            return response()->json(['signals' => $signals->map(fn ($signal) => [
+            return response()->json(['peer_present' => $peerPresent, 'signals' => $signals->map(fn ($signal) => [
                 'id' => $signal->id,
                 'type' => $signal->signal_type,
                 'payload' => json_decode($signal->payload, true),
@@ -242,11 +260,23 @@ class KonsultasiAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'type' => ['required', Rule::in(['description', 'candidate'])],
-            'payload' => ['required', 'array'],
+            'type' => ['required', Rule::in(['description', 'candidate', 'media-state', 'leave'])],
+            'payload' => ['required_unless:type,leave', 'nullable', 'array'],
             'session_id' => ['required', 'uuid'],
         ]);
         abort_unless(hash_equals((string) $meeting->room_session_id, $validated['session_id']), 409, 'Sesi ruang telah diperbarui. Muat ulang halaman meeting.');
+        if ($validated['type'] === 'leave') {
+            DB::transaction(function () use ($meeting) {
+                DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)->where('user_id', Auth::id())
+                    ->update(['left_at' => now(), 'last_seen_at' => now(), 'updated_at' => now()]);
+                $meeting->room_session_id = (string) Str::uuid();
+                $meeting->room_last_seen_at = now();
+                $meeting->save();
+                DB::table('meeting_signals')->where('meeting_id', $meeting->id)->delete();
+            });
+
+            return response()->json(['left' => true]);
+        }
         Meeting::whereKey($meeting->id)->update(['room_last_seen_at' => now()]);
         if (strlen(json_encode($validated['payload']) ?: '') > 100000) {
             return response()->json(['message' => 'Data signaling terlalu besar.'], 413);
@@ -261,8 +291,17 @@ class KonsultasiAdminController extends Controller
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+        $this->touchRoomParticipant($meeting);
 
         return response()->json(['accepted' => true], 201);
+    }
+
+    public function presence(Meeting $meeting): JsonResponse
+    {
+        $this->authorizeParticipant($meeting);
+        $this->ensureRoomOpen($meeting);
+
+        return response()->json(['peer_present' => $this->peerIsPresent($meeting)]);
     }
 
     public function documentation(Meeting $meeting)
@@ -287,6 +326,22 @@ class KonsultasiAdminController extends Controller
     {
         abort_unless((int) $meeting->status === 2, 404);
         abort_unless($this->isRoomOpen($meeting), 403, 'Ruang konsultasi hanya tersedia pada tanggal dan jam yang telah dikonfirmasi.');
+    }
+
+    private function touchRoomParticipant(Meeting $meeting): void
+    {
+        DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)->where('user_id', Auth::id())
+            ->whereNull('left_at')->update(['last_seen_at' => now(), 'updated_at' => now()]);
+    }
+
+    private function peerIsPresent(Meeting $meeting): bool
+    {
+        return DB::table('meeting_room_participants')
+            ->where('meeting_id', $meeting->id)
+            ->where('user_id', '!=', Auth::id())
+            ->whereNull('left_at')
+            ->where('last_seen_at', '>=', now()->subSeconds(8))
+            ->exists();
     }
 
     private function notifyConfirmed(Meeting $meeting): void

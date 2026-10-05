@@ -443,3 +443,25 @@ html[data-theme="dark"] .portal-modal .modal-title { color: #edf3f8; }
 html[data-theme="dark"] .portal-modal .btn-close { filter: invert(1) grayscale(1); }
 html[data-theme="dark"] .portal-modal .text-muted { color: #aebdca !important; }
 html[data-theme="dark"] .portal-scrim.is-visible { background: rgba(5,10,15,.68); }
+
+/* Consultation meeting list */
+.portal-meeting-card { padding: 20px 22px; border-radius: 10px; }
+.portal-meeting-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.portal-meeting-card h3 { font-size: 16px; line-height: 1.4; }
+.portal-meeting-card .portal-meeting-description { max-width: 900px; margin-top: 7px; }
+.portal-meeting-card .portal-meeting-meta { gap: 9px 24px; margin-top: 15px !important; }
+.portal-meeting-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 17px; padding-top: 14px; border-top: 1px solid #edf1f5; }
+.portal-room-presence, .admin-room-presence { display: inline-flex; align-items: center; gap: 7px; color: #6c7c8f; font-size: 11px; }
+.portal-room-presence.is-present, .admin-room-presence.is-present { color: #16734a; font-weight: 600; }
+.portal-room-presence.is-present i, .admin-room-presence.is-present i { color: #1c9b62; }
+.portal-meeting-join { min-width: 220px; justify-content: center; }
+.portal-meeting-join:disabled { opacity: .62; cursor: not-allowed; }
+.portal-meeting-hint { margin: 11px 0 0; color: #738196; font-size: 11px; }
+@media (max-width: 575.98px) {
+    .portal-meeting-card { padding: 16px; }
+    .portal-meeting-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
+    .portal-meeting-actions { align-items: stretch; flex-direction: column; }
+    .portal-meeting-join { width: 100%; }
+}
+html[data-theme="dark"] .portal-meeting-actions { border-top-color: #3b4a59; }
+html[data-theme="dark"] .portal-room-presence { color: #bac7d2; }

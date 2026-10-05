@@ -24,8 +24,8 @@
         integrity="sha512-aOG0c6nPNzGk+5zjwyJaoRUgCdOrfSDhmMID2u4+OIslr0GjpLKo7Xm0Ao3xmpM4T8AmIouRkqwj1nrdVsLKEQ=="
         crossorigin="anonymous" referrerpolicy="no-referrer" />
     {{-- <link href="{{ url('zanex/css/dark-style.css') }}" rel="stylesheet" />
-        <link href="{{ url('zanex/css/skin-modes.css') }}" rel="stylesheet" />
-        <link href="{{ url('zanex/css/transparent-style.css') }}" rel="stylesheet" /> --}}
+    <link href="{{ url('zanex/css/skin-modes.css') }}" rel="stylesheet" />
+    <link href="{{ url('zanex/css/transparent-style.css') }}" rel="stylesheet" /> --}}
 
     <!--- FONT-ICONS CSS -->
     {{-- <link href="{{ url('zanex/css/icons.css') }}" rel="stylesheet" /> --}}
@@ -521,11 +521,6 @@
 </head>
 
 <body>
-    @php
-        $isAdmin = Auth::check() && Auth::user()->hasRole(['admin', 'super_admin']);
-        $consultationUrl = $isAdmin ? route('admin.konsultasi') : url('konsultasi');
-        $chatbotUrl = $isAdmin ? route('admin.chatbot') : url('chatbot');
-    @endphp
     <nav class="navbar navbar-expand-lg header navbar-dark">
         <div class="container-fluid">
             <div class="logo-section d-flex align-items-center">
@@ -552,9 +547,9 @@
                             data-bs-toggle="dropdown">Layanan</a>
                         <ul class="dropdown-menu shadow">
                             <li>
-                                <a class="dropdown-item" href="{{ $consultationUrl }}">Konsultasi Virtual</a>
+                                <a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>
                             </li>
-                            <li><a class="dropdown-item" href="{{ $chatbotUrl }}">Chatbot</a></li>
+                            <li><a class="dropdown-item" href="{{ url('chatbot') }}">Chatbot</a></li>
                             <li>
                                 <a class="dropdown-item" target="_blank"
                                     href="https://perpustakaan.bps.go.id/opac/">Katalog
@@ -567,22 +562,22 @@
                             Kami</a>
                     </li>
                     @auth
-                        <a href="../html/sidebar.html" class="nav-link profile-icon">
-                            <span class="profile-icon-svg">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" fill="currentColor"
-                                    class="bi bi-person-circle" viewBox="0 0 16 16">
-                                    <path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
-                                    <path fill-rule="evenodd"
-                                        d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z" />
-                                </svg>
-                            </span>
-                            <span class="profile-text"></span>
-                        </a>
+                    <a href="../html/sidebar.html" class="nav-link profile-icon">
+                        <span class="profile-icon-svg">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" fill="currentColor"
+                                class="bi bi-person-circle" viewBox="0 0 16 16">
+                                <path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                                <path fill-rule="evenodd"
+                                    d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z" />
+                            </svg>
+                        </span>
+                        <span class="profile-text"></span>
+                    </a>
                     @else
-                        <li class="nav-item mt-3 mt-lg-0">
-                            <a href="{{ url('login') }}"
-                                class="btn-login-header d-inline-block text-center w-100 w-lg-auto">Masuk</a>
-                        </li>
+                    <li class="nav-item mt-3 mt-lg-0">
+                        <a href="{{ url('login') }}"
+                            class="btn-login-header d-inline-block text-center w-100 w-lg-auto">Masuk</a>
+                    </li>
                     @endauth
 
 
@@ -603,20 +598,20 @@
             <div class="avatar-icon"><i class="bi bi-person-circle"></i></div>
             <h6 class="name">
                 @auth
-                    {{ Auth::user()->name }}
+                {{ Auth::user()->name }}
                 @endauth
             </h6>
             <p class="role">
                 @auth
-                    {{ Auth::user()->getRoleNames()->first() ?? 'user' }}
+                {{ Auth::user()->getRoleNames()->first() ?? 'user' }}
                 @endauth
             </p>
         </div>
 
         <div class="sidebar-links">
             <a href="{{ url('/') }}" class="link-item">Landing page</a>
-            <a href="{{ $consultationUrl }}" class="link-item">Konsultasi</a>
-            <a href="{{ $chatbotUrl }}" class="link-item">Chatbot</a>
+            <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
+            <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
             <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
             <a href="{{ url('profile') }}" class="link-item active-link">Profil Saya</a>
             <a href="{{ url('logout') }}" class="link-item">Keluar</a>
@@ -682,8 +677,8 @@
                     <div class="row">
                         <div class="col-6">
                             <div class="footer-title">LAYANAN</div>
-                            <a href="{{ $consultationUrl }}" class="footer-link">Konsultasi Virtual</a>
-                            <a href="{{ $chatbotUrl }}" class="footer-link">Chatbot</a>
+                            <a href="{{ url('konsultasi') }}" class="footer-link">Konsultasi Virtual</a>
+                            <a href="{{ url('chatbot') }}" class="footer-link">Chatbot</a>
                             <a href="https://perpustakaan.bps.go.id/opac/" class="footer-link">Katalog Publikasi</a>
                         </div>
                         <div class="col-6">
