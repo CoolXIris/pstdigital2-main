@@ -139,8 +139,9 @@
 .admin-modal .form-control, .admin-modal .form-select { min-height: 38px; border-color: #dce4ed; border-radius: 5px; font-size: 11px; }
 .admin-modal textarea.form-control { min-height: 95px; }
 .admin-status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bps-green); }
-.admin-chat-test { display: grid; grid-template-rows: minmax(220px, 1fr) auto; min-height: 400px; }
+.admin-chat-test { display: grid; grid-template-rows: minmax(220px, 1fr) auto auto; min-height: 400px; }
 .admin-chat-log { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 16px; background: #f7f9fc; }
+.pstd-admin-page .admin-chat-warning { margin: 0; padding: 8px 12px 0; color: #52677e; background: #fff; font-size: 12px !important; line-height: 1.4; }
 .admin-chat-bubble { max-width: min(80%, 560px); padding: 10px 12px; color: #41536a; background: #fff; border: 1px solid var(--admin-line); border-radius: 7px; font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
 .admin-chat-bubble.is-user { align-self: flex-end; color: #fff; background: var(--bps-blue); border-color: var(--bps-blue); }
 .admin-chat-compose { display: flex; gap: 8px; padding: 12px; background: #fff; border-top: 1px solid var(--admin-line); }
@@ -505,6 +506,7 @@ html[data-theme="dark"] .admin-modal .modal-title, html[data-theme="dark"] .admi
 html[data-theme="dark"] .admin-modal .btn-close { filter: invert(1) grayscale(1); }
 html[data-theme="dark"] .admin-chat-test { background: #252f39; border-color: #3b4a59; }
 html[data-theme="dark"] .admin-chat-log { background: #1e2831; }
+html[data-theme="dark"] .admin-chat-warning { color: #b7c4d0; background: #252f39; }
 html[data-theme="dark"] .admin-chat-bubble { color: #e4ebf1; background: #303b45; border-color: #465564; }
 html[data-theme="dark"] .admin-chat-bubble.is-user { color: #fff; background: #14529a; border-color: #2868ad; }
 html[data-theme="dark"] .admin-chat-compose { background: #252f39; border-top-color: #3b4a59; }

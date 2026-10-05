@@ -80,6 +80,7 @@
                         <div class="admin-chat-log" id="chat-test-log" aria-live="polite">
                             <div class="admin-chat-bubble">Mulai uji layanan dengan mengirim pertanyaan singkat.</div>
                         </div>
+                        <p class="admin-chat-warning" role="note">Mode uji: jawaban dapat keliru. Verifikasi angka dan sumber sebelum dijadikan acuan.</p>
                         <form class="admin-chat-compose" id="chat-test-form" action="{{ route('admin.chatbot.test') }}">
                             <textarea class="form-control" name="message" id="chat-test-message" maxlength="2000" placeholder="Tulis pesan untuk menguji chatbot..." aria-label="Pesan uji chatbot" required></textarea>
                             <button class="admin-btn admin-btn-primary" type="submit" id="chat-test-submit"><i class="fe fe-send"></i><span>Kirim</span></button>
