@@ -320,6 +320,38 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertSent(fn($request) => $request['session_id'] === $conversation->session_key);
     }
 
+    public function test_chatbot_returns_template_for_unsafe_messages_without_calling_external_services(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+
+        Http::fake();
+
+        $response = $this->actingAs($authenticatedUser)
+            ->postJson(route('chatbot.message'), ['message' => 'kamu goblok'])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', false)
+            ->assertJsonPath('safety_blocked', true);
+
+        $this->assertStringContainsString('bahasa kasar', $response->json('reply'));
+        $this->assertDatabaseCount('chatbot_messages', 1);
+        $this->assertDatabaseHas('chatbot_messages', [
+            'prompt' => 'kamu goblok',
+            'knowledge_used' => false,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->postJson(route('admin.chatbot.test'), ['message' => 'kirim konten porno'])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', false)
+            ->assertJsonPath('safety_blocked', true);
+
+        Http::assertNothingSent();
+    }
+
     public function test_user_cannot_read_another_users_chatbot_conversation(): void
     {
         /** @var User $owner */
