@@ -43,10 +43,33 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_admin_can_open_all_four_management_pages(): void
     {
-        $this->actingAs($this->admin)->get(route('dashboard'))->assertOk();
+        $this->actingAs($this->admin)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('Landing page')
+            ->assertSee('href="'.url('/').'"', false);
         $this->actingAs($this->admin)->get(route('admin.konsultasi'))->assertOk();
         $this->actingAs($this->admin)->get(route('admin.chatbot'))->assertOk();
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
+    }
+
+    public function test_landing_service_links_use_the_dashboard_for_each_user_role(): void
+    {
+        $this->actingAs($this->admin)
+            ->get('/')
+            ->assertOk()
+            ->assertSee('href="'.route('admin.konsultasi').'" class="link-item">Konsultasi</a>', false)
+            ->assertSee('href="'.route('admin.chatbot').'" class="link-item">Chatbot</a>', false);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+
+        $this->actingAs($user)
+            ->get('/')
+            ->assertOk()
+            ->assertSee('href="'.url('konsultasi').'" class="link-item">Konsultasi</a>', false)
+            ->assertSee('href="'.url('chatbot').'" class="link-item">Chatbot</a>', false);
     }
 
     public function test_admin_profile_keeps_the_admin_layout_and_returns_to_dashboard(): void

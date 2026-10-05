@@ -10,6 +10,9 @@
             <h1>Dashboard PST DIGITAL</h1>
             <p>Periode: {{ $periodLabel }}</p>
         </div>
+        <div class="admin-heading-actions">
+            <a class="admin-btn admin-btn-outline" href="{{ url('/') }}"><i class="fe fe-home" aria-hidden="true"></i> Landing page</a>
+        </div>
     </section>
 
     <form class="admin-filter-bar admin-dashboard-filters" method="GET" action="{{ route('dashboard') }}">

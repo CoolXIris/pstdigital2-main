@@ -521,6 +521,11 @@
 </head>
 
 <body>
+    @php
+        $isAdmin = Auth::check() && Auth::user()->hasRole(['admin', 'super_admin']);
+        $consultationUrl = $isAdmin ? route('admin.konsultasi') : url('konsultasi');
+        $chatbotUrl = $isAdmin ? route('admin.chatbot') : url('chatbot');
+    @endphp
     <nav class="navbar navbar-expand-lg header navbar-dark">
         <div class="container-fluid">
             <div class="logo-section d-flex align-items-center">
@@ -547,9 +552,9 @@
                             data-bs-toggle="dropdown">Layanan</a>
                         <ul class="dropdown-menu shadow">
                             <li>
-                                <a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>
+                                <a class="dropdown-item" href="{{ $consultationUrl }}">Konsultasi Virtual</a>
                             </li>
-                            <li><a class="dropdown-item" href="{{ url('chatbot') }}">Chatbot</a></li>
+                            <li><a class="dropdown-item" href="{{ $chatbotUrl }}">Chatbot</a></li>
                             <li>
                                 <a class="dropdown-item" target="_blank"
                                     href="https://perpustakaan.bps.go.id/opac/">Katalog
@@ -610,8 +615,8 @@
 
         <div class="sidebar-links">
             <a href="{{ url('/') }}" class="link-item">Landing page</a>
-            <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
-            <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
+            <a href="{{ $consultationUrl }}" class="link-item">Konsultasi</a>
+            <a href="{{ $chatbotUrl }}" class="link-item">Chatbot</a>
             <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
             <a href="{{ url('profile') }}" class="link-item active-link">Profil Saya</a>
             <a href="{{ url('logout') }}" class="link-item">Keluar</a>
@@ -677,8 +682,8 @@
                     <div class="row">
                         <div class="col-6">
                             <div class="footer-title">LAYANAN</div>
-                            <a href="{{ url('konsultasi') }}" class="footer-link">Konsultasi Virtual</a>
-                            <a href="{{ url('chatbot') }}" class="footer-link">Chatbot</a>
+                            <a href="{{ $consultationUrl }}" class="footer-link">Konsultasi Virtual</a>
+                            <a href="{{ $chatbotUrl }}" class="footer-link">Chatbot</a>
                             <a href="https://perpustakaan.bps.go.id/opac/" class="footer-link">Katalog Publikasi</a>
                         </div>
                         <div class="col-6">
