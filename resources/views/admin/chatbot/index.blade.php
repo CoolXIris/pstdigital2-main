@@ -20,6 +20,18 @@
         <article class="admin-stat admin-stat-red"><span class="admin-stat-label">Mekanisme</span><strong class="admin-stat-value" style="font-size:16px">RAG</strong><span class="admin-stat-foot">Referensi relevan disertakan saat chat</span><span class="admin-stat-icon"><i class="fe fe-search"></i></span></article>
     </div>
 
+    <section class="admin-panel mb-3">
+        <div class="admin-panel-head"><div><h2 class="admin-panel-title">WebAPI BPS</h2><p class="admin-panel-subtitle">Gunakan tabel statistik resmi BPS sebagai konteks jawaban chatbot.</p></div><span class="admin-badge {{ $bpsApiKeyConfigured ? 'admin-badge-blue' : 'admin-badge-neutral' }}">{{ $bpsApiKeyConfigured ? 'API key tersimpan' : 'Belum terhubung' }}</span></div>
+        <div class="admin-panel-body">
+            <form method="POST" action="{{ route('admin.chatbot.bps-api-key') }}" class="admin-knowledge-upload">
+                @csrf
+                <div class="mb-3"><label class="form-label" for="bps-api-key">API key WebAPI BPS</label><input class="form-control" id="bps-api-key" name="api_key" type="password" autocomplete="new-password" maxlength="500" placeholder="{{ $bpsApiKeyConfigured ? 'API key tersimpan; isi hanya untuk mengganti' : 'Masukkan API key BPS' }}"><small class="form-text">Key dienkripsi di server dan tidak ditampilkan kembali. <a href="https://webapi.bps.go.id/developer" target="_blank" rel="noopener">Kelola API key di portal WebAPI BPS</a>.</small></div>
+                @if ($bpsApiKeyConfigured)<div class="form-check mb-3"><input class="form-check-input" id="clear-bps-api-key" name="clear_api_key" type="checkbox" value="1"><label class="form-check-label" for="clear-bps-api-key">Hapus API key tersimpan</label></div>@endif
+                <button class="admin-btn admin-btn-primary" type="submit"><i class="fe fe-shield"></i> Simpan konfigurasi BPS</button>
+            </form>
+        </div>
+    </section>
+
     <div class="row g-3 mb-3">
         <div class="col-xl-7">
             <section class="admin-panel h-100">

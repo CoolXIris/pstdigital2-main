@@ -62,6 +62,7 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
         ->name('admin.konsultasi.status');
     Route::get('admin/chatbot', [ChatbotController::class, 'management'])->name('admin.chatbot');
     Route::post('admin/chatbot/test', [ChatbotController::class, 'testMessage'])->name('admin.chatbot.test');
+    Route::post('admin/chatbot/bps-api-key', [ChatbotController::class, 'saveBpsApiKey'])->name('admin.chatbot.bps-api-key');
     Route::post('admin/chatbot/knowledge', [ChatbotController::class, 'uploadKnowledge'])->name('admin.chatbot.knowledge.store');
     Route::delete('admin/chatbot/knowledge/{source}', [ChatbotController::class, 'deleteKnowledge'])->name('admin.chatbot.knowledge.destroy');
 });

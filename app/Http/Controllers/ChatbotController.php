@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ChatbotKnowledgeSource;
 use App\Models\ChatbotConversation;
+use App\Services\BpsWebApiService;
 use App\Services\ChatbotKnowledgeService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
@@ -28,7 +29,7 @@ class ChatbotController extends Controller
         return view('chatbot.index', compact('user', 'conversations'));
     }
 
-    public function management(): View
+    public function management(BpsWebApiService $bps): View
     {
         $sources = ChatbotKnowledgeSource::with('uploader:id,name')->latest()->paginate(10);
 
@@ -37,7 +38,30 @@ class ChatbotController extends Controller
             'sourceCount' => ChatbotKnowledgeSource::count(),
             'chunkCount' => \App\Models\ChatbotKnowledgeChunk::count(),
             'lastTrainedAt' => ChatbotKnowledgeSource::max('trained_at'),
+            'bpsApiKeyConfigured' => $bps->hasApiKey(),
         ]);
+    }
+
+    public function saveBpsApiKey(Request $request, BpsWebApiService $bps): RedirectResponse
+    {
+        $validated = $request->validate([
+            'api_key' => ['nullable', 'string', 'max:500'],
+            'clear_api_key' => ['nullable', 'boolean'],
+        ]);
+
+        if ($validated['clear_api_key'] ?? false) {
+            $bps->clearApiKey();
+
+            return back()->with('message', 'API key WebAPI BPS berhasil dihapus.');
+        }
+
+        if (!filled($validated['api_key'] ?? null)) {
+            return back()->with('error', 'Masukkan API key baru atau pilih opsi hapus API key.');
+        }
+
+        $bps->saveApiKey($validated['api_key']);
+
+        return back()->with('message', 'API key WebAPI BPS berhasil disimpan secara terenkripsi.');
     }
 
     public function uploadKnowledge(Request $request, ChatbotKnowledgeService $knowledge): RedirectResponse
@@ -65,16 +89,16 @@ class ChatbotController extends Controller
         return back()->with('message', "Sumber '{$source->title}' dan indeksnya berhasil dihapus.");
     }
 
-    public function testMessage(Request $request, ChatbotKnowledgeService $knowledge): JsonResponse
+    public function testMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], 'admin-test-' . Auth::id(), $knowledge);
+        return $this->sendMessageToService($validated['message'], 'admin-test-' . Auth::id(), $knowledge, $bps);
     }
 
-    public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge): JsonResponse
+    public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
@@ -88,7 +112,7 @@ class ChatbotController extends Controller
         $sessionKey = $conversation?->session_key ?? (string) Str::uuid();
 
         try {
-            $context = $knowledge->contextFor($validated['message']);
+            $context = $this->combinedContext($validated['message'], $knowledge, $bps);
             $response = $knowledge->askWithContext($validated['message'], $sessionKey, $context);
             if (!$response->successful()) {
                 return response()->json(['message' => 'Layanan chatbot merespons dengan status ' . $response->status() . '.'], 502);
@@ -135,10 +159,10 @@ class ChatbotController extends Controller
         ]);
     }
 
-    private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge): JsonResponse
+    private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
         try {
-            $context = $knowledge->contextFor($message);
+            $context = $this->combinedContext($message, $knowledge, $bps);
             $response = $knowledge->askWithContext($message, $sessionId, $context);
             if (!$response->successful()) {
                 return response()->json(['message' => 'Layanan chatbot merespons dengan status ' . $response->status() . '.'], 502);
@@ -155,6 +179,16 @@ class ChatbotController extends Controller
 
             return response()->json(['message' => 'Tidak dapat menghubungi layanan chatbot.'], 502);
         }
+    }
+
+    private function combinedContext(string $message, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): ?string
+    {
+        $contexts = array_filter([
+            $knowledge->contextFor($message),
+            $bps->contextFor($message),
+        ]);
+
+        return $contexts === [] ? null : implode("\n\n", $contexts);
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Meeting;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -88,6 +89,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($authenticatedUser)->get(route('admin.konsultasi'))->assertForbidden();
         $this->actingAs($authenticatedUser)->get(route('admin.chatbot'))->assertForbidden();
         $this->actingAs($authenticatedUser)->get(route('users.index'))->assertForbidden();
+        $this->actingAs($authenticatedUser)->post(route('admin.chatbot.bps-api-key'), ['api_key' => 'should-not-be-saved'])->assertForbidden();
     }
 
     public function test_uploaded_dataset_is_used_as_context_for_chatbot_answers(): void
@@ -113,6 +115,61 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertJsonPath('knowledge_used', true);
 
         Http::assertSent(fn($request) => str_contains($request['text'], 'Garis kemiskinan') && str_contains($request['text'], 'PERTANYAAN:'));
+    }
+
+    public function test_admin_can_configure_encrypted_bps_api_key_and_use_bps_data_in_chat(): void
+    {
+        $this->actingAs($this->admin)
+            ->get(route('admin.chatbot'))
+            ->assertOk()
+            ->assertSee('WebAPI BPS')
+            ->assertSee('Belum terhubung');
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.chatbot.bps-api-key'), ['api_key' => 'bps-test-secret'])
+            ->assertRedirect(route('admin.chatbot'))
+            ->assertSessionHas('message');
+
+        $encryptedKey = DB::table('chatbot_settings')->where('key', 'bps_webapi_key')->value('value');
+        $this->assertNotSame('bps-test-secret', $encryptedKey);
+        $this->assertSame('bps-test-secret', Crypt::decryptString($encryptedKey));
+        $this->actingAs($this->admin)
+            ->get(route('admin.chatbot'))
+            ->assertOk()
+            ->assertDontSee('bps-test-secret')
+            ->assertSee('API key tersimpan');
+
+        Http::fake([
+            'webapi.bps.go.id/v1/api/list/*' => Http::response([
+                'status' => 'OK',
+                'data' => [['total' => 1], [['table_id' => 77, 'title' => 'Persentase Penduduk Miskin']]],
+            ]),
+            'webapi.bps.go.id/v1/view/*' => Http::response([
+                'status' => 'OK',
+                'data' => ['table' => '<table><tr><th>Tahun</th><th>Persentase</th></tr><tr><td>2025</td><td>10,5</td></tr></table>'],
+            ]),
+            'pst-chat.bpssumsel.com/*' => Http::response(['data' => 'Persentase kemiskinan tahun 2025 sebesar 10,5.'], 200),
+        ]);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'berapa persentase kemiskinan'])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', true);
+
+        Http::assertSent(fn($request) => str_contains($request->url(), 'key/bps-test-secret/'));
+        Http::assertSent(fn($request) => str_contains($request->url(), 'pst-chat.bpssumsel.com')
+            && str_contains($request['text'], 'Persentase Penduduk Miskin')
+            && str_contains($request['text'], '2025')
+            && str_contains($request['text'], 'PERTANYAAN:'));
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.chatbot.bps-api-key'), ['clear_api_key' => '1'])
+            ->assertRedirect(route('admin.chatbot'));
+        $this->assertDatabaseMissing('chatbot_settings', ['key' => 'bps_webapi_key']);
     }
 
     public function test_admin_can_confirm_assign_and_complete_a_consultation(): void
