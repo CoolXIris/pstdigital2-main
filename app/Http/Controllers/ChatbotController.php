@@ -2,15 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ChatbotKnowledgeSource;
 use App\Models\ChatbotConversation;
+use App\Models\ChatbotKnowledgeSource;
 use App\Services\BpsWebApiService;
 use App\Services\ChatbotKnowledgeService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
-use Illuminate\Http\Request;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\JsonResponse;
 use Illuminate\View\View;
 
 class ChatbotController extends Controller
@@ -20,7 +20,7 @@ class ChatbotController extends Controller
      */
     public function index()
     {
-        $user  = Auth::user();
+        $user = Auth::user();
         $conversations = ChatbotConversation::where('user_id', $user->id)
             ->withCount('messages')
             ->latest('updated_at')
@@ -55,7 +55,7 @@ class ChatbotController extends Controller
             return back()->with('message', 'API key WebAPI BPS berhasil dihapus.');
         }
 
-        if (!filled($validated['api_key'] ?? null)) {
+        if (! filled($validated['api_key'] ?? null)) {
             return back()->with('error', 'Masukkan API key baru atau pilih opsi hapus API key.');
         }
 
@@ -95,7 +95,7 @@ class ChatbotController extends Controller
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], 'admin-test-' . Auth::id(), $knowledge, $bps);
+        return $this->sendMessageToService($validated['message'], 'admin-test-'.Auth::id(), $knowledge, $bps);
     }
 
     public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
@@ -112,16 +112,29 @@ class ChatbotController extends Controller
         $sessionKey = $conversation?->session_key ?? (string) Str::uuid();
 
         try {
-            $context = $this->combinedContext($validated['message'], $knowledge, $bps);
-            $response = $knowledge->askWithContext($validated['message'], $sessionKey, $context);
-            if (!$response->successful()) {
-                return response()->json(['message' => 'Layanan chatbot merespons dengan status ' . $response->status() . '.'], 502);
-            }
+            $directReply = $bps->catalogAnswerFor($validated['message']);
+            $context = $directReply === null ? $this->combinedContext($validated['message'], $knowledge, $bps) : null;
+            $previousTurn = $conversation?->messages()->latest('id')->first(['prompt', 'response']);
+            $previousAnswer = $previousTurn !== null && $this->isFollowUpQuestion($validated['message'], $previousTurn->prompt)
+                ? $previousTurn->response
+                : null;
+            if ($directReply !== null) {
+                $reply = $directReply;
+            } else {
+                $response = $knowledge->askWithContext($validated['message'], (string) Str::uuid(), $context, $previousAnswer);
+                if (! $response->successful()) {
+                    return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
+                }
 
-            $reply = $response->json('data');
-            if (!is_string($reply) || trim($reply) === '') {
-                return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
+                $reply = $response->json('data');
+                if (! is_string($reply) || trim($reply) === '') {
+                    return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
+                }
+                if ($previousAnswer !== null && $this->sameAnswer($reply, $previousAnswer)) {
+                    $reply = 'Informasi yang saya sampaikan sebelumnya masih berlaku. Saya bisa menjelaskannya dengan lebih ringkas atau membandingkannya dengan periode lain.';
+                }
             }
+            $knowledgeUsed = $context !== null || $directReply !== null;
 
             $conversation ??= ChatbotConversation::create([
                 'user_id' => $user->id,
@@ -131,13 +144,13 @@ class ChatbotController extends Controller
             $conversation->messages()->create([
                 'prompt' => $validated['message'],
                 'response' => $reply,
-                'knowledge_used' => $context !== null,
+                'knowledge_used' => $knowledgeUsed,
             ]);
             $conversation->touch();
 
             return response()->json([
                 'reply' => $reply,
-                'knowledge_used' => $context !== null,
+                'knowledge_used' => $knowledgeUsed,
                 'conversation_id' => $conversation->id,
                 'title' => $conversation->title,
             ]);
@@ -162,18 +175,23 @@ class ChatbotController extends Controller
     private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
         try {
-            $context = $this->combinedContext($message, $knowledge, $bps);
-            $response = $knowledge->askWithContext($message, $sessionId, $context);
-            if (!$response->successful()) {
-                return response()->json(['message' => 'Layanan chatbot merespons dengan status ' . $response->status() . '.'], 502);
+            $directReply = $bps->catalogAnswerFor($message);
+            $context = $directReply === null ? $this->combinedContext($message, $knowledge, $bps) : null;
+            if ($directReply !== null) {
+                $reply = $directReply;
+            } else {
+                $response = $knowledge->askWithContext($message, $sessionId, $context);
+                if (! $response->successful()) {
+                    return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
+                }
+
+                $reply = $response->json('data');
+                if (! is_string($reply) || trim($reply) === '') {
+                    return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
+                }
             }
 
-            $reply = $response->json('data');
-            if (!is_string($reply) || trim($reply) === '') {
-                return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
-            }
-
-            return response()->json(['reply' => $reply, 'knowledge_used' => $context !== null]);
+            return response()->json(['reply' => $reply, 'knowledge_used' => $context !== null || $directReply !== null]);
         } catch (\Throwable $exception) {
             report($exception);
 
@@ -189,6 +207,24 @@ class ChatbotController extends Controller
         ]);
 
         return $contexts === [] ? null : implode("\n\n", $contexts);
+    }
+
+    private function sameAnswer(string $reply, string $previousAnswer): bool
+    {
+        $normalize = fn (string $answer) => preg_replace('/\s+/u', ' ', mb_strtolower(trim($answer))) ?? trim($answer);
+
+        return $normalize($reply) === $normalize($previousAnswer);
+    }
+
+    private function isFollowUpQuestion(string $question, string $previousQuestion): bool
+    {
+        $normalize = fn (string $text) => preg_replace('/[^\pL\pN]+/u', ' ', mb_strtolower(trim($text))) ?? trim($text);
+        if ($normalize($question) === $normalize($previousQuestion)) {
+            return true;
+        }
+
+        return preg_match('/\b(itu|tersebut|tadi|sebelumnya|contoh|rinci|maksud|lanjutkan|lanjut|bandingkan|dibandingkan)\b/u', mb_strtolower($question)) === 1
+            || preg_match('/\b(bagaimana dengan|kalau begitu)\b/u', mb_strtolower($question)) === 1;
     }
 
     /**
