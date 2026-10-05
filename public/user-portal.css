@@ -151,7 +151,7 @@
 .portal-room-aside dt { margin-bottom: 3px; color: #8592a1; font-size: 8px; font-weight: 500; }
 .portal-room-aside dd { margin: 0; color: #42546a; font-size: 9px; font-weight: 600; }
 .portal-chat-layout { display: grid; grid-template-columns: minmax(0,1fr) 240px; gap: 14px; align-items: start; }
-.portal-chat-card { display: grid; grid-template-rows: auto minmax(320px,1fr) auto; min-height: min(690px, calc(100vh - 155px)); overflow: hidden; background: #fff; border: 1px solid var(--portal-line); border-radius: 7px; box-shadow: 0 3px 12px rgba(24,48,79,.035); }
+.portal-chat-card { display: grid; grid-template-rows: auto minmax(320px,1fr) auto auto; min-height: min(690px, calc(100vh - 155px)); overflow: hidden; background: #fff; border: 1px solid var(--portal-line); border-radius: 7px; box-shadow: 0 3px 12px rgba(24,48,79,.035); }
 .portal-chat-header { display: flex; align-items: center; gap: 10px; padding: 14px 17px; border-bottom: 1px solid var(--portal-line); }
 .portal-chat-avatar { display: grid; place-items: center; flex: 0 0 37px; width: 37px; height: 37px; color: #fff; background: var(--portal-blue); border-radius: 50%; }
 .portal-chat-header strong { display: block; color: var(--portal-ink); font-size: 10px; }
@@ -163,6 +163,7 @@
 .portal-bubble.is-error { color: #a83f3f; background: #fff8f8; border-color: #edd0d0; }
 .portal-bubble-meta { margin-top: 5px; color: #91a0af; font-size: 7px; }
 .portal-bubble.is-user .portal-bubble-meta { color: rgba(255,255,255,.7); }
+.user-portal .portal-chat-warning { margin: 0; padding: 8px 12px 0; color: #52677e; background: #fff; font-size: 12px !important; line-height: 1.4; }
 .portal-chat-compose { display: flex; align-items: flex-end; gap: 8px; padding: 12px; background: #fff; border-top: 1px solid var(--portal-line); }
 .portal-chat-compose textarea { min-height: 42px; max-height: 130px; resize: vertical; border-color: #dce4ed; font-size: 9px; }
 .portal-send { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; color: #fff; background: var(--portal-blue); border: 0; border-radius: 5px; font-size: 15px; }
@@ -232,7 +233,7 @@
     .portal-stat { display: flex; align-items: center; justify-content: space-between; }
     .portal-stat strong { margin: 0; }
     .portal-meeting-top { align-items: flex-start; flex-direction: column; }
-    .portal-chat-card { min-height: calc(100dvh - 135px); grid-template-rows: auto minmax(250px,1fr) auto; }
+    .portal-chat-card { min-height: calc(100dvh - 135px); grid-template-rows: auto minmax(250px,1fr) auto auto; }
     .portal-chat-log { padding: 13px; }
     .portal-bubble { max-width: 90%; }
     .portal-chat-aside { display: block; }
@@ -423,6 +424,7 @@ html[data-theme="dark"] .portal-bubble { color: #e4ebf1; background: #303b45; bo
 html[data-theme="dark"] .portal-bubble.is-user { color: #fff; background: #14529a; border-color: #2868ad; }
 html[data-theme="dark"] .portal-bubble.is-error { color: #ffd4ce; background: #523638; border-color: #704447; }
 html[data-theme="dark"] .portal-chat-compose { background: #252f39; border-top-color: #3b4a59; }
+html[data-theme="dark"] .portal-chat-warning { color: #b7c4d0; background: #252f39; }
 html[data-theme="dark"] .portal-chat-aside { background: linear-gradient(155deg, #252f39, #293644); }
 html[data-theme="dark"] .portal-chat-history-heading h2 { color: #edf3f8; }
 html[data-theme="dark"] .portal-chat-history-item { color: #d1dce5; }

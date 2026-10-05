@@ -22,6 +22,7 @@
         <div class="portal-chat-log" id="portal-chat-log" data-greeting="{{ Auth::user()->name }}" aria-live="polite" aria-relevant="additions">
             <div class="portal-bubble">Halo {{ Auth::user()->name }}. Saya siap membantu menjelaskan data dan konsep statistik. Apa yang ingin Anda cari?</div>
         </div>
+        <p class="portal-chat-warning" role="note">AI dapat keliru. Periksa kembali informasi penting melalui sumber resmi.</p>
         <form class="portal-chat-compose" id="portal-chat-form" action="{{ route('chatbot.message') }}">
             <textarea class="form-control" id="portal-chat-input" rows="1" maxlength="2000" placeholder="Tulis pertanyaan statistik Anda..." aria-label="Pesan untuk chatbot" required></textarea>
             <button class="portal-send" id="portal-chat-send" type="submit" aria-label="Kirim pesan"><i class="bi bi-arrow-up"></i></button>

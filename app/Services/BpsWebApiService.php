@@ -35,21 +35,20 @@ class BpsWebApiService
     {
         $apiKey = $this->apiKey();
         $keywords = $this->keywords($question);
-        if ($apiKey === null || count($keywords) < 2) {
+        if ($apiKey === null || $keywords === []) {
             return null;
         }
 
         try {
-            $searchTerm = implode(' ', array_slice($keywords, 0, 6));
             $domain = '1600';
-            $tables = $this->searchTables($searchTerm, $domain, $apiKey);
+            $tables = $this->matchingTables($keywords, $domain, $apiKey);
             if ($tables === []) {
                 $domain = '0000';
-                $tables = $this->searchTables($searchTerm, $domain, $apiKey);
+                $tables = $this->matchingTables($keywords, $domain, $apiKey);
             }
 
             $context = [];
-            foreach (array_slice($tables, 0, 2) as $table) {
+            foreach ($tables as $table) {
                 $tableId = $table['table_id'] ?? null;
                 if (!is_scalar($tableId) || !isset($table['title'])) {
                     continue;
@@ -95,9 +94,35 @@ class BpsWebApiService
         return is_array($tables) ? $tables : [];
     }
 
+    private function matchingTables(array $keywords, string $domain, string $apiKey): array
+    {
+        $matches = [];
+        foreach (array_slice($keywords, 0, 4) as $keyword) {
+            foreach ($this->searchTables($keyword, $domain, $apiKey) as $table) {
+                $tableId = $table['table_id'] ?? null;
+                $title = $table['title'] ?? null;
+                if (!is_scalar($tableId) || !is_string($title)) {
+                    continue;
+                }
+
+                $score = 0;
+                foreach ($keywords as $term) {
+                    if (Str::contains(Str::lower($title), $term)) {
+                        $score += min(Str::length($term), 10);
+                    }
+                }
+                $matches[(string) $tableId] = ['table' => $table, 'score' => $score];
+            }
+        }
+
+        uasort($matches, fn (array $left, array $right) => $right['score'] <=> $left['score']);
+
+        return array_slice(array_column(array_slice($matches, 0, 2, true), 'table'), 0, 2);
+    }
+
     private function tableDetail(string $tableId, string $domain, string $apiKey): ?string
     {
-        $url = "https://webapi.bps.go.id/v1/view/model/statictable/domain/{$domain}/id/".rawurlencode($tableId)."/key/{$apiKey}/";
+        $url = "https://webapi.bps.go.id/v1/api/view/model/statictable/domain/{$domain}/lang/ind/id/".rawurlencode($tableId)."/key/{$apiKey}/";
         $response = Http::timeout(8)->get($url);
         if (!$response->successful() || $response->json('status') !== 'OK') {
             return null;
@@ -118,7 +143,7 @@ class BpsWebApiService
     private function keywords(string $question): array
     {
         preg_match_all('/[\pL\pN]{3,}/u', Str::lower($question), $matches);
-        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'tahun'];
+        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia'];
 
         return array_values(array_unique(array_diff($matches[0] ?? [], $stopWords)));
     }

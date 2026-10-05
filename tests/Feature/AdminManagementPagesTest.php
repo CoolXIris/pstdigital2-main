@@ -49,7 +49,10 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertSee('Landing page')
             ->assertSee('href="'.url('/').'"', false);
         $this->actingAs($this->admin)->get(route('admin.konsultasi'))->assertOk();
-        $this->actingAs($this->admin)->get(route('admin.chatbot'))->assertOk();
+        $this->actingAs($this->admin)
+            ->get(route('admin.chatbot'))
+            ->assertOk()
+            ->assertSee('Mode uji: jawaban dapat keliru. Verifikasi angka dan sumber sebelum dijadikan acuan.');
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
     }
 
@@ -167,7 +170,7 @@ class AdminManagementPagesTest extends BaseTestCase
                 'status' => 'OK',
                 'data' => [['total' => 1], [['table_id' => 77, 'title' => 'Persentase Penduduk Miskin']]],
             ]),
-            'webapi.bps.go.id/v1/view/*' => Http::response([
+            'webapi.bps.go.id/v1/api/view/*' => Http::response([
                 'status' => 'OK',
                 'data' => ['table' => '<table><tr><th>Tahun</th><th>Persentase</th></tr><tr><td>2025</td><td>10,5</td></tr></table>'],
             ]),
@@ -305,7 +308,12 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var Authenticatable $authenticatedUser */
         $authenticatedUser = $user;
 
-        $this->actingAs($authenticatedUser)->get('/chatbot')->assertOk()->assertSee('Konsultasi Chatbot')->assertSee('Katalog Publikasi');
+        $this->actingAs($authenticatedUser)
+            ->get('/chatbot')
+            ->assertOk()
+            ->assertSee('Konsultasi Chatbot')
+            ->assertSee('Katalog Publikasi')
+            ->assertSee('AI dapat keliru. Periksa kembali informasi penting melalui sumber resmi.');
     }
 
     public function test_user_chatbot_saves_and_reopens_conversation_turns(): void
