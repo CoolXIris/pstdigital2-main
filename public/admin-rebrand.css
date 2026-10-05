@@ -50,6 +50,9 @@
 .admin-topbar-kicker { color: #8290a0; font-size: 9px; font-weight: 600; letter-spacing: .8px; }
 .admin-topbar-context strong { font-size: 13px; font-weight: 600; }
 .admin-topbar-actions { display: flex; align-items: center; gap: 18px; margin-left: auto; }
+.admin-landing-link { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 12px; color: var(--bps-blue) !important; background: #edf3f9; border: 1px solid #d5e1ec; border-radius: 6px; font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap; transition: color .16s ease, background .16s ease, border-color .16s ease, transform .16s ease; }
+.admin-landing-link i { font-size: 16px; }
+.admin-landing-link:hover { color: #765b0e !important; background: #fff2bd; border-color: #e5cb70; transform: translateY(-1px); }
 .admin-date { display: flex; align-items: center; gap: 8px; color: #66768a; font-size: 11px; white-space: nowrap; }
 .admin-date i { color: var(--bps-blue); }
 .admin-profile { display: grid; place-items: center; overflow: hidden; text-decoration: none; border: 1px solid #e0e7ef; }
@@ -248,6 +251,8 @@
     .admin-topbar { gap: 10px; padding: 9px 14px; }
     .admin-topbar-kicker { font-size: 8px; }
     .admin-topbar-context strong { font-size: 11px; }
+    .admin-landing-link { width: 34px; min-height: 34px; justify-content: center; padding: 0; }
+    .admin-landing-link span { display: none; }
     .admin-profile { width: 34px; height: 34px; }
     .admin-content { padding: 18px 14px 24px; }
     .admin-footer { flex-direction: column; padding: 14px; }
@@ -448,6 +453,8 @@ html[data-theme="dark"] .admin-topbar, html[data-theme="dark"] .admin-footer { c
 html[data-theme="dark"] .admin-topbar-kicker, html[data-theme="dark"] .admin-date { color: #b8c6d3; }
 html[data-theme="dark"] .admin-topbar-context strong { color: #f0f4f8; }
 html[data-theme="dark"] .admin-profile { border-color: #536577; }
+html[data-theme="dark"] .admin-landing-link { color: #dce8f6 !important; background: #34404b; border-color: #536577; }
+html[data-theme="dark"] .admin-landing-link:hover { color: #fff !important; background: #42556b; }
 html[data-theme="dark"] .admin-theme-toggle { color: #f2d35d; background: #34404b; border-color: #536577; }
 html[data-theme="dark"] .admin-theme-toggle:hover { color: #fff; background: #42556b; }
 html[data-theme="dark"] .admin-page-heading h1, html[data-theme="dark"] .admin-panel-title, html[data-theme="dark"] .admin-stat-value, html[data-theme="dark"] .admin-section-heading h2, html[data-theme="dark"] .admin-pending-card h3, html[data-theme="dark"] .admin-confirmed-card h3, html[data-theme="dark"] .admin-knowledge-explainer h2 { color: #edf3f8; }

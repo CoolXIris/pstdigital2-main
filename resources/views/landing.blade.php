@@ -258,7 +258,7 @@
                                     mana dikelola secara otomatis oleh robot
                                 </p>
                             </div>
-                            <a href="{{ url('chatbot') }}" class="btn btn-card btn-blue mt-4">Mulai Chat Sekarang</a>
+                            <a href="{{ Auth::user()?->hasRole(['admin', 'super_admin']) ? route('admin.chatbot') : route('chatbot.index') }}" class="btn btn-card btn-blue mt-4">Mulai Chat Sekarang</a>
                         </div>
                     </div>
                 </div>
@@ -273,7 +273,7 @@
                                     terkait metodologi dan indikator statistik oleh operator
                                 </p>
                             </div>
-                            <a href="{{ url('konsultasi') }}" class="btn btn-card btn-green mt-4">Buat Janji Temu</a>
+                            <a href="{{ Auth::user()?->hasRole(['admin', 'super_admin']) ? route('admin.konsultasi') : route('konsultasi.index') }}" class="btn btn-card btn-green mt-4">Buat Janji Temu</a>
                         </div>
                     </div>
                 </div>

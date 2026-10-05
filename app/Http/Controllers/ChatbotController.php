@@ -22,6 +22,10 @@ class ChatbotController extends Controller
     public function index()
     {
         $user = Auth::user();
+        if ($user->hasRole(['admin', 'super_admin'])) {
+            return redirect()->route('admin.chatbot');
+        }
+
         $conversations = ChatbotConversation::where('user_id', $user->id)
             ->withCount('messages')
             ->latest('updated_at')

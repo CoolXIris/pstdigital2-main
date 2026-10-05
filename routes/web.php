@@ -70,7 +70,7 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
 Route::group(['middleware' => ['auth']], function () {
     Route::get('profile', [ProfileController::class, 'index'])->name('profile');
     Route::put('profile/{id}', [ProfileController::class, 'update'])->name('profile.update');
-    Route::get('konsultasi', [KonsultasiController::class, 'index']);
+    Route::get('konsultasi', [KonsultasiController::class, 'index'])->name('konsultasi.index');
     Route::post('konsultasi', [KonsultasiController::class, 'store']);
     Route::post('konsultasi_rating/{id}', [KonsultasiController::class, 'rating_post']);
     Route::get('konsultasi/{meeting}/room', [KonsultasiAdminController::class, 'room'])->name('konsultasi.room');
@@ -78,7 +78,7 @@ Route::group(['middleware' => ['auth']], function () {
     Route::get('konsultasi/{meeting}/presence', [KonsultasiAdminController::class, 'presence'])->middleware('throttle:120,1')->name('konsultasi.presence');
     Route::post('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.send');
     Route::get('konsultasi/{meeting}/documentation', [KonsultasiAdminController::class, 'documentation'])->name('konsultasi.documentation');
-    Route::get('chatbot', [ChatbotController::class, 'index']);
+    Route::get('chatbot', [ChatbotController::class, 'index'])->name('chatbot.index');
     Route::post('chatbot/message', [ChatbotController::class, 'sendMessage'])->name('chatbot.message');
     Route::get('chatbot/conversations/{conversation}', [ChatbotController::class, 'conversation'])->name('chatbot.conversation');
 });

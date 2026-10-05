@@ -66,6 +66,7 @@
                 <button class="admin-menu-toggle" type="button" data-admin-toggle aria-label="Buka menu" aria-expanded="false"><i class="fe fe-menu" aria-hidden="true"></i></button>
                 <div class="admin-topbar-context"><span class="admin-topbar-kicker">PST DIGITAL / ADMINISTRASI</span><strong>@yield('topbar_title', 'Pusat kendali layanan')</strong></div>
                 <div class="admin-topbar-actions">
+                    <a class="admin-landing-link" href="{{ url('/') }}" aria-label="Kembali ke landing page" title="Kembali ke landing page"><i class="fe fe-home" aria-hidden="true"></i><span>Landing</span></a>
                     <button class="admin-theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Aktifkan mode gelap" title="Aktifkan mode gelap"><i class="fe fe-moon" aria-hidden="true"></i></button>
                     <span class="admin-date"><i class="fe fe-calendar" aria-hidden="true"></i>{{ now()->translatedFormat('l, d F Y') }}</span>
                     <a class="admin-profile" href="{{ route('profile') }}" aria-label="Buka profil {{ Auth::user()->name }}">
