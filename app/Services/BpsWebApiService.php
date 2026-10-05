@@ -203,10 +203,6 @@ class BpsWebApiService
 
     private function catalogFilters(array $catalog, string $question): array
     {
-        if ($catalog['model'] !== 'pressrelease') {
-            return [];
-        }
-
         $filters = [];
         if (preg_match('/\byear\/(20\d{2})\b/i', $question, $match) || preg_match('/\btahun\s+(20\d{2})\b/i', $question, $match)) {
             $filters['year'] = (int) $match[1];
@@ -237,14 +233,14 @@ class BpsWebApiService
         if (preg_match('/\bkeyword\/([\pL\pN_-]+(?:%20[\pL\pN_-]+)*)/iu', $question, $match)) {
             $filters['keyword'] = str_replace('%20', ' ', $match[1]);
         } else {
-            $keywordQuestion = preg_replace('/\b(berita|resmi|statistik|brs|rilis|terbaru|terkini|terakhir|tahun|bulan|halaman|year|month|page|keyword|bps|sumsel|sumatera|selatan|apa|saja|dari|untuk|pada|yang|dan|tentang|mengenai|ini|januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/iu', ' ', $question) ?? '';
+            $keywordQuestion = preg_replace('/\b(berita|resmi|statistik|brs|rilis|publikasi|terbitan|buku|tabel|statis|daftar|subjek|subject|topik|data|terbaru|terkini|terakhir|tahun|bulan|halaman|year|month|page|keyword|bps|sumsel|sumatera|selatan|apa|saja|dari|untuk|pada|yang|dan|tentang|mengenai|ini|januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/iu', ' ', $question) ?? '';
             $keywordQuestion = preg_replace('/\b(20\d{2}|1[0-2]|[1-9])\b/u', ' ', $keywordQuestion) ?? '';
             $keywordQuestion = trim(preg_replace('/\s+/u', ' ', $keywordQuestion) ?? '');
             if (mb_strlen($keywordQuestion) >= 3) {
                 $filters['keyword'] = $keywordQuestion;
             }
         }
-        if (($catalog['latest'] ?? false) && isset($filters['month']) && ! isset($filters['year'])) {
+        if (isset($filters['month']) && ! isset($filters['year'])) {
             $filters['year'] = now('Asia/Jakarta')->year;
         }
 

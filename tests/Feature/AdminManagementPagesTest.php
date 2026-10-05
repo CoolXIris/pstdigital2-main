@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Meeting;
 use App\Models\User;
+use App\Services\BpsWebApiService;
 use App\Services\ChatbotKnowledgeService;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\UploadedFile;
@@ -143,6 +144,28 @@ class AdminManagementPagesTest extends BaseTestCase
             ->post(route('admin.chatbot.bps-api-key'), ['clear_api_key' => '1'])
             ->assertRedirect(route('admin.chatbot'));
         $this->assertDatabaseMissing('chatbot_settings', ['key' => 'bps_webapi_key']);
+    }
+
+    public function test_bps_catalog_filters_year_and_month_for_all_catalog_models(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+
+        Http::fake([
+            'webapi.bps.go.id/v1/api/list/*' => Http::response([
+                'status' => 'OK',
+                'data' => [['total' => 1, 'pages' => 1], [['title' => 'Katalog BPS Sumsel']]],
+            ]),
+        ]);
+
+        $service = app(BpsWebApiService::class);
+
+        $this->assertNotNull($service->catalogAnswerFor('publikasi kemiskinan tahun 2024 bulan maret'));
+        $this->assertNotNull($service->catalogAnswerFor('daftar tabel statis kemiskinan tahun 2025 bulan oktober'));
+        $this->assertNotNull($service->catalogAnswerFor('subjek data tahun 2026 bulan 2'));
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/publication/domain/1600/year/2024/month/3/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/statictable/domain/1600/year/2025/month/10/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/subject/domain/1600/year/2026/month/2/'));
     }
 
     public function test_admin_can_confirm_assign_and_complete_a_consultation(): void
