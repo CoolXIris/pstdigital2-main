@@ -16,6 +16,9 @@ class KonsultasiController extends Controller
     public function index()
     {
         $user = Auth::user();
+        if ($user->hasRole(['admin', 'super_admin'])) {
+            return redirect()->route('admin.konsultasi');
+        }
 
         $data_mendatang = Meeting::where('user_id', $user->id)
             ->whereIn('status', [0, 2])

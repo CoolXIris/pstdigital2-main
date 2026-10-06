@@ -2,17 +2,20 @@
 
 namespace Tests\Feature;
 
-use App\Models\User;
 use App\Models\Meeting;
+use App\Models\User;
+use App\Services\BpsWebApiService;
+use App\Services\ChatbotKnowledgeService;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Role;
-use App\Services\ChatbotKnowledgeService;
 use Tests\TestCase as BaseTestCase;
 
 class AdminManagementPagesTest extends BaseTestCase
@@ -85,7 +88,84 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertOk()
             ->assertJsonPath('knowledge_used', true);
 
-        Http::assertSent(fn($request) => str_contains($request['text'], 'Garis kemiskinan') && str_contains($request['text'], 'PERTANYAAN:'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Garis kemiskinan') && str_contains($request['text'], 'PERTANYAAN:'));
+    }
+
+    public function test_admin_can_configure_encrypted_bps_api_key_and_use_bps_data_in_chat(): void
+    {
+        $this->actingAs($this->admin)
+            ->get(route('admin.chatbot'))
+            ->assertOk()
+            ->assertSee('WebAPI BPS')
+            ->assertSee('Belum terhubung');
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.chatbot.bps-api-key'), ['api_key' => 'bps-test-secret'])
+            ->assertRedirect(route('admin.chatbot'))
+            ->assertSessionHas('message');
+
+        $encryptedKey = DB::table('chatbot_settings')->where('key', 'bps_webapi_key')->value('value');
+        $this->assertNotSame('bps-test-secret', $encryptedKey);
+        $this->assertSame('bps-test-secret', Crypt::decryptString($encryptedKey));
+        $this->actingAs($this->admin)
+            ->get(route('admin.chatbot'))
+            ->assertOk()
+            ->assertDontSee('bps-test-secret')
+            ->assertSee('API key tersimpan');
+
+        Http::fake([
+            'webapi.bps.go.id/v1/api/list/*' => Http::response([
+                'status' => 'OK',
+                'data' => [['total' => 1], [['table_id' => 77, 'title' => 'Persentase Penduduk Miskin']]],
+            ]),
+            'webapi.bps.go.id/v1/api/view/*' => Http::response([
+                'status' => 'OK',
+                'data' => ['table' => '<table><tr><th>Tahun</th><th>Persentase</th></tr><tr><td>2025</td><td>10,5</td></tr></table>'],
+            ]),
+            'pst-chat.bpssumsel.com/*' => Http::response(['data' => 'Persentase kemiskinan tahun 2025 sebesar 10,5.'], 200),
+        ]);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'berapa persentase kemiskinan'])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', true);
+
+        Http::assertSent(fn($request) => str_contains($request->url(), 'key/bps-test-secret/'));
+        Http::assertSent(fn($request) => str_contains($request->url(), 'pst-chat.bpssumsel.com')
+            && str_contains($request['text'], 'Persentase Penduduk Miskin')
+            && str_contains($request['text'], '2025')
+            && str_contains($request['text'], 'PERTANYAAN:'));
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.chatbot.bps-api-key'), ['clear_api_key' => '1'])
+            ->assertRedirect(route('admin.chatbot'));
+        $this->assertDatabaseMissing('chatbot_settings', ['key' => 'bps_webapi_key']);
+    }
+
+    public function test_bps_catalog_filters_year_and_month_for_all_catalog_models(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+
+        Http::fake([
+            'webapi.bps.go.id/v1/api/list/*' => Http::response([
+                'status' => 'OK',
+                'data' => [['total' => 1, 'pages' => 1], [['title' => 'Katalog BPS Sumsel']]],
+            ]),
+        ]);
+
+        $service = app(BpsWebApiService::class);
+
+        $this->assertNotNull($service->catalogAnswerFor('publikasi kemiskinan tahun 2024 bulan maret'));
+        $this->assertNotNull($service->catalogAnswerFor('daftar tabel statis kemiskinan tahun 2025 bulan oktober'));
+        $this->assertNotNull($service->catalogAnswerFor('subjek data tahun 2026 bulan 2'));
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/publication/domain/1600/year/2024/month/3/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/statictable/domain/1600/year/2025/month/10/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/subject/domain/1600/year/2026/month/2/'));
     }
 
     public function test_admin_can_confirm_assign_and_complete_a_consultation(): void
@@ -198,7 +278,99 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var Authenticatable $authenticatedUser */
         $authenticatedUser = $user;
 
-        $this->actingAs($authenticatedUser)->get('/chatbot')->assertOk()->assertSee('Konsultasi Chatbot')->assertSee('Katalog Publikasi');
+        $this->actingAs($authenticatedUser)
+            ->get('/chatbot')
+            ->assertOk()
+            ->assertSee('Konsultasi Chatbot')
+            ->assertSee('Katalog Publikasi')
+            ->assertSee('AI dapat keliru. Periksa kembali informasi penting melalui sumber resmi.');
+    }
+
+    public function test_user_chatbot_saves_and_reopens_conversation_turns(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+        Http::fake(['pst-chat.bpssumsel.com/*' => Http::response(['data' => 'Jawaban chatbot.'], 200)]);
+
+        $firstResponse = $this->actingAs($authenticatedUser)
+            ->postJson(route('chatbot.message'), ['message' => 'Bagaimana membaca inflasi?'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Jawaban chatbot.')
+            ->assertJsonPath('title', 'Bagaimana membaca inflasi?');
+        $conversationId = $firstResponse->json('conversation_id');
+
+        $this->postJson(route('chatbot.message'), [
+            'message' => 'Bisa beri contoh?',
+            'conversation_id' => $conversationId,
+        ])->assertOk();
+
+        $this->assertDatabaseCount('chatbot_messages', 2);
+        $this->getJson(route('chatbot.conversation', $conversationId))
+            ->assertOk()
+            ->assertJsonCount(2, 'messages')
+            ->assertJsonPath('messages.0.prompt', 'Bagaimana membaca inflasi?')
+            ->assertJsonPath('messages.1.response', 'Jawaban chatbot.');
+        $this->get('/chatbot')->assertOk()->assertSee('Bagaimana membaca inflasi?')->assertSee('tanya jawab');
+
+        $conversation = DB::table('chatbot_conversations')->where('id', $conversationId)->first();
+        $this->assertNotSame((string) $user->id, $conversation->session_key);
+        Http::assertSent(fn($request) => $request['session_id'] === $conversation->session_key);
+    }
+
+    public function test_chatbot_returns_template_for_unsafe_messages_without_calling_external_services(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+
+        Http::fake();
+
+        $response = $this->actingAs($authenticatedUser)
+            ->postJson(route('chatbot.message'), ['message' => 'kamu goblok'])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', false)
+            ->assertJsonPath('safety_blocked', true);
+
+        $this->assertStringContainsString('bahasa kasar', $response->json('reply'));
+        $this->assertDatabaseCount('chatbot_messages', 1);
+        $this->assertDatabaseHas('chatbot_messages', [
+            'prompt' => 'kamu goblok',
+            'knowledge_used' => false,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->postJson(route('admin.chatbot.test'), ['message' => 'kirim konten porno'])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', false)
+            ->assertJsonPath('safety_blocked', true);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_user_cannot_read_another_users_chatbot_conversation(): void
+    {
+        /** @var User $owner */
+        $owner = User::factory()->create();
+        /** @var User $otherUser */
+        $otherUser = User::factory()->create();
+        /** @var Authenticatable $authenticatedOtherUser */
+        $authenticatedOtherUser = $otherUser;
+        $conversationId = DB::table('chatbot_conversations')->insertGetId([
+            'user_id' => $owner->id,
+            'session_key' => (string) \Illuminate\Support\Str::uuid(),
+            'title' => 'Percakapan privat',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($authenticatedOtherUser)
+            ->getJson(route('chatbot.conversation', $conversationId))
+            ->assertNotFound();
     }
 
     public function test_admin_must_provide_a_reason_when_cancelling(): void
@@ -295,7 +467,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $authenticatedRequester = $requester;
         $meeting = $this->createMeeting(['user_id' => $requester->id, 'status' => 1]);
 
-        $this->actingAs($authenticatedRequester)->post('/konsultasi_rating/' . $meeting->id, ['rating' => 5, 'kritik' => 'Layanan sangat membantu.'])
+        $this->actingAs($authenticatedRequester)->post('/konsultasi_rating/'.$meeting->id, ['rating' => 5, 'kritik' => 'Layanan sangat membantu.'])
             ->assertRedirect()->assertSessionHas('message');
         $this->assertDatabaseHas('meeting', ['id' => $meeting->id, 'rating' => 5]);
 
@@ -304,7 +476,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $otherUser->assignRole('user');
         /** @var Authenticatable $authenticatedOther */
         $authenticatedOther = $otherUser;
-        $this->actingAs($authenticatedOther)->post('/konsultasi_rating/' . $meeting->id, ['rating' => 1])->assertNotFound();
+        $this->actingAs($authenticatedOther)->post('/konsultasi_rating/'.$meeting->id, ['rating' => 1])->assertNotFound();
     }
 
     public function test_admin_can_complete_a_session_with_an_optimized_private_image(): void
