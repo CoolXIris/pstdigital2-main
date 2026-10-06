@@ -8,7 +8,7 @@
 $profileFields = ['name', 'pekerjaan', 'jenis_kelamin', 'tanggal_lahir', 'asal_prov', 'asal_kab', 'no_hp', 'pendidikan'];
 $filledFields = collect($profileFields)->filter(fn ($field) => filled($data->{$field}))->count();
 $completion = (int) round($filledFields / count($profileFields) * 100);
-$jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/BUMD', 'Wiraswasta', 'ASN/TNI/Polri'];
+$jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/BUMD', 'Wiraswasta', 'ASN/TNI/Polri', 'Lainnya'];
 @endphp
 
 <section class="portal-heading">

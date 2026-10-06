@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Meeting;
 use App\Models\TelegramBot;
 use App\Services\ConsultationDocumentationService;
+use App\Services\ConsultationMeetingNotificationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
@@ -71,7 +72,7 @@ class KonsultasiAdminController extends Controller
         ]);
     }
 
-    public function updateStatus(Request $request, Meeting $meeting, ConsultationDocumentationService $documentation): RedirectResponse
+    public function updateStatus(Request $request, Meeting $meeting, ConsultationDocumentationService $documentation, ConsultationMeetingNotificationService $notifications): RedirectResponse
     {
         $validated = $request->validate([
             'action' => ['required', Rule::in(['confirm', 'complete', 'cancel'])],
@@ -96,7 +97,8 @@ class KonsultasiAdminController extends Controller
         }
 
         try {
-            DB::transaction(function () use ($meeting, $validated, $storedDocumentation, $request) {
+            $approver = Auth::user();
+            DB::transaction(function () use ($meeting, $validated, $storedDocumentation, $request, $approver) {
                 $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
 
                 if ($validated['action'] === 'confirm') {
@@ -119,6 +121,9 @@ class KonsultasiAdminController extends Controller
                     }
 
                     $lockedMeeting->assigned_staff = $staffName;
+                    $lockedMeeting->approved_by_user_id = $approver->id;
+                    $lockedMeeting->approved_by_name = $approver->name;
+                    $lockedMeeting->approved_by_email = $approver->email;
                     $lockedMeeting->status = 2;
                     $lockedMeeting->save();
 
@@ -164,7 +169,9 @@ class KonsultasiAdminController extends Controller
         }
 
         if ($validated['action'] === 'confirm') {
-            $this->notifyConfirmed($meeting->fresh());
+            $confirmedMeeting = $meeting->fresh();
+            $this->notifyConfirmed($confirmedMeeting);
+            $notifications->sendApprovalNotifications($confirmedMeeting);
         }
 
         $message = match ($validated['action']) {
