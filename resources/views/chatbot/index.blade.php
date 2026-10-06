@@ -47,6 +47,7 @@
 @endsection
 
 @section('scripts')
+<script src="{{ asset('chat-markdown.js') }}"></script>
 <script>
     (() => {
         const form = document.getElementById('portal-chat-form');
@@ -61,7 +62,14 @@
         const addBubble = (text, role = 'assistant', meta = '') => {
             const bubble = document.createElement('div');
             bubble.className = `portal-bubble${role === 'user' ? ' is-user' : ''}`;
-            bubble.textContent = text;
+            const content = document.createElement('div');
+            if (role === 'user') {
+                content.textContent = text;
+            } else {
+                content.className = 'chat-md';
+                content.innerHTML = window.renderChatMarkdown(text);
+            }
+            bubble.append(content);
             if (meta) {
                 const details = document.createElement('div');
                 details.className = 'portal-bubble-meta';
@@ -98,7 +106,7 @@
                 });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.message || 'Chatbot belum dapat menjawab. Coba kembali sebentar lagi.');
-                pending.firstChild.textContent = result.reply || 'Maaf, saya belum mendapatkan jawaban untuk pertanyaan tersebut.';
+                pending.firstChild.innerHTML = window.renderChatMarkdown(result.reply || 'Maaf, saya belum mendapatkan jawaban untuk pertanyaan tersebut.');
                 const details = document.createElement('div');
                 details.className = 'portal-bubble-meta';
                 details.textContent = `${timestamp()}${result.knowledge_used ? ' · memakai referensi data PST' : ''}`;

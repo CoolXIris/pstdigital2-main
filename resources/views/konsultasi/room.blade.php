@@ -97,6 +97,7 @@
         };
 
         const consumeSignals = async () => {
+            let pollDelay = 5000;
             while (polling) {
                 try {
                     const response = await fetch(`${room.dataset.pollUrl}?after=${lastSignal}&session_id=${encodeURIComponent(roomSession)}`, { headers: { 'Accept': 'application/json' } });
@@ -116,6 +117,11 @@
                         break;
                     }
                     const { signals, peer_present: peerPresent } = await response.json();
+                    if (peer.connectionState === 'connected') pollDelay = 3500;
+                    else if (signals.length) pollDelay = 1200;
+                    else if (peerPresent) pollDelay = 2500;
+                    else pollDelay = 5000;
+                    if (document.hidden) pollDelay = Math.max(pollDelay, 5000);
                     if (!peerPresent && peer.connectionState !== 'closed') {
                         status.textContent = requester ? 'Menunggu petugas bergabung' : 'Menunggu pengguna bergabung';
                         remotePlaceholder.hidden = false;
@@ -149,7 +155,7 @@
                     status.textContent = error.message;
                     if (error.message.includes('jadwal telah berakhir')) polling = false;
                 }
-                await new Promise((resolve) => setTimeout(resolve, 1200));
+                await new Promise((resolve) => setTimeout(resolve, pollDelay));
             }
         };
 

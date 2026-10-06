@@ -76,6 +76,9 @@ Route::group(['middleware' => ['auth']], function () {
     Route::get('konsultasi/{meeting}/room', [KonsultasiAdminController::class, 'room'])->name('konsultasi.room');
     Route::get('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.poll');
     Route::get('konsultasi/{meeting}/presence', [KonsultasiAdminController::class, 'presence'])->middleware('throttle:120,1')->name('konsultasi.presence');
+    Route::get('konsultasi/{meeting}/messages', [KonsultasiAdminController::class, 'messages'])->middleware('throttle:120,1')->name('konsultasi.messages');
+    Route::get('konsultasi/{meeting}/messages/status', [KonsultasiAdminController::class, 'messageStatus'])->middleware('throttle:120,1')->name('konsultasi.messages.status');
+    Route::post('konsultasi/{meeting}/messages', [KonsultasiAdminController::class, 'sendMessage'])->middleware('throttle:120,1')->name('konsultasi.messages.send');
     Route::post('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.send');
     Route::get('konsultasi/{meeting}/documentation', [KonsultasiAdminController::class, 'documentation'])->name('konsultasi.documentation');
     Route::get('chatbot', [ChatbotController::class, 'index'])->name('chatbot.index');

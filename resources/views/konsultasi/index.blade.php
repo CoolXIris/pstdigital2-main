@@ -43,7 +43,10 @@
             </div>
             @if ($isConfirmed)
                 <div class="portal-meeting-actions">
-                    <span class="portal-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="bi bi-arrow-repeat"></i> Memeriksa kehadiran...</span>
+                    <div class="portal-meeting-presence-chat">
+                        <span class="portal-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="bi bi-arrow-repeat"></i> Memeriksa kehadiran...</span>
+                    <button class="portal-btn portal-btn-outline consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->assigned_staff ?: 'Petugas konsultasi' }}" aria-label="Buka chat konsultasi"><i class="bi bi-chat-dots-fill"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
+                    </div>
                     @if ($meeting->room_open)
                         <form method="GET" action="{{ route('konsultasi.room', $meeting) }}"><button class="portal-btn portal-btn-primary portal-meeting-join" type="submit"><i class="bi bi-camera-video-fill"></i> Masuk ruang meeting</button></form>
                     @else
@@ -167,6 +170,8 @@
         </div>
     </div>
 </div>
+@include('konsultasi.partials.text-chat-modal')
+
 @endsection
 
 @section('scripts')
@@ -216,12 +221,20 @@
                 indicator.innerHTML = '<i class="bi bi-arrow-repeat"></i> Status ruang belum tersedia';
             }
         };
-        indicators.forEach((indicator) => {
-            updatePresence(indicator);
-            window.setInterval(() => {
-                if (!document.hidden) updatePresence(indicator);
-            }, 5000);
+        const refreshPresence = () => {
+            if (document.hidden) return;
+            indicators.forEach((indicator, index) => {
+                window.setTimeout(() => {
+                    if (!document.hidden) updatePresence(indicator);
+                }, index * 250);
+            });
+        };
+        refreshPresence();
+        if (indicators.length) window.setInterval(refreshPresence, 15000);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) refreshPresence();
         });
     })();
 </script>
+@include('konsultasi.partials.text-chat-script')
 @endsection

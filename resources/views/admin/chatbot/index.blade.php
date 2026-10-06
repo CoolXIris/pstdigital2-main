@@ -140,6 +140,7 @@
 @endsection
 
 @section('scripts')
+<script src="{{ asset('chat-markdown.js') }}"></script>
 <script>
     (() => {
         const form = document.getElementById('chat-test-form');
@@ -154,7 +155,12 @@
         const addMessage = (text, isUser = false) => {
             const bubble = document.createElement('div');
             bubble.className = `admin-chat-bubble${isUser ? ' is-user' : ''}`;
-            bubble.textContent = text;
+            if (isUser) {
+                bubble.textContent = text;
+            } else {
+                bubble.classList.add('chat-md');
+                bubble.innerHTML = window.renderChatMarkdown(text);
+            }
             log.append(bubble);
             log.scrollTop = log.scrollHeight;
         };

@@ -78,6 +78,9 @@
                             </div>
                         @endif
                         @unless ($meeting->room_open)<p class="admin-room-window-note">Ruang aktif hanya pada tanggal dan jam sesi.</p>@endunless
+                        @if (!$meeting->approved_by_user_id || (int) $meeting->approved_by_user_id === (int) Auth::id())
+                            <button class="admin-btn admin-btn-outline admin-confirmed-button consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->user?->name ?? 'Pengguna' }}"><i class="fe fe-message-circle"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
+                        @endif
                         <button class="admin-btn admin-btn-success admin-confirmed-button" type="button" data-bs-toggle="modal" data-bs-target="#completeMeetingModal" data-meeting-id="{{ $meeting->id }}" data-topic="{{ $meeting->name }}"><i class="fe fe-check"></i> Selesaikan konsultasi</button>
                     </article>
                 @endforeach
@@ -136,6 +139,8 @@
     <div class="modal fade admin-modal" id="completeMeetingModal" tabindex="-1" aria-labelledby="completeMeetingTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><form method="POST" id="complete-meeting-form" enctype="multipart/form-data" data-endpoint-base="{{ url('admin/konsultasi') }}">@csrf @method('PATCH')<input type="hidden" name="action" value="complete"><div class="modal-header"><div><span class="admin-eyebrow">Tutup sesi</span><h2 class="modal-title" id="completeMeetingTitle">Selesaikan konsultasi</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div><div class="modal-body"><p class="text-muted">Sesi: <strong id="complete-meeting-topic"></strong>. Setelah disimpan, pengguna dapat memberi rating dan kritik/saran.</p><div class="mb-3"><label class="form-label" for="meeting-summary">Hasil konsultasi</label><textarea class="form-control" id="meeting-summary" name="ringkasan" rows="4" minlength="10" maxlength="5000" placeholder="Rangkuman hasil, jawaban, dan tindak lanjut..." required></textarea></div><div class="row g-3"><div class="col-md-6"><label class="form-label" for="meeting-documentation">Dokumentasi gambar/video</label><input class="form-control" id="meeting-documentation" name="documentation" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"><small class="form-text">Maksimal 25 MB. Gambar dioptimalkan saat disimpan; video disimpan dengan batas ukuran.</small></div><div class="col-md-6"><label class="form-label" for="meeting-documentation-url">Atau tautan dokumentasi</label><input class="form-control" id="meeting-documentation-url" name="documentation_url" type="url" maxlength="2048" placeholder="https://..."><small class="form-text">Isi salah satu: berkas atau tautan.</small></div></div><div class="admin-detail-error mt-2" id="documentation-choice-error" hidden>Pilih berkas atau masukkan tautan dokumentasi.</div></div><div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Kembali</button><button class="admin-btn admin-btn-success" type="submit"><i class="fe fe-check"></i> Selesaikan sesi</button></div></form></div></div></div>
 
     <div class="modal fade admin-modal" id="meetingDetailModal" tabindex="-1" aria-labelledby="meetingDetailTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header"><div><span class="admin-eyebrow">Arsip sesi</span><h2 class="modal-title" id="meetingDetailTitle">Detail konsultasi</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div><div class="modal-body"><div class="admin-approval-details"><div><small>Pengguna</small><strong id="detail-user"></strong></div><div><small>Email</small><strong id="detail-email"></strong></div><div><small>Jenis konsultasi</small><strong id="detail-topic"></strong></div><div><small>Waktu</small><strong id="detail-schedule"></strong></div><div><small>Petugas</small><strong id="detail-staff"></strong></div><div><small>Status</small><strong id="detail-status"></strong></div><div class="admin-approval-description"><small>Deskripsi</small><p id="detail-description"></p></div><div class="admin-approval-description"><small>Hasil konsultasi</small><p id="detail-summary"></p></div><div class="admin-approval-description" id="detail-cancellation-wrap"><small>Alasan pembatalan</small><p id="detail-reason"></p></div><div><small>Rating pengguna</small><strong id="detail-rating"></strong></div><div><small>Kritik/saran</small><strong id="detail-feedback"></strong></div><div class="admin-approval-description" id="detail-document-wrap"><small>Dokumentasi</small><p><a id="detail-document-link" target="_blank" rel="noopener">Buka dokumentasi</a></p></div></div></div><div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Tutup</button></div></div></div></div>
+@include('konsultasi.partials.text-chat-modal')
+
 @endsection
 
 @section('scripts')
@@ -226,12 +231,20 @@
                 indicator.innerHTML = '<i class="fe fe-refresh-cw"></i> Status ruang belum tersedia';
             }
         };
-        indicators.forEach((indicator) => {
-            updatePresence(indicator);
-            window.setInterval(() => {
-                if (!document.hidden) updatePresence(indicator);
-            }, 5000);
+        const refreshPresence = () => {
+            if (document.hidden) return;
+            indicators.forEach((indicator, index) => {
+                window.setTimeout(() => {
+                    if (!document.hidden) updatePresence(indicator);
+                }, index * 250);
+            });
+        };
+        refreshPresence();
+        if (indicators.length) window.setInterval(refreshPresence, 15000);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) refreshPresence();
         });
     })();
 </script>
+@include('konsultasi.partials.text-chat-script')
 @endsection
