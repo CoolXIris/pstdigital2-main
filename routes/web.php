@@ -84,4 +84,5 @@ Route::group(['middleware' => ['auth']], function () {
     Route::get('chatbot', [ChatbotController::class, 'index'])->name('chatbot.index');
     Route::post('chatbot/message', [ChatbotController::class, 'sendMessage'])->name('chatbot.message');
     Route::get('chatbot/conversations/{conversation}', [ChatbotController::class, 'conversation'])->name('chatbot.conversation');
+    Route::delete('chatbot/conversations/{conversation}', [ChatbotController::class, 'destroyConversation'])->name('chatbot.conversation.destroy');
 });

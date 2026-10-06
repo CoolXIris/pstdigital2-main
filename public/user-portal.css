@@ -181,6 +181,9 @@
 .portal-chat-history-item.is-active { color: var(--portal-blue); background: #eaf1fa; border-color: #c7d9eb; box-shadow: inset 3px 0 0 #d9ad22; }
 .portal-chat-history-icon { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; color: var(--portal-blue); background: #eaf1fa; border-radius: 5px; }
 .portal-chat-history-copy { display: grid; min-width: 0; gap: 3px; }
+.portal-chat-history-delete { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; margin-left: auto; color: #96a5b5; background: transparent; border: 0; border-radius: 4px; font-size: 11px; opacity: 0; transition: opacity .16s ease, color .16s ease, background .16s ease; }
+.portal-chat-history-item:hover .portal-chat-history-delete, .portal-chat-history-delete:focus-visible { opacity: 1; }
+.portal-chat-history-delete:hover, .portal-chat-history-delete:focus-visible { color: #a83f3f; background: #fae9e7; outline: 2px solid #e1b92d; outline-offset: 1px; }
 .portal-chat-history-copy strong { overflow: hidden; color: inherit; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .portal-chat-history-copy small { color: #78899b; font-size: 9px; }
 .portal-chat-history-empty { display: grid; justify-items: center; gap: 7px; padding: 18px 10px; color: #718096; text-align: center; font-size: 11px; }
@@ -431,6 +434,8 @@ html[data-theme="dark"] .portal-chat-history-item { color: #d1dce5; }
 html[data-theme="dark"] .portal-chat-history-item:hover { background: #303d48; border-color: #465564; }
 html[data-theme="dark"] .portal-chat-history-item.is-active { color: #fff; background: #34475a; border-color: #536779; box-shadow: inset 3px 0 0 #dfbd4c; }
 html[data-theme="dark"] .portal-chat-history-icon { color: #d5e7f8; background: #3a5064; }
+html[data-theme="dark"] .portal-chat-history-delete { color: #8696a6; }
+html[data-theme="dark"] .portal-chat-history-delete:hover, html[data-theme="dark"] .portal-chat-history-delete:focus-visible { color: #ffb4ac; background: #523638; }
 html[data-theme="dark"] .portal-chat-history-copy small, html[data-theme="dark"] .portal-chat-history-empty { color: #aebdca; }
 html[data-theme="dark"] .portal-chat-topics { color: #c3ced8; border-top-color: #465564; }
 html[data-theme="dark"] .portal-chat-topics summary { color: #a9cef1; }

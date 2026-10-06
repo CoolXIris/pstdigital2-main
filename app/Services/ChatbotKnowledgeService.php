@@ -108,6 +108,15 @@ class ChatbotKnowledgeService
         }
         $sections[] = "PERTANYAAN:\n{$question}";
 
+        // PHP's default max_execution_time (commonly 30s) can be shorter than the HTTP
+        // client timeout below, causing a fatal timeout that returns an empty response
+        // body (surfacing as "Unexpected end of JSON input" in the browser) instead of
+        // the catchable exception the controller expects. Extend it so the HTTP client's
+        // own timeout always has a chance to resolve first.
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(60);
+        }
+
         return Http::timeout(45)->post('https://pst-chat.bpssumsel.com/send_message/', [
             'text' => implode("\n\n", $sections),
             'session_id' => $sessionId,

@@ -184,6 +184,16 @@ class ChatbotController extends Controller
         ]);
     }
 
+    public function destroyConversation(ChatbotConversation $conversation): JsonResponse
+    {
+        abort_unless($conversation->user_id === Auth::id(), 404);
+
+        $conversation->messages()->delete();
+        $conversation->delete();
+
+        return response()->json(['message' => 'Riwayat percakapan berhasil dihapus.']);
+    }
+
     private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps, ChatbotSafetyService $safety): JsonResponse
     {
         $safetyViolation = $safety->check($message);
