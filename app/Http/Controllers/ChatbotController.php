@@ -100,7 +100,7 @@ class ChatbotController extends Controller
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], 'admin-test-'.Auth::id(), $knowledge, $bps, $safety);
+        return $this->sendMessageToService($validated['message'], (string) Str::uuid(), $knowledge, $bps, $safety);
     }
 
     public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps, ChatbotSafetyService $safety): JsonResponse
@@ -123,15 +123,22 @@ class ChatbotController extends Controller
                 $knowledgeUsed = false;
             } else {
                 $directReply = $bps->catalogAnswerFor($validated['message']);
-                $context = $directReply === null ? $this->combinedContext($validated['message'], $knowledge, $bps) : null;
+                $bpsContext = $directReply === null ? $bps->contextFor($validated['message']) : null;
+                $knowledgeContext = $directReply === null && $bpsContext === null
+                    ? $knowledge->contextFor($validated['message'])
+                    : null;
+                $context = $bpsContext ?? $knowledgeContext;
+                $isDataQuestion = $bps->isDataQuestion($validated['message']);
                 $previousTurn = $conversation?->messages()->latest('id')->first(['prompt', 'response']);
                 $previousAnswer = $previousTurn !== null && $this->isFollowUpQuestion($validated['message'], $previousTurn->prompt)
                     ? $previousTurn->response
                     : null;
                 if ($directReply !== null) {
                     $reply = $directReply;
+                } elseif ($isDataQuestion && $context === null) {
+                    $reply = 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.';
                 } else {
-                    $response = $knowledge->askWithContext($validated['message'], (string) Str::uuid(), $context, $previousAnswer);
+                    $response = $knowledge->askWithContext($validated['message'], $sessionKey, $context, $previousAnswer);
                     if (! $response->successful()) {
                         return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
                     }
@@ -207,7 +214,15 @@ class ChatbotController extends Controller
 
         try {
             $directReply = $bps->catalogAnswerFor($message);
-            $context = $directReply === null ? $this->combinedContext($message, $knowledge, $bps) : null;
+            $bpsContext = $directReply === null ? $bps->contextFor($message) : null;
+            $context = $bpsContext ?? ($directReply === null ? $knowledge->contextFor($message) : null);
+            if ($directReply === null && $bps->isDataQuestion($message) && $context === null) {
+                return response()->json([
+                    'reply' => 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.',
+                    'knowledge_used' => false,
+                ]);
+            }
+
             if ($directReply !== null) {
                 $reply = $directReply;
             } else {
@@ -228,16 +243,6 @@ class ChatbotController extends Controller
 
             return response()->json(['message' => 'Tidak dapat menghubungi layanan chatbot.'], 502);
         }
-    }
-
-    private function combinedContext(string $message, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): ?string
-    {
-        $contexts = array_filter([
-            $knowledge->contextFor($message),
-            $bps->contextFor($message),
-        ]);
-
-        return $contexts === [] ? null : implode("\n\n", $contexts);
     }
 
     private function sameAnswer(string $reply, string $previousAnswer): bool

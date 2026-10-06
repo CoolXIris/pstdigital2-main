@@ -17,7 +17,6 @@
         <header class="portal-chat-header">
             <span class="portal-chat-avatar"><i class="bi bi-robot"></i></span>
             <span><strong>Chatbot PST BPS Sumatera Selatan</strong><small><span class="portal-online"></span> Asisten informasi statistik</small></span>
-            <button class="portal-action-icon ms-auto" id="clear-chat" type="button" aria-label="Bersihkan percakapan" title="Bersihkan percakapan"><i class="bi bi-arrow-counterclockwise"></i></button>
         </header>
         <div class="portal-chat-log" id="portal-chat-log" data-greeting="{{ Auth::user()->name }}" aria-live="polite" aria-relevant="additions">
             <div class="portal-bubble">Halo {{ Auth::user()->name }}. Saya siap membantu menjelaskan data dan konsep statistik. Apa yang ingin Anda cari?</div>
