@@ -252,7 +252,12 @@ class KonsultasiAdminController extends Controller
             }
             $this->touchRoomParticipant($meeting);
             $peerPresent = $this->peerIsPresent($meeting);
-            Meeting::whereKey($meeting->id)->update(['room_last_seen_at' => now()]);
+            Meeting::whereKey($meeting->id)
+                ->where(function ($query) {
+                    $query->whereNull('room_last_seen_at')
+                        ->orWhere('room_last_seen_at', '<=', now()->subSeconds(30));
+                })
+                ->update(['room_last_seen_at' => now()]);
             $signals = DB::table('meeting_signals')->where('meeting_id', $meeting->id)
                 ->where('session_id', $validated['session_id'])
                 ->where('sender_user_id', '!=', Auth::id())
@@ -303,6 +308,101 @@ class KonsultasiAdminController extends Controller
         return response()->json(['accepted' => true], 201);
     }
 
+    public function messages(Request $request, Meeting $meeting): JsonResponse
+    {
+        $this->authorizeMeetingChatParticipant($meeting);
+        abort_unless((int) $meeting->status === 2, 404, 'Chat hanya tersedia untuk konsultasi yang masih terkonfirmasi.');
+
+        $validated = $request->validate([
+            'after' => ['nullable', 'integer', 'min:0'],
+        ]);
+        DB::table('consultation_messages')->where('meeting_id', $meeting->id)->where('sender_user_id', '!=', Auth::id())->whereNull('read_at')->update(['read_at' => now(), 'updated_at' => now()]);
+
+        $after = (int) ($validated['after'] ?? 0);
+        $query = DB::table('consultation_messages')
+            ->join('users', 'users.id', '=', 'consultation_messages.sender_user_id')
+            ->where('consultation_messages.meeting_id', $meeting->id)
+            ->select([
+                'consultation_messages.id',
+                'consultation_messages.sender_user_id',
+                'consultation_messages.body',
+                'consultation_messages.created_at',
+                'consultation_messages.read_at',
+                'users.name as sender_name',
+            ]);
+
+        if ($after > 0) {
+            $messages = $query->where('consultation_messages.id', '>', $after)
+                ->orderBy('consultation_messages.id')
+                ->limit(100)
+                ->get();
+        } else {
+            $messages = $query->orderByDesc('consultation_messages.id')
+                ->limit(50)
+                ->get()
+                ->reverse()
+                ->values();
+        }
+
+        return response()->json([
+            'unread_count' => 0,
+            'read_message_ids' => DB::table('consultation_messages')->where('meeting_id', $meeting->id)->where('sender_user_id', Auth::id())->whereNotNull('read_at')->orderByDesc('id')->limit(100)->pluck('id')->map(fn ($id) => (int) $id),
+            'messages' => $messages->map(fn ($message) => [
+                'id' => (int) $message->id,
+                'sender_id' => (int) $message->sender_user_id,
+                'sender_name' => $message->sender_name,
+                'body' => $message->body,
+                'is_mine' => (int) $message->sender_user_id === (int) Auth::id(),
+                'sent_at' => Carbon::parse($message->created_at)->timezone('Asia/Jakarta')->format('d/m/Y H:i'),
+                'is_read' => $message->read_at !== null,
+            ]),
+        ]);
+    }
+
+    public function messageStatus(Meeting $meeting): JsonResponse
+    {
+        $this->authorizeMeetingChatParticipant($meeting);
+        abort_unless((int) $meeting->status === 2, 404, 'Chat hanya tersedia untuk konsultasi yang masih terkonfirmasi.');
+
+        return response()->json([
+            'unread_count' => DB::table('consultation_messages')
+                ->where('meeting_id', $meeting->id)
+                ->where('sender_user_id', '!=', Auth::id())
+                ->whereNull('read_at')
+                ->count(),
+        ]);
+    }
+
+    public function sendMessage(Request $request, Meeting $meeting): JsonResponse
+    {
+        $this->authorizeMeetingChatParticipant($meeting);
+        abort_unless((int) $meeting->status === 2, 404, 'Chat hanya tersedia untuk konsultasi yang masih terkonfirmasi.');
+
+        $validated = $request->validate([
+            'body' => ['required', 'string', 'max:5000'],
+        ]);
+
+        $messageId = DB::table('consultation_messages')->insertGetId([
+            'meeting_id' => $meeting->id,
+            'sender_user_id' => Auth::id(),
+            'body' => trim($validated['body']),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => [
+                'id' => $messageId,
+                'sender_id' => (int) Auth::id(),
+                'sender_name' => Auth::user()->name,
+                'body' => trim($validated['body']),
+                'is_mine' => true,
+                'sent_at' => now('Asia/Jakarta')->format('d/m/Y H:i'),
+                'is_read' => false,
+            ],
+        ], 201);
+    }
+
     public function presence(Meeting $meeting): JsonResponse
     {
         $this->authorizeParticipant($meeting);
@@ -322,6 +422,16 @@ class KonsultasiAdminController extends Controller
         );
     }
 
+    private function authorizeMeetingChatParticipant(Meeting $meeting): void
+    {
+        $isRequester = (int) $meeting->user_id === (int) Auth::id();
+        $isApprover = $meeting->approved_by_user_id
+            && (int) $meeting->approved_by_user_id === (int) Auth::id();
+        $isLegacyAdministrator = !$meeting->approved_by_user_id
+            && Auth::user()->hasRole(['admin', 'super_admin']);
+        abort_unless($isRequester || $isApprover || $isLegacyAdministrator, 403);
+    }
+
     private function authorizeParticipant(Meeting $meeting): void
     {
         $isRequester = (int) $meeting->user_id === (int) Auth::id();
@@ -338,7 +448,8 @@ class KonsultasiAdminController extends Controller
     private function touchRoomParticipant(Meeting $meeting): void
     {
         DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)->where('user_id', Auth::id())
-            ->whereNull('left_at')->update(['last_seen_at' => now(), 'updated_at' => now()]);
+            ->whereNull('left_at')->where('last_seen_at', '<=', now()->subSeconds(8))
+            ->update(['last_seen_at' => now(), 'updated_at' => now()]);
     }
 
     private function peerIsPresent(Meeting $meeting): bool
@@ -347,7 +458,7 @@ class KonsultasiAdminController extends Controller
             ->where('meeting_id', $meeting->id)
             ->where('user_id', '!=', Auth::id())
             ->whereNull('left_at')
-            ->where('last_seen_at', '>=', now()->subSeconds(8))
+            ->where('last_seen_at', '>=', now()->subSeconds(15))
             ->exists();
     }
 
