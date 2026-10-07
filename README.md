@@ -21,6 +21,27 @@ Laravel is a web application framework with expressive, elegant syntax. We belie
 
 Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
+## Gemini chatbot API
+
+The Laravel chatbot calls the private FastAPI service configured by
+`GEMINI_CHAT_API_URL`. Keep `GEMINI_API_KEY` and the shared
+`GEMINI_CHAT_API_TOKEN` on the server; do not expose either value in browser code
+or commit populated values to source control.
+
+Install the Python service dependencies and start the API from the project root:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn main:app --host 127.0.0.1 --port 8001
+```
+
+Set the same strong `GEMINI_CHAT_API_TOKEN` in Laravel and the Python process,
+and set `GEMINI_API_KEY` for the Python process. `GEMINI_MODEL` defaults to
+`gemini-flash-lite-latest`. For a separately hosted service, set
+`GEMINI_CHAT_API_URL` to its private or HTTPS `/api/chat` URL.
+
 ## Learning Laravel
 
 Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.

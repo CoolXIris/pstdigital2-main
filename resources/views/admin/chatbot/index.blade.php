@@ -130,8 +130,8 @@
             </div>
             <div class="admin-panel-body">
                 <div class="admin-connection mb-3"><span class="admin-connection-indicator" id="chat-status-icon"><i class="fe fe-activity"></i></span><span><strong id="chat-status-title">Belum diperiksa</strong><small id="chat-status-description">Kirim pesan uji untuk mengecek endpoint.</small></span></div>
-                <div class="d-flex justify-content-between py-2" style="border-bottom:1px solid #edf1f5"><span class="text-muted">Endpoint</span><span class="fw-semibold">pst-chat.bpssumsel.com</span></div>
-                <div class="d-flex justify-content-between py-2"><span class="text-muted">Metode</span><span class="fw-semibold">POST /send_message</span></div>
+                <div class="d-flex justify-content-between py-2" style="border-bottom:1px solid #edf1f5"><span class="text-muted">Endpoint</span><span class="fw-semibold">Gemini API</span></div>
+                <div class="d-flex justify-content-between py-2"><span class="text-muted">Metode</span><span class="fw-semibold">POST /api/chat</span></div>
             </div>
         </section>
         <aside class="admin-muted-note"><strong>Uji sumber pengetahuan</strong><br>Percakapan uji menggunakan sesi terpisah. Tanyakan topik yang tercantum pada sumber aktif untuk memastikan referensi terbaru dipakai pada jawaban.</aside>

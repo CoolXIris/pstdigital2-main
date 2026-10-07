@@ -6,7 +6,6 @@ use App\Models\ChatbotConversation;
 use App\Models\ChatbotKnowledgeSource;
 use App\Services\BpsWebApiService;
 use App\Services\ChatbotKnowledgeService;
-use App\Services\ChatbotSafetyService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -97,16 +96,16 @@ class ChatbotController extends Controller
         return back()->with('message', "Sumber '{$source->title}' dan indeksnya berhasil dihapus.");
     }
 
-    public function testMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps, ChatbotSafetyService $safety): JsonResponse
+    public function testMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], (string) Str::uuid(), $knowledge, $bps, $safety);
+        return $this->sendMessageToService($validated['message'], (string) Str::uuid(), $knowledge, $bps);
     }
 
-    public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps, ChatbotSafetyService $safety): JsonResponse
+    public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
@@ -118,44 +117,27 @@ class ChatbotController extends Controller
             ? ChatbotConversation::where('user_id', $user->id)->findOrFail($validated['conversation_id'])
             : null;
         $sessionKey = $conversation?->session_key ?? (string) Str::uuid();
-        $safetyViolation = $safety->check($validated['message']);
+        $context = null;
+        $aiReply = null;
 
         try {
-            if ($safetyViolation !== null) {
-                $reply = $safetyViolation['reply'];
-                $knowledgeUsed = false;
-            } else {
-                $directReply = $bps->catalogAnswerFor($validated['message']);
-                $bpsContext = $directReply === null ? $bps->contextFor($validated['message']) : null;
-                $unavailableBpsData = $bps->isUnavailableDataContext($bpsContext);
-                $knowledgeContext = $directReply === null && $bpsContext === null && ! $unavailableBpsData
-                    ? $knowledge->contextFor($validated['message'])
-                    : null;
-                $context = $bpsContext ?? $knowledgeContext;
-                $isDataQuestion = $bps->isDataQuestion($validated['message']);
-                $previousTurn = $conversation?->messages()->latest('id')->first(['prompt', 'response']);
-                $previousAnswer = $previousTurn !== null && $this->isFollowUpQuestion($validated['message'], $previousTurn->prompt)
-                    ? $previousTurn->response
-                    : null;
-                if ($directReply !== null) {
-                    $reply = $directReply;
-                } elseif ($unavailableBpsData || ($isDataQuestion && $context === null)) {
-                    $reply = 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.';
-                } else {
-                    $reply = $this->askAi($knowledge, $validated['message'], $sessionKey, $context, $previousAnswer);
-                    if ($reply === null) {
-                        $reply = $bps->fallbackAnswerFor($validated['message']);
-                    } elseif ($previousAnswer !== null && $this->sameAnswer($reply, $previousAnswer)) {
-                        $reply = 'Informasi yang saya sampaikan sebelumnya masih berlaku. Saya bisa menjelaskannya dengan lebih ringkas atau membandingkannya dengan periode lain.';
-                    }
-                }
-                $knowledgeUsed = ($context !== null && ! $unavailableBpsData) || $directReply !== null;
-            }
+            $context = $this->knowledgeContextFor($knowledge, $validated['message']);
+            $history = $this->conversationHistory($conversation);
+            $aiReply = $this->askAi($knowledge, $validated['message'], $sessionKey, $context, $history);
+        } catch (\Throwable $exception) {
+            report($exception);
+            $aiReply = null;
+        }
 
+        $reply = $aiReply ?? $this->fallbackAnswer($bps, $validated['message']);
+        $knowledgeUsed = $aiReply !== null && $context !== null;
+        $title = $conversation?->title ?? Str::limit(trim($validated['message']), 180, '...');
+
+        try {
             $conversation ??= ChatbotConversation::create([
                 'user_id' => $user->id,
                 'session_key' => $sessionKey,
-                'title' => Str::limit(trim($validated['message']), 180, '...'),
+                'title' => $title,
             ]);
             $conversation->messages()->create([
                 'prompt' => $validated['message'],
@@ -163,19 +145,17 @@ class ChatbotController extends Controller
                 'knowledge_used' => $knowledgeUsed,
             ]);
             $conversation->touch();
-
-            return response()->json([
-                'reply' => $reply,
-                'knowledge_used' => $knowledgeUsed,
-                'safety_blocked' => $safetyViolation !== null,
-                'conversation_id' => $conversation->id,
-                'title' => $conversation->title,
-            ]);
         } catch (\Throwable $exception) {
             report($exception);
-
-            return response()->json(['message' => 'Tidak dapat menghubungi layanan chatbot.'], 502);
         }
+
+        return response()->json([
+            'reply' => $reply,
+            'knowledge_used' => $knowledgeUsed,
+            'safety_blocked' => false,
+            'conversation_id' => $conversation?->id,
+            'title' => $conversation?->title ?? $title,
+        ]);
     }
 
     public function conversation(ChatbotConversation $conversation): JsonResponse
@@ -199,37 +179,18 @@ class ChatbotController extends Controller
         return response()->json(['message' => 'Riwayat percakapan berhasil dihapus.']);
     }
 
-    private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps, ChatbotSafetyService $safety): JsonResponse
+    private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
     {
-        $safetyViolation = $safety->check($message);
-        if ($safetyViolation !== null) {
-            return response()->json([
-                'reply' => $safetyViolation['reply'],
-                'knowledge_used' => false,
-                'safety_blocked' => true,
-            ]);
-        }
-
         try {
-            $directReply = $bps->catalogAnswerFor($message);
-            $bpsContext = $directReply === null ? $bps->contextFor($message) : null;
-            $unavailableBpsData = $bps->isUnavailableDataContext($bpsContext);
-            $context = $bpsContext ?? ($directReply === null && ! $unavailableBpsData ? $knowledge->contextFor($message) : null);
-            if ($directReply === null && ($unavailableBpsData || ($bps->isDataQuestion($message) && $context === null))) {
-                return response()->json([
-                    'reply' => 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.',
-                    'knowledge_used' => false,
-                ]);
-            }
+            $context = $this->knowledgeContextFor($knowledge, $message);
+            $aiReply = $this->askAi($knowledge, $message, $sessionId, $context);
+            $reply = $aiReply ?? $this->fallbackAnswer($bps, $message);
 
-            if ($directReply !== null) {
-                $reply = $directReply;
-            } else {
-                $reply = $this->askAi($knowledge, $message, $sessionId, $context)
-                    ?? $bps->fallbackAnswerFor($message);
-            }
-
-            return response()->json(['reply' => $reply, 'knowledge_used' => $context !== null || $directReply !== null]);
+            return response()->json([
+                'reply' => $reply,
+                'knowledge_used' => $aiReply !== null && $context !== null,
+                'safety_blocked' => false,
+            ]);
         } catch (\Throwable $exception) {
             report($exception);
 
@@ -237,18 +198,25 @@ class ChatbotController extends Controller
         }
     }
 
-    private function askAi(ChatbotKnowledgeService $knowledge, string $message, string $sessionId, ?string $context, ?string $previousAnswer = null): ?string
+    private function askAi(ChatbotKnowledgeService $knowledge, string $message, string $sessionId, ?string $context, array $history = []): ?string
     {
-        $cacheKey = $previousAnswer === null
-            ? 'chatbot:ai:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context))
-            : null;
-        if ($cacheKey !== null && ($cached = Cache::get($cacheKey)) !== null) {
-            return $cached;
+        $cacheKey = 'chatbot:ai:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context).'|'.sha1(serialize($history)));
+        try {
+            $cached = Cache::get($cacheKey);
+            if (is_string($cached) && trim($cached) !== '') {
+                return $cached;
+            }
+        } catch (\Throwable $exception) {
+            report($exception);
         }
 
         try {
-            $response = $knowledge->askWithContext($message, $sessionId, $context, $previousAnswer);
+            $response = $knowledge->askWithContext($message, $sessionId, $context, $history);
         } catch (ConnectionException $exception) {
+            report($exception);
+
+            return null;
+        } catch (\Throwable $exception) {
             report($exception);
 
             return null;
@@ -260,39 +228,66 @@ class ChatbotController extends Controller
             return null;
         }
 
-        $reply = $response->json('data');
-        if (! is_string($reply) || trim($reply) === '' || $this->isBusyReply($reply)) {
+        $reply = $response->json('reply');
+        if (! is_string($reply)) {
+            $reply = $response->json('data');
+        }
+        if (! is_string($reply) || trim($reply) === '') {
+            Log::warning('chatbot.ai_empty_reply');
+
             return null;
         }
 
-        if ($cacheKey !== null) {
+        try {
             Cache::put($cacheKey, $reply, now()->addMinutes(20));
+        } catch (\Throwable $exception) {
+            report($exception);
         }
 
         return $reply;
     }
 
-    private function isBusyReply(string $reply): bool
+    private function knowledgeContextFor(ChatbotKnowledgeService $knowledge, string $message): ?string
     {
-        return preg_match('/sedang menerima banyak permintaan|beberapa data BPS Provinsi Sumatera Selatan yang mungkin menarik/iu', $reply) === 1;
-    }
+        try {
+            return $knowledge->contextFor($message);
+        } catch (\Throwable $exception) {
+            report($exception);
 
-    private function sameAnswer(string $reply, string $previousAnswer): bool
-    {
-        $normalize = fn (string $answer) => preg_replace('/\s+/u', ' ', mb_strtolower(trim($answer))) ?? trim($answer);
-
-        return $normalize($reply) === $normalize($previousAnswer);
-    }
-
-    private function isFollowUpQuestion(string $question, string $previousQuestion): bool
-    {
-        $normalize = fn (string $text) => preg_replace('/[^\pL\pN]+/u', ' ', mb_strtolower(trim($text))) ?? trim($text);
-        if ($normalize($question) === $normalize($previousQuestion)) {
-            return true;
+            return null;
         }
+    }
 
-        return preg_match('/\b(itu|tersebut|tadi|sebelumnya|contoh|rinci|maksud|lanjutkan|lanjut|bandingkan|dibandingkan)\b/u', mb_strtolower($question)) === 1
-            || preg_match('/\b(bagaimana dengan|kalau begitu)\b/u', mb_strtolower($question)) === 1;
+    private function conversationHistory(?ChatbotConversation $conversation): array
+    {
+        try {
+            return $conversation?->messages()
+                ->latest('id')
+                ->limit(6)
+                ->get(['prompt', 'response'])
+                ->reverse()
+                ->map(fn ($turn) => [
+                    'prompt' => mb_substr($turn->prompt, 0, 4000),
+                    'response' => mb_substr($turn->response, 0, 6000),
+                ])
+                ->values()
+                ->all() ?? [];
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return [];
+        }
+    }
+
+    private function fallbackAnswer(BpsWebApiService $bps, string $message): string
+    {
+        try {
+            return $bps->fallbackAnswerFor($message);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return config('chatbot_fallback.notice')."\n\n".config('chatbot_fallback.closing');
+        }
     }
 
     /**

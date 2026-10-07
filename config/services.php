@@ -39,5 +39,9 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI') ?: env('APP_URL').'/google_callback',
     ],
+    'gemini' => [
+        'chat_url' => env('GEMINI_CHAT_API_URL', 'http://127.0.0.1:8001/api/chat'),
+        'chat_token' => env('GEMINI_CHAT_API_TOKEN'),
+    ],
 
 ];
