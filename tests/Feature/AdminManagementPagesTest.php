@@ -15,7 +15,6 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase as BaseTestCase;
 
@@ -135,8 +134,8 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertOk()
             ->assertJsonPath('knowledge_used', true);
 
-        Http::assertSent(fn($request) => str_contains($request->url(), 'key/bps-test-secret/'));
-        Http::assertSent(fn($request) => str_contains($request->url(), 'pst-chat.bpssumsel.com')
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'key/bps-test-secret/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'pst-chat.bpssumsel.com')
             && str_contains($request['text'], 'Persentase Penduduk Miskin')
             && str_contains($request['text'], '2025')
             && str_contains($request['text'], 'PERTANYAAN:'));
@@ -183,7 +182,7 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/'));
     }
 
-    public function test_dynamic_bps_context_checks_next_variable_when_top_match_lacks_requested_year(): void
+    public function test_dynamic_bps_context_rejects_ambiguous_variables_instead_of_guessing(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
         Cache::flush();
@@ -218,10 +217,8 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $context = app(BpsWebApiService::class)->contextFor('berapa jumlah produksi ikan tahun 2024');
 
-        $this->assertStringContainsString('Produksi Ikan Budidaya', $context);
-        $this->assertStringContainsString('2024', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/th/domain/1600/var/12/'));
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/12/th/2024/'));
+        $this->assertNull($context);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
     }
 
     public function test_dynamic_bps_context_uses_latest_period_and_caches_period_list(): void
@@ -258,6 +255,173 @@ class AdminManagementPagesTest extends BaseTestCase
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
         Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/980/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 2026]]]]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/980/')) {
+                return Http::response(['status' => 'OK', 'datacontent' => ['1600' => 75.5]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('IPM terbaru');
+
+        $this->assertStringContainsString('Indeks Pembangunan Manusia', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/980/th/2026/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/var/'));
+        Carbon::setTestNow();
+    }
+
+    public function test_latest_bps_indicator_does_not_fall_back_to_an_older_period(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/model/th/domain/1600/var/980/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('IPM terbaru');
+
+        $this->assertStringContainsString('tahun 2026 belum tersedia', $context);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
+        Carbon::setTestNow();
+    }
+
+    public function test_curated_population_variable_uses_verified_projection_var_id(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/51/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/51/')) {
+                return Http::response(['status' => 'OK', 'datacontent' => ['1600' => 9000000]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('berapa jumlah penduduk?');
+
+        $this->assertStringContainsString('Proyeksi Jumlah Penduduk', $context);
+        $this->assertStringContainsString('"tahun":"2025"', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/51/th/2025/'));
+        Http::assertNotSent(fn ($request) => preg_match('/\/var\/(317|320|322)\//', $request->url()) === 1);
+    }
+
+    public function test_population_projection_is_not_used_for_disaggregated_population_questions(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Http::fake();
+
+        $context = app(BpsWebApiService::class)->contextFor('jumlah penduduk menurut kabupaten kota');
+
+        $this->assertStringContainsString('Variabel terverifikasi', $context);
+        Http::assertNothingSent();
+    }
+
+    public function test_poverty_count_does_not_use_the_verified_poverty_percentage_variable(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Http::fake();
+
+        $context = app(BpsWebApiService::class)->contextFor('berapa jumlah penduduk miskin?');
+
+        $this->assertStringContainsString('Variabel terverifikasi', $context);
+        Http::assertNothingSent();
+    }
+
+    public function test_historical_monthly_indicator_uses_dated_bps_press_release(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(['webapi.bps.go.id/*' => Http::response([
+            'status' => 'OK',
+            'data' => [['total' => 1, 'pages' => 1], [[
+                'title' => 'Inflasi Sumatera Selatan 2024',
+                'rl_date' => '2024-03-01',
+                'abstract' => 'Rilis inflasi periode 2024.',
+            ]]],
+        ])]);
+
+        $context = app(BpsWebApiService::class)->contextFor('inflasi tahun 2024');
+
+        $this->assertStringContainsString('"tanggal":"2024-03-01"', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/')
+            && str_contains($request->url(), '/year/2024/')
+            && str_contains($request->url(), '/keyword/inflasi/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
+    }
+
+    public function test_monthly_latest_request_does_not_fall_back_when_brs_has_no_dated_release(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(['webapi.bps.go.id/*' => Http::response([
+            'status' => 'OK',
+            'data' => [['total' => 0, 'pages' => 1], []],
+        ])]);
+
+        $context = app(BpsWebApiService::class)->contextFor('pengangguran terbaru');
+
+        $this->assertStringContainsString('BRS bertanggal', $context);
+        $this->assertStringContainsString('2026', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/')
+            && str_contains($request->url(), '/year/2026/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
+        Carbon::setTestNow();
+    }
+
+    public function test_chatbot_reports_unavailable_latest_data_without_calling_ai_or_using_older_periods(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/model/th/domain/1600/var/980/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
+            }
+            if (str_contains($request->url(), '/model/pressrelease/')) {
+                return Http::response(['status' => 'OK', 'data' => [['total' => 0, 'pages' => 1], []]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'IPM terbaru'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.');
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'pengangguran terbaru'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.');
+
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'pst-chat.bpssumsel.com'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
+        Carbon::setTestNow();
+    }
+
+    public function test_explicit_historical_ipm_year_remains_available(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
             if (str_contains($url, '/model/th/domain/1600/var/980/')) {
@@ -270,11 +434,10 @@ class AdminManagementPagesTest extends BaseTestCase
             return Http::response(['status' => 'ERROR'], 404);
         });
 
-        $context = app(BpsWebApiService::class)->contextFor('IPM terbaru');
+        $context = app(BpsWebApiService::class)->contextFor('IPM tahun 2025');
 
-        $this->assertStringContainsString('Indeks Pembangunan Manusia', $context);
+        $this->assertStringContainsString('"tahun":"2025"', $context);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/980/th/2025/'));
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/var/'));
     }
 
     public function test_static_tables_without_main_keyword_are_rejected(): void
@@ -556,6 +719,107 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertJsonPath('reply', 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.');
 
         Http::assertNothingSent();
+    }
+
+    public function test_chatbot_replaces_busy_ai_reply_with_latest_topic_brs_template(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), 'pst-chat.bpssumsel.com')) {
+                return Http::response(['data' => 'Saat ini chatbot BPS Sumsel sedang menerima banyak permintaan. Coba lagi nanti.'], 200);
+            }
+            if (str_contains($request->url(), '/model/pressrelease/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['total' => 1, 'pages' => 1], [[
+                        'title' => 'Inflasi Sumatera Selatan sebesar 3,2 persen',
+                        'rl_date' => '2026-10-01',
+                    ]]],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $response = $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'inflasi bulan ini'])
+            ->assertOk();
+        $this->assertStringContainsString('Inflasi Sumatera Selatan sebesar 3,2 persen', $response->json('reply'));
+        $this->assertStringContainsString('rilis: 2026-10-01', $response->json('reply'));
+        $this->assertStringNotContainsString('Coba lagi nanti.', $response->json('reply'));
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'pst-chat.bpssumsel.com'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/')
+            && str_contains($request->url(), '/year/2026/month/10/'));
+        Carbon::setTestNow();
+    }
+
+    public function test_chatbot_replaces_ai_http_error_with_fallback_instead_of_returning_502(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        Http::fake(['pst-chat.bpssumsel.com/*' => Http::response(['error' => 'busy'], 503)]);
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'Apa manfaat layanan konsultasi?'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Maaf, chatbot BPS Sumsel sedang menerima banyak permintaan sehingga belum dapat memproses pesan Anda.'."\n\nSilakan kirim pertanyaan Anda lagi beberapa saat lagi, atau kunjungi https://sumsel.bps.go.id.");
+    }
+
+    public function test_chatbot_replaces_ai_connection_failure_with_fallback(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        Http::fake(['pst-chat.bpssumsel.com/*' => Http::failedConnection()]);
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'Apa manfaat layanan konsultasi?'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Maaf, chatbot BPS Sumsel sedang menerima banyak permintaan sehingga belum dapat memproses pesan Anda.'."\n\nSilakan kirim pertanyaan Anda lagi beberapa saat lagi, atau kunjungi https://sumsel.bps.go.id.");
+    }
+
+    public function test_admin_chatbot_test_uses_fallback_when_ai_is_unavailable(): void
+    {
+        Http::fake(['pst-chat.bpssumsel.com/*' => Http::response(['error' => 'busy'], 503)]);
+
+        $this->actingAs($this->admin)
+            ->postJson(route('admin.chatbot.test'), ['message' => 'Apa manfaat layanan konsultasi?'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Maaf, chatbot BPS Sumsel sedang menerima banyak permintaan sehingga belum dapat memproses pesan Anda.'."\n\nSilakan kirim pertanyaan Anda lagi beberapa saat lagi, atau kunjungi https://sumsel.bps.go.id.");
+    }
+
+    public function test_successful_ai_reply_is_cached_for_twenty_minutes(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        Cache::flush();
+        $aiRequests = 0;
+        Http::fake(function ($request) use (&$aiRequests) {
+            if (str_contains($request->url(), 'pst-chat.bpssumsel.com')) {
+                $aiRequests++;
+
+                return Http::response(['data' => 'Jawaban AI yang dapat digunakan kembali.'], 200);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        foreach (range(1, 2) as $_) {
+            $this->actingAs($user)
+                ->postJson(route('chatbot.message'), ['message' => 'Apa manfaat layanan konsultasi?'])
+                ->assertOk()
+                ->assertJsonPath('reply', 'Jawaban AI yang dapat digunakan kembali.');
+        }
+
+        $this->assertSame(1, $aiRequests);
     }
 
     public function test_inflation_for_current_month_uses_bps_press_release_context(): void

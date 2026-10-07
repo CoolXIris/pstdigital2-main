@@ -7,10 +7,13 @@ use App\Models\ChatbotKnowledgeSource;
 use App\Services\BpsWebApiService;
 use App\Services\ChatbotKnowledgeService;
 use App\Services\ChatbotSafetyService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
@@ -124,7 +127,8 @@ class ChatbotController extends Controller
             } else {
                 $directReply = $bps->catalogAnswerFor($validated['message']);
                 $bpsContext = $directReply === null ? $bps->contextFor($validated['message']) : null;
-                $knowledgeContext = $directReply === null && $bpsContext === null
+                $unavailableBpsData = $bps->isUnavailableDataContext($bpsContext);
+                $knowledgeContext = $directReply === null && $bpsContext === null && ! $unavailableBpsData
                     ? $knowledge->contextFor($validated['message'])
                     : null;
                 $context = $bpsContext ?? $knowledgeContext;
@@ -135,23 +139,17 @@ class ChatbotController extends Controller
                     : null;
                 if ($directReply !== null) {
                     $reply = $directReply;
-                } elseif ($isDataQuestion && $context === null) {
+                } elseif ($unavailableBpsData || ($isDataQuestion && $context === null)) {
                     $reply = 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.';
                 } else {
-                    $response = $knowledge->askWithContext($validated['message'], $sessionKey, $context, $previousAnswer);
-                    if (! $response->successful()) {
-                        return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
-                    }
-
-                    $reply = $response->json('data');
-                    if (! is_string($reply) || trim($reply) === '') {
-                        return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
-                    }
-                    if ($previousAnswer !== null && $this->sameAnswer($reply, $previousAnswer)) {
+                    $reply = $this->askAi($knowledge, $validated['message'], $sessionKey, $context, $previousAnswer);
+                    if ($reply === null) {
+                        $reply = $bps->fallbackAnswerFor($validated['message']);
+                    } elseif ($previousAnswer !== null && $this->sameAnswer($reply, $previousAnswer)) {
                         $reply = 'Informasi yang saya sampaikan sebelumnya masih berlaku. Saya bisa menjelaskannya dengan lebih ringkas atau membandingkannya dengan periode lain.';
                     }
                 }
-                $knowledgeUsed = $context !== null || $directReply !== null;
+                $knowledgeUsed = ($context !== null && ! $unavailableBpsData) || $directReply !== null;
             }
 
             $conversation ??= ChatbotConversation::create([
@@ -215,8 +213,9 @@ class ChatbotController extends Controller
         try {
             $directReply = $bps->catalogAnswerFor($message);
             $bpsContext = $directReply === null ? $bps->contextFor($message) : null;
-            $context = $bpsContext ?? ($directReply === null ? $knowledge->contextFor($message) : null);
-            if ($directReply === null && $bps->isDataQuestion($message) && $context === null) {
+            $unavailableBpsData = $bps->isUnavailableDataContext($bpsContext);
+            $context = $bpsContext ?? ($directReply === null && ! $unavailableBpsData ? $knowledge->contextFor($message) : null);
+            if ($directReply === null && ($unavailableBpsData || ($bps->isDataQuestion($message) && $context === null))) {
                 return response()->json([
                     'reply' => 'Maaf, data tersebut belum ditemukan di WebAPI BPS. Silakan cek https://sumsel.bps.go.id.',
                     'knowledge_used' => false,
@@ -226,15 +225,8 @@ class ChatbotController extends Controller
             if ($directReply !== null) {
                 $reply = $directReply;
             } else {
-                $response = $knowledge->askWithContext($message, $sessionId, $context);
-                if (! $response->successful()) {
-                    return response()->json(['message' => 'Layanan chatbot merespons dengan status '.$response->status().'.'], 502);
-                }
-
-                $reply = $response->json('data');
-                if (! is_string($reply) || trim($reply) === '') {
-                    return response()->json(['message' => 'Layanan merespons, tetapi format jawabannya tidak dikenali.'], 502);
-                }
+                $reply = $this->askAi($knowledge, $message, $sessionId, $context)
+                    ?? $bps->fallbackAnswerFor($message);
             }
 
             return response()->json(['reply' => $reply, 'knowledge_used' => $context !== null || $directReply !== null]);
@@ -243,6 +235,46 @@ class ChatbotController extends Controller
 
             return response()->json(['message' => 'Tidak dapat menghubungi layanan chatbot.'], 502);
         }
+    }
+
+    private function askAi(ChatbotKnowledgeService $knowledge, string $message, string $sessionId, ?string $context, ?string $previousAnswer = null): ?string
+    {
+        $cacheKey = $previousAnswer === null
+            ? 'chatbot:ai:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context))
+            : null;
+        if ($cacheKey !== null && ($cached = Cache::get($cacheKey)) !== null) {
+            return $cached;
+        }
+
+        try {
+            $response = $knowledge->askWithContext($message, $sessionId, $context, $previousAnswer);
+        } catch (ConnectionException $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            Log::warning('chatbot.ai_unavailable', ['status' => $response->status()]);
+
+            return null;
+        }
+
+        $reply = $response->json('data');
+        if (! is_string($reply) || trim($reply) === '' || $this->isBusyReply($reply)) {
+            return null;
+        }
+
+        if ($cacheKey !== null) {
+            Cache::put($cacheKey, $reply, now()->addMinutes(20));
+        }
+
+        return $reply;
+    }
+
+    private function isBusyReply(string $reply): bool
+    {
+        return preg_match('/sedang menerima banyak permintaan|beberapa data BPS Provinsi Sumatera Selatan yang mungkin menarik/iu', $reply) === 1;
     }
 
     private function sameAnswer(string $reply, string $previousAnswer): bool

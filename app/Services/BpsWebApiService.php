@@ -12,9 +12,22 @@ use Illuminate\Support\Str;
 
 class BpsWebApiService
 {
-    private const GENERIC_TERMS = ['jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak'];
+    private const GENERIC_TERMS = ['jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia'];
 
     private const SETTING_KEY = 'bps_webapi_key';
+
+    private const BRS_TOPICS = [
+        ['question' => '/\b(inflasi|ihk)\b/i', 'title' => '/inflasi/i', 'keyword' => 'inflasi'],
+        ['question' => '/\bntp\b|nilai tukar petani/i', 'title' => '/\bNTP\b|nilai tukar petani/i', 'keyword' => 'ntp'],
+        ['question' => '/\bekspor\b/i', 'title' => '/ekspor|neraca perdagangan/i', 'keyword' => 'ekspor'],
+        ['question' => '/\bimpor\b/i', 'title' => '/impor|neraca perdagangan/i', 'keyword' => 'impor'],
+        ['question' => '/neraca perdagangan/i', 'title' => '/neraca perdagangan|ekspor|impor/i', 'keyword' => 'perdagangan'],
+        ['question' => '/\b(wisman|wisatawan|wisata|pariwisata|hotel|tpk)\b/i', 'title' => '/wisman|wisnus|hotel|TPK/i', 'keyword' => 'pariwisata'],
+        ['question' => '/\b(penumpang|transportasi)\b/i', 'title' => '/penumpang|transportasi/i', 'keyword' => 'penumpang'],
+        ['question' => '/\b(ketenagakerjaan|tenaga\s+kerja|penganggur\w*|tpt|upah)\b/i', 'title' => '/ketenagakerjaan|penganggur|TPT|upah/i', 'keyword' => 'ketenagakerjaan'],
+        ['question' => '/miskin|kemiskinan/i', 'title' => '/kemiskinan|penduduk miskin/i', 'keyword' => 'kemiskinan'],
+        ['question' => '/pertumbuhan ekonomi|laju ekonomi|pdrb/i', 'title' => '/pertumbuhan ekonomi|PDRB/i', 'keyword' => 'pdrb'],
+    ];
 
     public function hasApiKey(): bool
     {
@@ -39,12 +52,23 @@ class BpsWebApiService
         return preg_match('/\b(berapa|persen\w*|persentase|jumlah|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|indikator|data|statistik)\b/i', $question) === 1;
     }
 
+    public function isUnavailableDataContext(?string $context): bool
+    {
+        return is_string($context) && str_starts_with($context, '[WebAPI BPS][DATA_BELUM_TERSEDIA]');
+    }
+
     public function contextFor(string $question): ?string
     {
         $apiKey = $this->apiKey();
         $catalog = $this->catalogIntent($question);
         if ($catalog !== null && $apiKey === null) {
             return '[WebAPI BPS] API key belum dikonfigurasi. Beri tahu pengguna bahwa data '.$catalog['label'].' belum dapat diambil dan jangan mengarang daftar atau jumlah.';
+        }
+        if ($this->isMonthlyBpsTopic($question) && $apiKey === null) {
+            return $this->monthlyReleaseUnavailableContext($question);
+        }
+        if ($apiKey === null && $this->isDataQuestion($question) && $this->isCurrentPeriodRequest($question)) {
+            return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk periode terbaru/tahun berjalan belum dapat diverifikasi tanpa koneksi WebAPI BPS. Jangan gunakan periode lama sebagai pengganti.';
         }
 
         $keywords = $this->keywords($question);
@@ -58,18 +82,19 @@ class BpsWebApiService
                 return $this->catalogContext($catalog, $domain, $apiKey);
             }
 
-            $requestedYear = preg_match('/\b(20\d{2})\b/', $question, $yearMatch) ? (int) $yearMatch[1] : null;
-            if (($requestedYear === null || $requestedYear >= now('Asia/Jakarta')->year)
-                && $this->isMonthlyBpsTopic($question)) {
+            if ($this->isMonthlyBpsTopic($question)) {
                 $pressReleaseContext = $this->pressReleaseContextFor($question, $domain, $apiKey);
-                if ($pressReleaseContext !== null) {
-                    return $pressReleaseContext;
-                }
+
+                return $pressReleaseContext ?? $this->monthlyReleaseUnavailableContext($question);
             }
 
             $dynamicContext = $this->dynamicContextFor($question, $keywords, $domain, $apiKey);
             if ($dynamicContext !== null) {
                 return $dynamicContext;
+            }
+
+            if ($this->isDataQuestion($question) && $this->isCurrentPeriodRequest($question)) {
+                return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk periode terbaru/tahun berjalan belum ditemukan. Jangan gunakan periode lama atau variabel yang kurang relevan sebagai pengganti.';
             }
 
             $tables = $this->matchingTables($keywords, $domain, $apiKey);
@@ -91,11 +116,19 @@ class BpsWebApiService
                 }
             }
 
-            return $context === [] ? null : implode("\n\n", $context);
+            if ($context !== []) {
+                return implode("\n\n", $context);
+            }
+
+            return null;
         } catch (ConnectionException) {
-            return $catalog === null
-                ? null
-                : '[WebAPI BPS] API tidak dapat dihubungi untuk mengambil '.$catalog['label'].'. Beri tahu pengguna bahwa data belum dapat diverifikasi dan jangan mengarang daftar atau jumlah.';
+            if ($catalog !== null) {
+                return '[WebAPI BPS] API tidak dapat dihubungi untuk mengambil '.$catalog['label'].'. Beri tahu pengguna bahwa data belum dapat diverifikasi dan jangan mengarang daftar atau jumlah.';
+            }
+
+            return $this->isMonthlyBpsTopic($question)
+                ? $this->monthlyReleaseUnavailableContext($question)
+                : null;
         }
     }
 
@@ -144,6 +177,42 @@ class BpsWebApiService
         }
 
         return $answer;
+    }
+
+    public function fallbackAnswerFor(string $question): string
+    {
+        $busy = 'Maaf, chatbot BPS Sumsel sedang menerima banyak permintaan sehingga belum dapat memproses pesan Anda.';
+        $outro = "\n\nSilakan kirim pertanyaan Anda lagi beberapa saat lagi, atau kunjungi https://sumsel.bps.go.id.";
+
+        $apiKey = $this->apiKey();
+        if ($apiKey === null) {
+            return $busy.$outro;
+        }
+
+        try {
+            $topic = $this->topicPatternFor($question);
+            $items = $this->latestPressReleases($apiKey, $topic, 5);
+            $heading = 'Berita Resmi Statistik yang terkait dengan pertanyaan Anda';
+            if ($items === []) {
+                $items = $this->latestPressReleases($apiKey, null, 5);
+                $heading = 'Berita Resmi Statistik terbaru';
+            }
+        } catch (ConnectionException) {
+            return $busy.$outro;
+        }
+
+        if ($items === []) {
+            return $busy.$outro;
+        }
+
+        $lines = [$busy.' Berikut data terbaru langsung dari WebAPI BPS:', '', $heading.':'];
+        foreach ($items as $index => $item) {
+            $lines[] = ($index + 1).'. '.$item['judul'].(isset($item['tanggal']) ? ' (rilis: '.$item['tanggal'].')' : '');
+        }
+        $lines[] = '';
+        $lines[] = 'Data diambil dari WebAPI BPS pada '.now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.';
+
+        return implode("\n", $lines).$outro;
     }
 
     private function catalogIntent(string $question): ?array
@@ -357,15 +426,21 @@ class BpsWebApiService
             return null;
         }
 
+        $hasCuratedIntent = $this->hasCuratedIndicatorIntent($terms);
         $variables = $this->curatedVariables($terms);
         if ($variables === []) {
+            if ($hasCuratedIntent) {
+                return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Variabel terverifikasi untuk rincian indikator yang diminta belum tersedia. Jangan menggantinya dengan var_id hasil tebakan.';
+            }
             $variables = $this->matchingVariables($terms, $question, $domain, $apiKey);
         }
         if ($variables === []) {
             return null;
         }
 
-        $requestedYear = preg_match('/\b(20\d{2})\b/', $question, $yearMatch) ? $yearMatch[1] : null;
+        $requestedYear = preg_match('/\b(20\d{2})\b/', $question, $yearMatch)
+            ? $yearMatch[1]
+            : ($this->isCurrentPeriodRequest($question) ? (string) now('Asia/Jakarta')->year : null);
         $requestedQuarter = $this->requestedQuarter($question);
         $notes = [];
         $candidates = [];
@@ -386,7 +461,7 @@ class BpsWebApiService
                 : array_values(array_filter($periods, fn (array $period) => (string) ($period['th'] ?? '') === $requestedYear));
 
             if ($requestedYear !== null && $periodsToCheck === []) {
-                $notes[] = 'Data WebAPI BPS untuk '.$variable['title'].' tahun '.$requestedYear.' belum tersedia. Periode terbaru pada API: '.($periods[0]['th'] ?? 'tidak diketahui').'. Jangan gunakan tahun lain sebagai pengganti.';
+                $notes[] = 'Data WebAPI BPS untuk '.$variable['title'].' tahun '.$requestedYear.' belum tersedia. Jangan gunakan periode lain sebagai pengganti.';
 
                 continue;
             }
@@ -449,21 +524,12 @@ class BpsWebApiService
             return implode("\n\n", $contexts);
         }
 
-        $requestedYearValue = $requestedYear === null ? null : (int) $requestedYear;
-        if (($requestedYearValue === null || $requestedYearValue >= now('Asia/Jakarta')->year)
-            && $this->isMonthlyBpsTopic($question)) {
-            $pressReleaseContext = $this->pressReleaseContextFor($question, $domain, $apiKey);
-            if ($pressReleaseContext !== null) {
-                return $pressReleaseContext;
-            }
-        }
-
         if ($notes !== []) {
-            return $notes[0];
+            return '[WebAPI BPS][DATA_BELUM_TERSEDIA] '.$notes[0];
         }
 
         if ($requestedYear !== null && $variables !== []) {
-            return 'WebAPI BPS belum mengembalikan nilai untuk indikator yang cocok pada tahun '.$requestedYear.'. Jangan menyajikan data tahun sebelumnya sebagai data '.$requestedYear.'.';
+            return '[WebAPI BPS][DATA_BELUM_TERSEDIA] WebAPI BPS belum mengembalikan nilai untuk indikator yang cocok pada tahun '.$requestedYear.'. Jangan menyajikan data tahun sebelumnya sebagai data '.$requestedYear.'.';
         }
 
         return null;
@@ -472,17 +538,9 @@ class BpsWebApiService
     private function pressReleaseContextFor(string $question, string $domain, string $apiKey): ?string
     {
         $keyword = null;
-        foreach ([
-            'inflasi' => '/\binflasi\b/i',
-            'ntp' => '/\bntp\b/i',
-            'ekspor' => '/\bekspor\b/i',
-            'impor' => '/\bimpor\b/i',
-            'pariwisata' => '/\b(wisata|pariwisata|hotel)\w*\b/i',
-            'penumpang' => '/\b(penumpang|transportasi)\w*\b/i',
-            'ketenagakerjaan' => '/\b(ketenagakerjaan|tenaga\s+kerja|penganggur\w*|tpt|upah)\b/i',
-        ] as $term => $pattern) {
-            if (preg_match($pattern, $question)) {
-                $keyword = $term;
+        foreach (self::BRS_TOPICS as $topic) {
+            if (preg_match($topic['question'], $question)) {
+                $keyword = $topic['keyword'];
                 break;
             }
         }
@@ -490,26 +548,34 @@ class BpsWebApiService
             return null;
         }
 
-        $context = Cache::remember('bps-webapi:press-release:'.$domain.':'.$keyword, now()->addHour(), function () use ($keyword, $domain, $apiKey) {
+        $dateFilters = $this->pressReleaseDateFilters($question);
+        $cacheKey = 'bps-webapi:press-release:'.$domain.':'.$keyword.':'.sha1(json_encode($dateFilters) ?: '');
+        $context = Cache::remember($cacheKey, now()->addHour(), function () use ($keyword, $domain, $apiKey, $dateFilters) {
             $catalog = ['model' => 'pressrelease', 'label' => 'Berita Resmi Statistik '.$keyword, 'limit' => 5, 'pages' => 1, 'dated' => true];
-            $today = now('Asia/Jakarta');
-            for ($monthsBack = 0; $monthsBack <= 2; $monthsBack++) {
-                $month = $today->copy()->subMonthsNoOverflow($monthsBack);
+            $months = [];
+            if (isset($dateFilters['year'])) {
+                $months[] = $dateFilters;
+            } else {
+                $today = now('Asia/Jakarta');
+                for ($monthsBack = 0; $monthsBack <= 2; $monthsBack++) {
+                    $month = $today->copy()->subMonthsNoOverflow($monthsBack);
+                    $months[] = ['year' => $month->year, 'month' => $month->month];
+                }
+            }
+
+            foreach ($months as $filters) {
                 try {
-                    $result = $this->fetchCatalog($catalog, $domain, $apiKey, [
-                        'year' => $month->year,
-                        'month' => $month->month,
-                        'keyword' => $keyword,
-                    ]);
+                    $result = $this->fetchCatalog($catalog, $domain, $apiKey, $filters + ['keyword' => $keyword]);
                 } catch (ConnectionException) {
                     return '';
                 }
                 if (isset($result['error'])) {
                     return '';
                 }
-                if ($result['items'] !== []) {
+                $datedItems = array_values(array_filter($result['items'], fn (array $item) => isset($item['tanggal'])));
+                if ($datedItems !== []) {
                     $lines = ['[Sumber: Berita Resmi Statistik BPS, kata kunci '.$keyword.']'];
-                    foreach ($result['items'] as $index => $item) {
+                    foreach ($datedItems as $index => $item) {
                         $lines[] = ($index + 1).'. '.json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                     }
 
@@ -521,6 +587,104 @@ class BpsWebApiService
         });
 
         return $context !== '' ? $context : null;
+    }
+
+    private function latestPressReleases(string $apiKey, ?string $titlePattern, int $max, int $monthsBack = 6): array
+    {
+        $catalog = ['model' => 'pressrelease', 'label' => 'Berita Resmi Statistik', 'limit' => 30, 'pages' => 3, 'dated' => true];
+        $now = now('Asia/Jakarta');
+        $found = [];
+
+        for ($back = 0; $back <= $monthsBack && count($found) < $max; $back++) {
+            $month = $now->copy()->subMonthsNoOverflow($back);
+            $cacheKey = "bps-webapi:brs:{$month->year}-{$month->month}";
+            $result = Cache::get($cacheKey);
+            if ($result === null) {
+                $result = $this->fetchCatalog($catalog, '1600', $apiKey, ['year' => $month->year, 'month' => $month->month]);
+                if (isset($result['error'])) {
+                    continue;
+                }
+                Cache::put($cacheKey, $result, now()->addMinutes(30));
+            }
+
+            foreach ($result['items'] as $item) {
+                if (isset($item['judul'], $item['tanggal'])
+                    && ($titlePattern === null || preg_match($titlePattern, $item['judul']))) {
+                    $found[] = $item;
+                }
+            }
+            if ($titlePattern === null && $found !== []) {
+                break;
+            }
+        }
+
+        usort($found, fn (array $left, array $right) => strcmp($right['tanggal'], $left['tanggal']));
+
+        return array_slice($found, 0, $max);
+    }
+
+    private function topicPatternFor(string $question): ?string
+    {
+        foreach (self::BRS_TOPICS as $topic) {
+            if (preg_match($topic['question'], $question)) {
+                return $topic['title'];
+            }
+        }
+
+        return null;
+    }
+
+    private function pressReleaseDateFilters(string $question): array
+    {
+        $filters = [];
+        if (preg_match('/\b(20\d{2})\b/', $question, $match)) {
+            $filters['year'] = (int) $match[1];
+        } elseif (preg_match('/\b(tahun ini|tahun sekarang|sekarang|saat ini|terbaru|terkini|terakhir)\b/i', $question)) {
+            $filters['year'] = now('Asia/Jakarta')->year;
+        }
+
+        if (preg_match('/\bbulan\s+(1[0-2]|[1-9])\b/i', $question, $match)) {
+            $filters['month'] = (int) $match[1];
+        } else {
+            $months = [
+                'januari' => 1, 'februari' => 2, 'maret' => 3, 'april' => 4,
+                'mei' => 5, 'juni' => 6, 'juli' => 7, 'agustus' => 8,
+                'september' => 9, 'oktober' => 10, 'november' => 11, 'desember' => 12,
+            ];
+            foreach ($months as $name => $number) {
+                if (preg_match('/\b'.preg_quote($name, '/').'\b/i', $question)) {
+                    $filters['month'] = $number;
+                    break;
+                }
+            }
+        }
+
+        if (isset($filters['month']) && ! isset($filters['year'])) {
+            $filters['year'] = now('Asia/Jakarta')->year;
+        }
+
+        return $filters;
+    }
+
+    private function monthlyReleaseUnavailableContext(string $question): string
+    {
+        $year = preg_match('/\b(20\d{2})\b/', $question, $match)
+            ? $match[1]
+            : (preg_match('/\b(tahun ini|tahun sekarang|sekarang|saat ini|terbaru|terkini|terakhir)\b/i', $question)
+                ? (string) now('Asia/Jakarta')->year
+                : 'periode yang diminta');
+
+        return '[WebAPI BPS][DATA_BELUM_TERSEDIA] BRS bertanggal untuk indikator bulanan '.$year.' belum ditemukan atau belum dapat diverifikasi. Jangan gunakan nilai dari variabel lain atau periode yang lebih lama sebagai pengganti. Beri tahu pengguna data tersebut belum tersedia dan arahkan ke https://sumsel.bps.go.id.';
+    }
+
+    private function isCurrentPeriodRequest(string $question): bool
+    {
+        if (preg_match('/\b(tahun ini|tahun sekarang|bulan ini|sekarang|saat ini|terbaru|terkini|terakhir)\b/i', $question)) {
+            return true;
+        }
+
+        return preg_match('/\b(20\d{2})\b/', $question, $match) === 1
+            && (int) $match[1] === now('Asia/Jakarta')->year;
     }
 
     private function isMonthlyBpsTopic(string $question): bool
@@ -580,19 +744,34 @@ class BpsWebApiService
         }
 
         uasort($variables, fn (array $left, array $right) => $right['score'] <=> $left['score']);
+        $ranked = array_values($variables);
+        $best = $ranked[0] ?? null;
+        $runnerUp = $ranked[1] ?? null;
+        if ($best === null
+            || $best['score'] < 6
+            || ($runnerUp !== null && $best['score'] - $runnerUp['score'] < 4)) {
+            return [];
+        }
 
-        return array_column(array_slice($variables, 0, 5, true), 'variable');
+        return [$best['variable']];
     }
 
     private function curatedVariables(array $terms): array
     {
         $variables = [];
         foreach (config('bps_indicators.groups', []) as $group) {
-            if (array_intersect($terms, $group['terms'] ?? []) === []) {
+            $matchedGroupTerms = array_values(array_intersect($terms, $group['terms'] ?? []));
+            if ($matchedGroupTerms === []
+                || (in_array('ipm', $group['terms'] ?? [], true)
+                    && ! in_array('ipm', $matchedGroupTerms, true)
+                    && count($matchedGroupTerms) < 2)) {
                 continue;
             }
 
             foreach ($group['variables'] ?? [] as $variable) {
+                if (array_intersect($terms, $variable['excludes'] ?? []) !== []) {
+                    continue;
+                }
                 $score = 0;
                 foreach ($terms as $term) {
                     if (in_array($term, $variable['terms'] ?? [], true)) {
@@ -607,6 +786,25 @@ class BpsWebApiService
         uasort($variables, fn (array $left, array $right) => ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0));
 
         return array_values(array_slice($variables, 0, 5));
+    }
+
+    private function hasCuratedIndicatorIntent(array $terms): bool
+    {
+        foreach (config('bps_indicators.groups', []) as $group) {
+            $matchedGroupTerms = array_values(array_intersect($terms, $group['terms'] ?? []));
+            if ($matchedGroupTerms === []) {
+                continue;
+            }
+            if (in_array('ipm', $group['terms'] ?? [], true)
+                && ! in_array('ipm', $matchedGroupTerms, true)
+                && count($matchedGroupTerms) < 2) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private function variablesForKeyword(string $keyword, string $domain, string $apiKey): array
@@ -797,8 +995,16 @@ class BpsWebApiService
         }
 
         uasort($matches, fn (array $left, array $right) => $right['score'] <=> $left['score']);
+        $ranked = array_values($matches);
+        $best = $ranked[0] ?? null;
+        $runnerUp = $ranked[1] ?? null;
+        if ($best === null
+            || $best['score'] < 6
+            || ($runnerUp !== null && $best['score'] - $runnerUp['score'] < 4)) {
+            return [];
+        }
 
-        return array_slice(array_column(array_slice($matches, 0, 2, true), 'table'), 0, 2);
+        return [$best['table']];
     }
 
     private function mainKeyword(array $keywords): ?string
