@@ -53,8 +53,9 @@ MAX_CHATS_PER_MINUTE = int(os.getenv("GEMINI_MAX_CHATS_PER_MINUTE", "4"))
 
 DATA_QUESTION = re.compile(
     r"\b(berapa|persen\w*|jumlah|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|"
-    r"\w*miskin\w*|penduduk|pdrb|ekspor|impor|upah|penganggur\w*|ntp|terbaru|produksi|"
-    r"padi|beras|luas|panen|pertanian|perkebunan|perikanan|konsumsi)\b",
+    r"\w*miskin\w*|penduduk|warga|jiwa|populasi|pdrb|ekspor|impor|upah|penganggur\w*|"
+    r"ntp|terbaru|produksi|gaji|penghasilan|pendapatan|minimum|ump|umk|umr|padi|beras|"
+    r"luas|panen|pertanian|perkebunan|perikanan|konsumsi)\b",
     re.IGNORECASE,
 )
 GREETING_ONLY = re.compile(
@@ -129,8 +130,8 @@ def build_instructions() -> str:
         "3. Indikator bulanan/triwulanan dan pertanyaan 'terbaru' (inflasi, NTP, ekspor-impor, pariwisata, pengangguran, "
         "kemiskinan terbaru, pertumbuhan ekonomi triwulan): panggil berita_resmi_statistik dengan kata kunci inti; "
         "angka utama dapat ada pada judul atau ringkasan. Jika pengguna meminta bulan dan tahun tertentu, cari BRS "
-        "yang judulnya memuat keduanya. Jika tidak ditemukan, katakan 'Data untuk {bulan} {tahun} tidak ditemukan; "
-        "berikut yang terbaru:' lalu tampilkan rilis terbaru tanpa menyebutnya sebagai data bulan yang diminta. "
+        "yang judulnya memuat keduanya; jika hanya tahun yang disebut, cari seluruh rilis yang membahas tahun itu. "
+        "Jika periode yang diminta tidak ditemukan, sebutkan periode itu dengan jelas lalu bedakan dengan rilis terbaru. "
         "Untuk pertanyaan wilayah, periksa ringkasan BRS untuk nama wilayah dan tampilkan kalimat yang memuat angka "
         "wilayah tersebut; jangan menebak angka kota dari angka provinsi.\n"
         "4. Pertanyaan publikasi atau katalog: panggil publikasi_terbaru. Jika memfilter berdasarkan bulan, bulan "
@@ -140,7 +141,10 @@ def build_instructions() -> str:
         "misalnya 'Maret 2025', bukan hanya '2025'.\n"
         "6. Jika wilayah yang ditanya tidak ada pada data, katakan tidak tersedia pada tingkat itu; jangan mengganti "
         "dengan angka provinsi tanpa menyebutnya.\n"
-        "7. Jika tools tidak menghasilkan data relevan, katakan belum ditemukan dan arahkan ke https://sumsel.bps.go.id. "
+        "7. Jika status_hasil='gagal_teknis', jangan menyatakan data tidak ada di BPS dan jangan menyebut penyebab "
+        "kegagalan teknis; katakan data belum dapat diverifikasi. Jika status_hasil='kosong', nyatakan hanya bahwa "
+        "pencarian/periode itu tidak menghasilkan data. Jika tools tidak menghasilkan data relevan, arahkan ke "
+        "https://sumsel.bps.go.id. "
         "Jangan menebak angka, indikator, wilayah, atau tahun.\n"
         "8. Gunakan paling banyak 4 panggilan tool dan jangan mengulang panggilan dengan argumen yang sama. "
         "cari_variabel mencari indeks variabel domain lokal dengan toleransi salah ketik, stem, dan sinonim. "
@@ -243,7 +247,7 @@ def _record_unresolved_question(question: str, reason: str, keyword: str | None 
         "occurred_at": datetime.now(WIB).isoformat(),
         "question": redact(question)[:240],
         "reason": reason[:80],
-        "keyword": redact(keyword or "")[:80],
+        "keyword": redact(bps_tools._clean_search_keyword(keyword or question))[:80],
     }
     logger.warning("BPS_QUERY_UNRESOLVED %s", json.dumps(entry, ensure_ascii=False))
 
@@ -381,7 +385,28 @@ def _canonical_indicator_intent(question: str) -> tuple[str, str, Optional[str]]
     return name, year or "", selected_region
 
 
-def _monthly_intent(question: str) -> tuple[str, str, int] | None:
+def _year_range_intent(question: str) -> tuple[int, int] | None:
+    match = re.search(
+        r"\b(20\d{2})\s*(?:sampai|hingga|s\/d\.?|[-–])\s*(20\d{2})\b",
+        question,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _minimum_wage_question(question: str) -> bool:
+    has_income_term = re.search(
+        r"\b(upah|gaji|ump|umk|umr|penghasilan|pendapatan)\b",
+        question,
+        re.IGNORECASE,
+    )
+    has_minimum_term = re.search(r"\b(minimum|ump|umk|umr)\b", question, re.IGNORECASE)
+    return bool(has_income_term and has_minimum_term)
+
+
+def _monthly_intent(question: str) -> tuple[str, Optional[str], int] | None:
     text = question.lower()
     months = {
         "januari": "januari", "februari": "februari", "maret": "maret", "april": "april",
@@ -390,7 +415,7 @@ def _monthly_intent(question: str) -> tuple[str, str, int] | None:
     }
     month = next((value for key, value in months.items() if re.search(rf"\b{key}\b", text)), None)
     year_match = re.search(r"\b(20\d{2})\b", text)
-    if month is None or year_match is None:
+    if year_match is None:
         return None
 
     topics = (
@@ -413,41 +438,18 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
         return None
 
     region, _ = bps_tools.resolve_region_from_text(question)
-    text = question.lower()
+    original_text = question.lower()
     all_regions = re.search(
         r"\b(?:(?:menurut|per|tiap|seluruh)\s+)?"
         r"(?:kab(?:upaten)?\s*/?\s*kota|kabupaten dan kota)\b",
-        text,
+        original_text,
     ) is not None
-    for _, aliases in sorted(bps_tools._REGIONS, key=lambda item: max(map(len, item[1])), reverse=True):
-        for alias in aliases:
-            text = re.sub(rf"(?<!\w){re.escape(alias)}(?!\w)", " ", text)
-
-    year_match = re.search(r"\b(20\d{2})\b", text)
+    year_match = re.search(r"\b(20\d{2})\b", original_text)
     year = year_match.group(1) if year_match else ""
-    text = re.sub(r"\b20\d{2}\b", " ", text)
-    for month in (
-        "januari", "februari", "maret", "april", "mei", "juni",
-        "juli", "agustus", "september", "oktober", "november", "desember",
-    ):
-        text = re.sub(rf"\b{month}\b", " ", text)
-    stop_words = {
-        "berapa", "data", "terbaru", "terkini", "terakhir", "tahun", "di", "ke", "dari",
-        "untuk", "pada", "dan", "yang", "menurut", "provinsi", "kab", "kabupaten", "kota",
-        "sumsel", "sumatera", "selatan", "angka", "nilai", "berapa", "adalah", "berapa",
-        "tampilkan", "tunjukkan", "berapa", "besar", "jumlah", "persentase", "tingkat",
-    }
-    synonyms = {
-        "miskin": "kemiskinan",
-        "nganggur": "pengangguran",
-        "pengangguran": "pengangguran",
-        "laju": "pertumbuhan",
-        "uhh": "harapan hidup",
-        "warga": "penduduk",
-    }
-    words = [word for word in re.findall(r"[a-z]+", text) if word not in stop_words]
-    words = [synonyms.get(word, word) for word in words]
-    keyword = " ".join(dict.fromkeys(words))[:80].strip()
+    keyword = bps_tools._clean_search_keyword(original_text)
+    keyword = re.sub(r"\b(laju|pertumbuhan)\b", "pertumbuhan", keyword)
+    keyword = re.sub(r"\buhh\b", "harapan hidup", keyword)
+    keyword = " ".join(dict.fromkeys(keyword.split()))[:80].strip()
     if len(keyword) < 3:
         return None
     selected_region = None if all_regions else (region or "Provinsi Sumatera Selatan")
@@ -455,15 +457,23 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
 
 
 def _static_table_intent(question: str) -> str | None:
-    if not re.search(r"\b(upah|gaji|ump|umk|umr)\b", question, re.IGNORECASE):
+    if not re.search(
+        r"\b(upah|gaji|ump|umk|umr|penghasilan|pendapatan)\b",
+        question,
+        re.IGNORECASE,
+    ):
         return None
+    if re.search(
+        r"\b(minimum|ump|umk|umr)\b",
+        question,
+        re.IGNORECASE,
+    ) and re.search(r"\b(upah|gaji|ump|umk|umr|penghasilan|pendapatan)\b", question, re.IGNORECASE):
+        return "upah minimum"
     dynamic_intent = _dynamic_variable_intent(question)
     if dynamic_intent is not None:
         words = dynamic_intent[0].split()
     else:
-        text = bps_tools._remove_region_names(question.lower())
-        text = re.sub(r"\b20\d{2}\b", " ", text)
-        words = re.findall(r"[a-z]+", text)
+        words = bps_tools._clean_search_keyword(question).split()
     words = [
         "upah" if word in {"ump", "umk", "umr"} else word
         for word in words
@@ -570,6 +580,11 @@ def _rank_variable_candidates(search_result: dict, keyword: str, region: Optiona
         "laju": "pertumbuhan",
         "pertumbuhan": "tumbuh",
         "warga": "penduduk",
+        "jiwa": "penduduk",
+        "populasi": "penduduk",
+        "gaji": "upah",
+        "penghasilan": "upah",
+        "pendapatan": "upah",
     }
     for candidate in candidates:
         if not isinstance(candidate, dict) or not candidate.get("var_id"):
@@ -600,10 +615,16 @@ def _rank_variable_candidates(search_result: dict, keyword: str, region: Optiona
     return best[0] if len(best) == 1 else None
 
 
-def _format_brs_fallback(question: str, data: dict, month: str, year: int) -> str:
+def _format_brs_fallback(
+    question: str,
+    data: dict,
+    month: Optional[str],
+    year: int,
+) -> str:
     results = data.get("hasil")
+    period = f"{month.capitalize()} {year}" if month else f"tahun {year}"
     if not isinstance(results, list) or not results:
-        return f"Data untuk {month.capitalize()} {year} tidak ditemukan; BRS yang cocok belum tersedia."
+        return f"Data untuk {period} tidak ditemukan; BRS yang cocok belum tersedia."
 
     region, _ = bps_tools.resolve_region_from_text(question)
     formatted = []
@@ -626,7 +647,7 @@ def _format_brs_fallback(question: str, data: dict, month: str, year: int) -> st
             + (f": {summary}" if summary else "")
         )
     if not formatted:
-        return f"Data untuk {month.capitalize()} {year} tidak ditemukan; data wilayah yang diminta tidak tercantum pada ringkasan BRS."
+        return f"Data untuk {period} tidak ditemukan; data wilayah yang diminta tidak tercantum pada ringkasan BRS."
     return "\n".join(formatted)
 
 
@@ -637,6 +658,52 @@ def _format_indicator_fallback(
 ) -> str:
     if data.get("status_hasil") == "gagal_teknis":
         return "Maaf, data belum dapat diverifikasi saat ini."
+    if data.get("input_tidak_valid") and data.get("error"):
+        return str(data["error"])
+    yearly_results = data.get("data_per_tahun")
+    if isinstance(yearly_results, list):
+        lines = []
+        for yearly_result in yearly_results:
+            rows = yearly_result.get("data")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict) or row.get("nilai") is None:
+                    continue
+                value = row["nilai"]
+                if isinstance(value, (int, float)):
+                    value_text = (
+                        f"{value:,.6f}".rstrip("0").rstrip(".")
+                        .replace(",", "_").replace(".", ",").replace("_", ".")
+                    )
+                else:
+                    value_text = str(value)
+                scope = row.get("wilayah") or wilayah or "Sumatera Selatan"
+                unit = str(yearly_result.get("satuan") or data.get("satuan") or "").strip()
+                lines.append(
+                    f"{yearly_result.get('tahun')}, {scope}: "
+                    f"{value_text}{' ' + unit if unit else ''}"
+                )
+        if not lines:
+            missing = data.get("tahun_tidak_tersedia") or []
+            return (
+                f"Data {data.get('judul') or 'indikator BPS'} untuk rentang {requested_year} "
+                "belum tercantum pada hasil WebAPI BPS."
+                + (f" Tahun yang tidak tersedia: {', '.join(map(str, missing))}." if missing else "")
+            )
+        missing = data.get("tahun_tidak_tersedia") or []
+        missing_note = (
+            f" Tahun yang tidak tersedia dalam rentang: {', '.join(map(str, missing))}."
+            if missing else ""
+        )
+        title = data.get("judul") or data.get("nama_indikator") or "Indikator BPS"
+        nature = str(data.get("sifat_data") or "").lower()
+        nature_note = (
+            " Angka ini merupakan estimasi." if nature == "estimasi"
+            else " Angka ini merupakan proyeksi." if nature == "proyeksi"
+            else ""
+        )
+        return f"{title}, rentang {requested_year}:\n" + "\n".join(lines) + missing_note + nature_note
     if data.get("error"):
         years = data.get("tahun_tersedia")
         if requested_year and isinstance(years, list) and years:
@@ -786,6 +853,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         return {"reply": reply, "data": reply, "tools_used": False}
 
     canonical_data: dict | None = None
+    year_range = _year_range_intent(question)
     monthly_intent = _monthly_intent(question)
     canonical_intent = None if monthly_intent else _canonical_indicator_intent(question)
     dynamic_intent = None
@@ -793,7 +861,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     canonical_fallback: str | None = None
     canonical_tool_call: str | None = None
     followup_intent = _followup_data_intent(question, request.history, canonical_intent)
-    if monthly_intent is None and followup_intent is not None:
+    if monthly_intent is None and year_range is None and followup_intent is not None:
         intent_kind, followup_value = followup_intent
         if intent_kind == "canonical":
             canonical_intent = followup_value
@@ -812,6 +880,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     static_table_result: dict | None = None
     static_table_checked = False
     static_table_query = static_table_keyword
+    force_deterministic_fallback = False
     if static_table_keyword:
         try:
             static_table_result = bps_tools.tabel_statis(static_table_keyword)
@@ -827,6 +896,71 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             logger.exception("Pencarian tabel statis gagal")
             canonical_data = {"error": "Pencarian tabel statis gagal.", "status_hasil": "gagal_teknis"}
             canonical_fallback = "Maaf, tabel BPS belum dapat diverifikasi saat ini."
+    if (
+        _minimum_wage_question(question)
+        and static_table_result is not None
+        and static_table_result.get("status_hasil") == "kosong"
+    ):
+        try:
+            variable_search = bps_tools.cari_variabel("upah")
+            variable = _rank_variable_candidates(variable_search, "upah minimum", None)
+            variable_title = str(variable.get("judul") or "").lower() if variable else ""
+            if variable_search.get("status_hasil") == "gagal_teknis":
+                canonical_data = variable_search
+                canonical_tool_call = "cari_variabel(kata_kunci='upah')"
+                canonical_fallback = "Maaf, data belum dapat diverifikasi saat ini."
+            elif variable and re.search(r"\b(minimum|ump|umk|umr)\b", variable_title):
+                if year_range:
+                    canonical_data = bps_tools.ambil_data(
+                        int(variable["var_id"]),
+                        wilayah="Provinsi Sumatera Selatan",
+                        tahun_mulai=str(year_range[0]),
+                        tahun_akhir=str(year_range[1]),
+                    )
+                    displayed_year = f"{year_range[0]}-{year_range[1]}"
+                else:
+                    year_match = re.search(r"\b(20\d{2})\b", question)
+                    displayed_year = year_match.group(1) if year_match else ""
+                    canonical_data = bps_tools.ambil_data(
+                        int(variable["var_id"]),
+                        tahun=displayed_year or None,
+                        wilayah="Provinsi Sumatera Selatan",
+                    )
+                canonical_tool_call = (
+                    "tabel_statis(kata_kunci='upah minimum') + "
+                    f"cari_variabel(kata_kunci='upah') -> ambil_data(var_id={variable['var_id']})"
+                )
+                canonical_data["judul"] = canonical_data.get("judul") or variable.get("judul")
+                canonical_data["var_id"] = int(variable["var_id"])
+                canonical_fallback = _format_indicator_fallback(
+                    canonical_data,
+                    "Provinsi Sumatera Selatan",
+                    displayed_year,
+                )
+            else:
+                canonical_data = {
+                    "hasil": [],
+                    "pencarian_tabel": static_table_result,
+                    "pencarian_variabel": variable_search,
+                    "status_hasil": "kosong",
+                }
+                canonical_tool_call = (
+                    "tabel_statis(kata_kunci='upah minimum') + cari_variabel(kata_kunci='upah')"
+                )
+                canonical_fallback = (
+                    "Pencarian variabel dan tabel BPS Sumatera Selatan tidak menemukan data "
+                    "penghasilan minimum/UMP. Penetapan UMP dilakukan melalui keputusan Gubernur; "
+                    "rujuk pengumuman resmi Pemerintah Provinsi Sumatera Selatan untuk besarannya."
+                )
+                force_deterministic_fallback = True
+        except Exception:
+            logger.exception("Pencarian variabel upah gagal")
+            canonical_data = {
+                "error": "Pencarian variabel upah gagal.",
+                "status_hasil": "gagal_teknis",
+            }
+            canonical_tool_call = "cari_variabel(kata_kunci='upah')"
+            canonical_fallback = "Maaf, data belum dapat diverifikasi saat ini."
     if monthly_intent is not None:
         topic, month, year = monthly_intent
         try:
@@ -837,7 +971,8 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 bulan=month,
             )
             canonical_tool_call = (
-                f"berita_resmi_statistik(kata_kunci='{topic}', bulan='{month}', tahun={year})"
+                f"berita_resmi_statistik(kata_kunci='{topic}', "
+                f"bulan='{month or 'semua'}', tahun={year})"
             )
             if canonical_data.get("error"):
                 canonical_fallback = "Maaf, BRS belum dapat diverifikasi saat ini."
@@ -852,8 +987,9 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         "hasil_terbaru": latest.get("hasil", []),
                     }
                     latest_results = {"hasil": canonical_data["hasil_terbaru"]}
+                    period = f"{month.capitalize()} {year}" if month else f"tahun {year}"
                     canonical_fallback = (
-                        f"Data untuk {month.capitalize()} {year} tidak ditemukan; berikut yang terbaru:\n"
+                        f"Data untuk {period} tidak ditemukan; berikut BRS terbaru:\n"
                         + _format_brs_fallback(question, latest_results, month, year)
                     )
             elif canonical_data.get("hasil"):
@@ -865,17 +1001,43 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
 
     if canonical_intent is not None:
         indicator_name, requested_year, region = canonical_intent
+        if year_range:
+            requested_year = ""
         try:
-            canonical_data = bps_tools.indikator_utama(
-                indicator_name,
-                tahun=requested_year or None,
-                wilayah=region,
-            )
-            canonical_tool_call = (
-                f"indikator_utama(nama='{indicator_name}', "
-                f"tahun='{requested_year or 'terbaru'}', wilayah='{region}')"
-            )
-            if canonical_data.get("tahun_tersedia") and requested_year:
+            if year_range:
+                canonical_data = bps_tools.indikator_utama(
+                    indicator_name,
+                    wilayah=region,
+                    tahun_mulai=str(year_range[0]),
+                    tahun_akhir=str(year_range[1]),
+                )
+                requested_year = f"{year_range[0]}-{year_range[1]}"
+                canonical_tool_call = (
+                    f"indikator_utama(nama='{indicator_name}', "
+                    f"tahun_mulai='{year_range[0]}', tahun_akhir='{year_range[1]}', "
+                    f"wilayah='{region}')"
+                )
+            else:
+                canonical_data = bps_tools.indikator_utama(
+                    indicator_name,
+                    tahun=requested_year or None,
+                    wilayah=region,
+                )
+                canonical_tool_call = (
+                    f"indikator_utama(nama='{indicator_name}', "
+                    f"tahun='{requested_year or 'terbaru'}', wilayah='{region}')"
+                )
+            if (
+                year_range
+                and canonical_data.get("error")
+                and not canonical_data.get("input_tidak_valid")
+                and canonical_data.get("tahun_tersedia")
+            ):
+                latest = bps_tools.indikator_utama(indicator_name, wilayah=region)
+                if "error" not in latest:
+                    latest["tahun_diminta_tidak_tersedia"] = requested_year
+                    canonical_data = latest
+            if canonical_data.get("tahun_tersedia") and requested_year and not year_range:
                 alternatives = {"ipm": (209,), "kemiskinan_persen": (605,)}
                 for alternative_id in alternatives.get(indicator_name, ()):
                     alternate = bps_tools.ambil_data(
@@ -906,7 +1068,12 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             canonical_data = {"error": "Pengambilan indikator gagal.", "status_hasil": "gagal_teknis"}
             canonical_fallback = "Maaf, data belum dapat diverifikasi saat ini."
 
-    if canonical_data is None and monthly_intent is None and canonical_intent is None:
+    if (
+        canonical_data is None
+        and monthly_intent is None
+        and canonical_intent is None
+        and not _minimum_wage_question(question)
+    ):
         dynamic_intent = dynamic_intent or _dynamic_variable_intent(question)
         if dynamic_intent is not None:
             keyword, requested_year, region = dynamic_intent
@@ -918,16 +1085,35 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     canonical_fallback = "Maaf, data belum dapat diverifikasi saat ini."
                 elif variable is not None:
                     variable_id = int(variable["var_id"])
-                    canonical_data = bps_tools.ambil_data(
-                        variable_id,
-                        tahun=requested_year or None,
-                        wilayah=region,
-                    )
+                    if year_range:
+                        canonical_data = bps_tools.ambil_data(
+                            variable_id,
+                            wilayah=region,
+                            tahun_mulai=str(year_range[0]),
+                            tahun_akhir=str(year_range[1]),
+                        )
+                        requested_year = f"{year_range[0]}-{year_range[1]}"
+                    else:
+                        canonical_data = bps_tools.ambil_data(
+                            variable_id,
+                            tahun=requested_year or None,
+                            wilayah=region,
+                        )
+                    if (
+                        year_range
+                        and canonical_data.get("error")
+                        and not canonical_data.get("input_tidak_valid")
+                        and canonical_data.get("tahun_tersedia")
+                    ):
+                        latest = bps_tools.ambil_data(variable_id, wilayah=region)
+                        if "error" not in latest:
+                            latest["tahun_diminta_tidak_tersedia"] = requested_year
+                            canonical_data = latest
                     canonical_tool_call = (
                         f"cari_variabel(kata_kunci='{keyword}') -> "
                         f"ambil_data(var_id={variable_id}, tahun='{requested_year or 'terbaru'}', wilayah='{region}')"
                     )
-                    if canonical_data.get("tahun_tersedia") and requested_year:
+                    if canonical_data.get("tahun_tersedia") and requested_year and not year_range:
                         latest = bps_tools.ambil_data(variable_id, wilayah=region)
                         if "error" not in latest:
                             canonical_data = latest
@@ -961,10 +1147,14 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         )
 
     if DATA_QUESTION.search(question):
-        if canonical_data is not None and _tool_result_status(canonical_data) == "kosong":
+        if canonical_data is not None:
+            result_status = _tool_result_status(canonical_data)
+        else:
+            result_status = None
+        if result_status in {"kosong", "gagal_teknis"}:
             _record_unresolved_question(
                 question,
-                "verified_empty_result",
+                "verified_empty_result" if result_status == "kosong" else "technical_failure",
                 static_table_query or (dynamic_intent[0] if dynamic_intent else None),
             )
 
@@ -978,6 +1168,13 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 "arguments": {},
                 "result": canonical_data,
             })
+
+    if force_deterministic_fallback and canonical_fallback:
+        return {
+            "reply": canonical_fallback,
+            "data": canonical_fallback,
+            "tools_used": True,
+        }
 
     if not os.getenv("GEMINI_API_KEY"):
         if canonical_fallback:
@@ -1062,7 +1259,17 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     if canonical_data is None and DATA_QUESTION.search(question):
         statuses = [record["result"].get("status_hasil") for record in tool_records]
         if not statuses or all(status == "kosong" for status in statuses):
-            _record_unresolved_question(question, "no_tool_result")
+            _record_unresolved_question(
+                question,
+                "no_tool_result" if not statuses else "verified_empty_result",
+                dynamic_intent[0] if dynamic_intent else None,
+            )
+        elif "gagal_teknis" in statuses:
+            _record_unresolved_question(
+                question,
+                "technical_failure",
+                dynamic_intent[0] if dynamic_intent else None,
+            )
 
     logger.info("Gemini selesai dalam %.1f detik", time.time() - started)
 

@@ -113,6 +113,141 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(result["status_hasil"], "ditemukan")
         self.assertEqual(result["hasil"][0]["var_id"], 20)
 
+    def test_variable_search_retries_synonym_queries(self):
+        variable = {
+            "var_id": "20",
+            "title": "Tingkat Pengangguran Terbuka",
+            "unit": "Persen",
+        }
+        with (
+            patch.object(bps_tools, "_variable_index", return_value={"variables": [variable]}),
+            patch.object(
+                bps_tools,
+                "_rank_local_variables",
+                side_effect=[[], [], [variable]],
+            ) as rank,
+            patch.object(bps_tools, "_latest_year", return_value=("2025", 8, False)),
+        ):
+            result = bps_tools.cari_variabel("pengangguran")
+
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(result["hasil"][0]["var_id"], 20)
+        self.assertEqual(rank.call_count, 3)
+
+    def test_keyword_cleanup_removes_regions_years_months_and_fillers(self):
+        self.assertEqual(
+            bps_tools._clean_search_keyword(
+                "Tolong berapa jumlah warga Kota Palembang tahun 2024 bulan Maret?"
+            ),
+            "penduduk",
+        )
+
+    def test_keyword_variants_include_roots_and_related_synonyms(self):
+        variants = bps_tools._search_keyword_variants("kemiskinan")
+        self.assertEqual(variants[:2], ["miskin", "kemiskinan"])
+        population_variants = bps_tools._search_keyword_variants("jiwa")
+        self.assertEqual(population_variants[0], "penduduk")
+        self.assertIn("warga", population_variants)
+        self.assertIn("gaji", bps_tools._search_keyword_variants("upah"))
+        self.assertIn("pengangguran", bps_tools._search_keyword_variants("penganggur"))
+
+    def test_ambil_data_returns_a_bounded_year_range(self):
+        periods = [
+            {"th": str(year), "th_id": str(year)}
+            for year in (2026, 2025, 2024, 2023)
+        ]
+
+        def fake_format(*args):
+            period = args[2]
+            return {
+                "judul": "Jumlah Penduduk",
+                "satuan": "Jiwa",
+                "tahun": period["th"],
+                "data": [{"wilayah": "Sumatera Selatan", "nilai": int(period["th"])}],
+            }
+
+        with (
+            patch.object(bps_tools, "_periods", return_value=periods),
+            patch.object(bps_tools, "_cached", side_effect=lambda *args: args[2]()),
+            patch.object(bps_tools, "_get", return_value={"status": "OK"}),
+            patch.object(bps_tools, "_format_data", side_effect=fake_format),
+        ):
+            result = bps_tools.ambil_data(
+                262,
+                tahun_mulai="2023",
+                tahun_akhir="2026",
+            )
+
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(result["tahun_tersedia"], ["2023", "2024", "2025", "2026"])
+        self.assertEqual(result["jumlah_tahun"], 4)
+        self.assertEqual(
+            [entry["data"][0]["nilai"] for entry in result["data_per_tahun"]],
+            [2023, 2024, 2025, 2026],
+        )
+
+    def test_ambil_data_rejects_ranges_over_ten_years(self):
+        with patch.object(bps_tools, "_periods", return_value=[{"th": "2026", "th_id": "1"}]):
+            result = bps_tools.ambil_data(
+                262,
+                tahun_mulai="2010",
+                tahun_akhir="2020",
+            )
+
+        self.assertEqual(result["status_hasil"], "kosong")
+        self.assertTrue(result["input_tidak_valid"])
+        self.assertIn("maksimal 10 tahun", result["error"])
+
+    def test_ambil_data_lists_unavailable_years_in_a_partial_range(self):
+        periods = [{"th": "2025", "th_id": "25"}, {"th": "2024", "th_id": "24"}]
+
+        def fake_format(*args):
+            period = args[2]
+            return {
+                "judul": "Jumlah Penduduk",
+                "tahun": period["th"],
+                "data": [{"wilayah": "Sumatera Selatan", "nilai": 1}],
+            }
+
+        with (
+            patch.object(bps_tools, "_periods", return_value=periods),
+            patch.object(bps_tools, "_cached", side_effect=lambda *args: args[2]()),
+            patch.object(bps_tools, "_get", return_value={"status": "OK"}),
+            patch.object(bps_tools, "_format_data", side_effect=fake_format),
+        ):
+            result = bps_tools.ambil_data(
+                262,
+                tahun_mulai="2023",
+                tahun_akhir="2026",
+            )
+
+        self.assertEqual(result["tahun_tersedia"], ["2024", "2025"])
+        self.assertEqual(result["tahun_tidak_tersedia"], ["2023", "2026"])
+
+    def test_brs_year_search_reads_historical_release_months(self):
+        def fake_brs_month(year, month):
+            if (year, month) == (2024, 4):
+                return [{
+                    "title": "Perkembangan Inflasi Sumatera Selatan Maret 2024",
+                    "rl_date": "2024-04-01",
+                    "abstract": "Inflasi tercatat.",
+                }]
+            if (year, month) == (2025, 1):
+                return [{
+                    "title": "Perkembangan Inflasi Sumatera Selatan Desember 2024",
+                    "rl_date": "2025-01-02",
+                    "abstract": "Inflasi tahunan tercatat.",
+                }]
+            return []
+
+        with patch.object(bps_tools, "_brs_month", side_effect=fake_brs_month) as load:
+            result = bps_tools.berita_resmi_statistik("inflasi", tahun=2024)
+
+        self.assertEqual(len(result["hasil"]), 2)
+        self.assertTrue(any("Maret 2024" in item["judul"] for item in result["hasil"]))
+        self.assertTrue(any("Desember 2024" in item["judul"] for item in result["hasil"]))
+        self.assertTrue(any(call.args == (2025, 1) for call in load.call_args_list))
+
     def test_refresh_variable_index_loads_all_subjects_and_pages_without_notes(self):
         def fake_get(path):
             if path == "list/model/subject/domain/1600":
@@ -249,6 +384,20 @@ class BpsToolsTests(unittest.TestCase):
         self.assertIn("[PHONE]", captured.output[0])
         self.assertNotIn("user@example.com", captured.output[0])
         self.assertNotIn("081234567890", captured.output[0])
+
+    def test_unresolved_query_log_records_a_cleaned_search_keyword(self):
+        import main
+
+        with self.assertLogs(main.logger, level="WARNING") as captured:
+            main._record_unresolved_question(
+                "Tolong cari jumlah warga Kota Palembang tahun 2024",
+                "verified_empty_result",
+            )
+
+        entry = json.loads(captured.output[0].split("BPS_QUERY_UNRESOLVED ", 1)[1])
+        self.assertEqual(entry["keyword"], "penduduk")
+        self.assertIn("Palembang", entry["question"])
+        self.assertIn("2024", entry["question"])
 
     def test_notes_fields_are_removed_recursively(self):
         cleaned = bps_tools.strip_notes({

@@ -54,6 +54,7 @@ _VARIABLE_SYNONYMS = {
     "miskin": "kemiskinan",
     "pengangguran": "penganggur",
     "penganggur": "pengangguran",
+    "tpt": "penganggur",
     "nganggur": "pengangguran",
     "pertumbuhan": "tumbuh",
     "tumbuh": "pertumbuhan",
@@ -64,6 +65,26 @@ _VARIABLE_SYNONYMS = {
     "gaji": "upah",
     "penghasilan": "pendapatan",
     "pendapatan": "penghasilan",
+    "jiwa": "penduduk",
+}
+_VARIABLE_SYNONYM_GROUPS = (
+    ("miskin", "kemiskinan"),
+    ("penganggur", "pengangguran", "pengangguran terbuka"),
+    ("penduduk", "warga", "jiwa", "populasi"),
+    ("upah", "gaji", "penghasilan", "pendapatan"),
+)
+_SEARCH_FILLER_WORDS = {
+    "apa", "apakah", "adakah", "berapa", "berapakah", "bagaimana", "tolong", "mohon", "bisa",
+    "carikan", "cari", "menampilkan", "tampilkan", "menunjukkan", "tunjukkan",
+    "data", "terbaru", "terkini", "terakhir", "tahun", "pada", "di", "ke", "dari",
+    "untuk", "tentang", "mengenai", "yang", "dan", "atau", "dengan", "saya",
+    "ingin", "dong", "kah", "angka", "nilai", "jumlah", "adalah", "tersebut",
+    "jelaskan", "sebutkan", "besaran", "menurut", "per", "tiap", "seluruh",
+    "kab", "kabupaten", "kota", "provinsi", "sumsel", "sumatera", "selatan",
+}
+_MONTH_WORDS = {
+    "januari", "februari", "maret", "april", "mei", "juni",
+    "juli", "agustus", "september", "oktober", "november", "desember", "bulan",
 }
 
 
@@ -187,6 +208,22 @@ def _remove_region_names(keyword: str) -> str:
     return " ".join(result.split())
 
 
+def _clean_search_keyword(keyword: str) -> str:
+    result = _remove_region_names(keyword or "")
+    result = re.sub(r"\b20\d{2}\b", " ", result)
+    words = [
+        word for word in re.findall(r"[a-z0-9]+", result.casefold())
+        if word not in _SEARCH_FILLER_WORDS and word not in _MONTH_WORDS
+    ]
+    canonical_synonyms = {
+        synonym: group[0]
+        for group in _VARIABLE_SYNONYM_GROUPS
+        for synonym in group
+    }
+    words = [canonical_synonyms.get(word, word) for word in words]
+    return " ".join(words)[:80].strip()
+
+
 def _stem_keyword(word: str) -> str:
     stem = word
     for prefix in ("meng", "meny", "mem", "men", "peng", "peny", "pem", "pen", "per", "ber", "ter", "ke", "se", "pe", "me"):
@@ -201,16 +238,39 @@ def _stem_keyword(word: str) -> str:
 
 
 def _search_keyword_variants(keyword: str) -> list[str]:
-    words = keyword.split()
-    candidates = [keyword]
+    normalized = _clean_search_keyword(keyword)
+    words = normalized.split()
+    if not words:
+        return []
+
+    candidates = [normalized]
     synonym_phrase = " ".join(_VARIABLE_SYNONYMS.get(word, word) for word in words)
-    if synonym_phrase != keyword:
+    if synonym_phrase != normalized:
         candidates.append(synonym_phrase)
-    for word in sorted(set(words), key=len, reverse=True):
-        if len(word) < 4:
+
+    stemmed_phrase = " ".join(_stem_keyword(word) for word in words)
+    if stemmed_phrase != normalized:
+        candidates.append(stemmed_phrase)
+
+    for word in dict.fromkeys(words):
+        if len(word) < 3:
             continue
-        candidates.extend((word, _stem_keyword(word), _VARIABLE_SYNONYMS.get(word, word)))
-    return list(dict.fromkeys(query for query in candidates if query))[:7]
+        candidates.append(word)
+        stem = _stem_keyword(word)
+        if stem != word:
+            candidates.append(stem)
+        candidates.extend(
+            synonym
+            for group in _VARIABLE_SYNONYM_GROUPS
+            if word in group
+            for synonym in group
+            if synonym != word
+        )
+        mapped = _VARIABLE_SYNONYMS.get(word)
+        if mapped and mapped != word:
+            candidates.append(mapped)
+
+    return list(dict.fromkeys(query for query in candidates if query))[:24]
 
 
 def _variable_index_key() -> str:
@@ -294,6 +354,9 @@ def _variable_index() -> dict:
 
 def _token_match_score(term: str, title_tokens: set[str]) -> float:
     variants = {term, _stem_keyword(term), _VARIABLE_SYNONYMS.get(term, term)}
+    for group in _VARIABLE_SYNONYM_GROUPS:
+        if term in group:
+            variants.update(group)
     for variant in tuple(variants):
         variants.add(_stem_keyword(variant))
         variants.add(_VARIABLE_SYNONYMS.get(variant, variant))
@@ -352,7 +415,7 @@ def cari_variabel(kata_kunci: str) -> dict:
     Args:
         kata_kunci: kata inti indikator yang dicari.
     """
-    keyword = _remove_region_names(" ".join((kata_kunci or "").split()))[:80]
+    keyword = _clean_search_keyword(kata_kunci or "")
     if not keyword:
         return {
             "jumlah_ditemukan": 0,
@@ -363,7 +426,11 @@ def cari_variabel(kata_kunci: str) -> dict:
 
     try:
         index = _variable_index()
-        variables = _rank_local_variables(keyword, index["variables"])
+        variables: list[dict] = []
+        for query in _search_keyword_variants(keyword):
+            variables = _rank_local_variables(query, index["variables"])
+            if variables:
+                break
 
         candidates = variables[:15]
         with ThreadPoolExecutor(max_workers=6) as pool:
@@ -575,18 +642,27 @@ def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str
     }
 
 
-def ambil_data(var_id: int, tahun: Optional[str] = None, wilayah: Optional[str] = None) -> dict:
-    """Mengambil nilai data satu variabel BPS Sumatera Selatan (hasil cari_variabel).
+def ambil_data(
+    var_id: int,
+    tahun: Optional[str] = None,
+    wilayah: Optional[str] = None,
+    tahun_mulai: Optional[str] = None,
+    tahun_akhir: Optional[str] = None,
+) -> dict:
+    """Mengambil nilai satu tahun atau rentang tahun untuk satu variabel BPS Sumatera Selatan.
 
     Tanpa tahun, yang diambil adalah tahun terbaru yang sudah berjalan (bukan tahun proyeksi
     mendatang). Isi tahun untuk tahun lain, termasuk proyeksi masa depan jika tersedia. Isi
     parameter wilayah (mis. "Palembang", "Muara Enim") jika pengguna menanyakan satu
-    kabupaten/kota; kosongkan untuk data tingkat provinsi atau semua wilayah.
+    kabupaten/kota; kosongkan untuk data tingkat provinsi atau semua wilayah. Untuk beberapa
+    tahun berurutan, isi tahun_mulai dan tahun_akhir; rentang dibatasi maksimal 10 tahun.
 
     Args:
         var_id: ID variabel dari hasil cari_variabel.
         tahun: tahun yang diminta, mis. "2025". Kosongkan untuk tahun terbaru.
         wilayah: nama kabupaten/kota untuk memfilter baris data.
+        tahun_mulai: tahun awal rentang (opsional).
+        tahun_akhir: tahun akhir rentang (opsional).
     """
     try:
         vid = int(var_id)
@@ -600,13 +676,121 @@ def ambil_data(var_id: int, tahun: Optional[str] = None, wilayah: Optional[str] 
                 }
         periods = _periods(vid)
         if not periods:
-            return {"error": "Variabel ini tidak memiliki data tahunan."}
+            return {
+                "error": "Variabel ini tidak memiliki data tahunan.",
+                "status_hasil": "kosong",
+            }
         available = [str(p["th"]) for p in periods]
+        if tahun_mulai is not None or tahun_akhir is not None:
+            if tahun is not None:
+                return {
+                    "error": "Gunakan tahun atau rentang tahun, bukan keduanya sekaligus.",
+                    "input_tidak_valid": True,
+                    "status_hasil": "kosong",
+                }
+            if tahun_mulai is None:
+                tahun_mulai = tahun_akhir
+            if tahun_akhir is None:
+                tahun_akhir = tahun_mulai
+            try:
+                start_year = int(str(tahun_mulai).strip())
+                end_year = int(str(tahun_akhir).strip())
+            except (TypeError, ValueError):
+                return {
+                    "error": "Tahun awal dan akhir harus berupa angka tahun.",
+                    "input_tidak_valid": True,
+                    "status_hasil": "kosong",
+                }
+            if not (1000 <= start_year <= 9999 and 1000 <= end_year <= 9999):
+                return {
+                    "error": "Tahun awal dan akhir tidak valid.",
+                    "input_tidak_valid": True,
+                    "status_hasil": "kosong",
+                }
+            if start_year > end_year:
+                return {
+                    "error": "Tahun awal rentang tidak boleh melebihi tahun akhir.",
+                    "input_tidak_valid": True,
+                    "status_hasil": "kosong",
+                }
+            requested_years = list(range(start_year, end_year + 1))
+            if len(requested_years) > 10:
+                return {
+                    "error": "Rentang tahun dibatasi maksimal 10 tahun.",
+                    "input_tidak_valid": True,
+                    "status_hasil": "kosong",
+                }
+            period_by_year = {str(period["th"]): period for period in periods}
+            selected_periods = [
+                period_by_year[str(year)]
+                for year in requested_years
+                if str(year) in period_by_year
+            ]
+            missing_years = [
+                str(year) for year in requested_years
+                if str(year) not in period_by_year
+            ]
+            if not selected_periods:
+                return {
+                    "error": f"Tidak ada tahun dalam rentang {start_year}-{end_year} yang tersedia.",
+                    "input_tidak_valid": False,
+                    "tahun_tersedia": available[:10],
+                    "tahun_tidak_tersedia": [str(year) for year in requested_years],
+                    "status_hasil": "kosong",
+                }
+
+            def load_year(period: dict) -> dict:
+                payload = _cached(
+                    f"data:{DOMAIN}:{vid}:{period['th_id']}",
+                    1800,
+                    lambda: _get(
+                        f"list/model/data/domain/{DOMAIN}/var/{vid}/th/{period['th_id']}"
+                    ),
+                )
+                return _format_data(payload, vid, period, resolved_region, available)
+
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                yearly_results = list(pool.map(load_year, selected_periods))
+            data_by_year = []
+            for period, result in zip(selected_periods, yearly_results):
+                result_year = str(result.get("tahun") or period["th"])
+                rows = result.get("data")
+                if result.get("error") or not isinstance(rows, list) or not rows:
+                    if result_year:
+                        missing_years.append(result_year)
+                    continue
+                data_by_year.append({
+                    "tahun": result_year,
+                    "judul": result.get("judul"),
+                    "satuan": result.get("satuan"),
+                    "data": rows,
+                })
+            data_by_year.sort(key=lambda item: int(item["tahun"]))
+            return {
+                "judul": next(
+                    (result.get("judul") for result in yearly_results if result.get("judul")),
+                    None,
+                ),
+                "satuan": next(
+                    (result.get("satuan") for result in yearly_results if result.get("satuan")),
+                    None,
+                ),
+                "tahun_mulai": start_year,
+                "tahun_akhir": end_year,
+                "data_per_tahun": data_by_year,
+                "tahun_tersedia": [item["tahun"] for item in data_by_year],
+                "tahun_tidak_tersedia": sorted(set(missing_years), key=int),
+                "jumlah_tahun": len(data_by_year),
+                **({"wilayah_ditafsirkan": resolved_region} if resolved_region else {}),
+                "status_hasil": "ditemukan" if data_by_year else "kosong",
+            }
+
         if tahun:
             chosen = next((p for p in periods if str(p["th"]) == str(tahun).strip()), None)
             if chosen is None:
                 return {
                     "error": f"Tahun {tahun} tidak tersedia.",
+                    "status_hasil": "kosong",
                     "rentang_tahun_tersedia": f"{available[-1]} sampai {available[0]}",
                     "tahun_tersedia": available[:10],
                 }
@@ -620,15 +804,20 @@ def ambil_data(var_id: int, tahun: Optional[str] = None, wilayah: Optional[str] 
         )
         return _format_data(payload, vid, chosen, resolved_region, available)
     except BpsError as exc:
-        return {"error": str(exc)}
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
     except (KeyError, ValueError, TypeError):
-        return {"error": "Format respons BPS tidak dikenali."}
+        return {
+            "error": "Format respons BPS tidak dikenali.",
+            "status_hasil": "gagal_teknis",
+        }
 
 
 def indikator_utama(
     nama: str,
     tahun: Optional[str] = None,
     wilayah: Optional[str] = None,
+    tahun_mulai: Optional[str] = None,
+    tahun_akhir: Optional[str] = None,
 ) -> dict:
     """Mengambil data indikator kanonik untuk tahun dan wilayah yang diminta.
 
@@ -641,6 +830,8 @@ def indikator_utama(
         nama: nama indikator kanonik dari daftar tetap.
         tahun: tahun yang diminta (opsional).
         wilayah: nama wilayah (opsional); kosongkan untuk semua wilayah.
+        tahun_mulai: tahun awal rentang opsional, sampai dengan tahun_akhir.
+        tahun_akhir: tahun akhir rentang opsional; rentang maksimal 10 tahun.
     """
     if not isinstance(nama, str) or nama not in _INDIKATOR_UTAMA:
         return {
@@ -649,7 +840,15 @@ def indikator_utama(
         }
 
     indicator = _INDIKATOR_UTAMA[nama]
-    result = ambil_data(int(indicator["var_id"]), tahun=tahun, wilayah=wilayah)
+    if tahun_mulai is not None or tahun_akhir is not None:
+        result = ambil_data(
+            int(indicator["var_id"]),
+            wilayah=wilayah,
+            tahun_mulai=tahun_mulai,
+            tahun_akhir=tahun_akhir,
+        )
+    else:
+        result = ambil_data(int(indicator["var_id"]), tahun=tahun, wilayah=wilayah)
     if "error" in result:
         return {"nama_indikator": nama, "var_id": int(indicator["var_id"]), **result}
     result["nama_indikator"] = nama
@@ -669,6 +868,27 @@ def indikator_utama(
             }
         result["data"] = matching_rows
         result["jumlah_baris"] = len(matching_rows)
+    elif indicator.get("vervar_label") and isinstance(result.get("data_per_tahun"), list):
+        expected_label = str(indicator["vervar_label"]).casefold().strip()
+        missing_category_years = []
+        for yearly_result in result["data_per_tahun"]:
+            yearly_result["data"] = [
+                row for row in yearly_result["data"]
+                if str(row.get("wilayah", "")).casefold().strip().lstrip("0123456789. )-")
+                == expected_label
+            ]
+            if not yearly_result["data"]:
+                missing_category_years.append(str(yearly_result["tahun"]))
+        result["data_per_tahun"] = [
+            item for item in result["data_per_tahun"] if item["data"]
+        ]
+        result["tahun_tersedia"] = [item["tahun"] for item in result["data_per_tahun"]]
+        result["tahun_tidak_tersedia"] = sorted(
+            set(result.get("tahun_tidak_tersedia", [])) | set(missing_category_years),
+            key=int,
+        )
+        result["jumlah_tahun"] = len(result["data_per_tahun"])
+        result["status_hasil"] = "ditemukan" if result["data_per_tahun"] else "kosong"
     if "sifat_data" in indicator:
         result["sifat_data"] = indicator["sifat_data"]
     if "catatan_sumber" in indicator:
@@ -732,10 +952,39 @@ def berita_resmi_statistik(
     }
     requested_month = (bulan or "").strip().lower()
     month_variants = month_names.get(requested_month, (requested_month,)) if requested_month else ()
+    current_month_index = now.year * 12 + now.month - 1
+    if tahun is None:
+        month_indices = [current_month_index - back for back in range(12)]
+    elif requested_month in month_names:
+        month_number = list(month_names).index(requested_month) + 1
+        target_index = int(tahun) * 12 + month_number - 1
+        month_indices = [target_index + offset for offset in range(3)]
+    else:
+        start_index = int(tahun) * 12
+        month_indices = list(range(start_index, start_index + 24))
+
+    def load_month(month_index: int) -> tuple[int, int, list[dict]]:
+        year, month0 = divmod(month_index, 12)
+        return year, month0 + 1, _brs_month(year, month0 + 1)
+
     try:
-        for back in range(12):
-            year, month0 = divmod(now.year * 12 + (now.month - 1) - back, 12)
-            for item in _brs_month(year, month0 + 1):
+        if tahun is not None:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                month_results = list(pool.map(load_month, month_indices))
+        else:
+            month_results = []
+            for month_index in month_indices:
+                month_result = load_month(month_index)
+                month_results.append(month_result)
+                if (not tokens and not bulan and found) or (
+                    len(found) >= count and not bulan
+                ):
+                    break
+
+        for month_result in month_results:
+            month_number = month_result[1]
+            month_rows = month_result[2]
+            for item in month_rows:
                 title = str(item.get("title", ""))
                 score = sum(t in title.lower() for t in tokens)
                 if tokens and score == 0:
@@ -748,12 +997,8 @@ def berita_resmi_statistik(
                 ):
                     continue
                 found.append((score, str(item.get("rl_date", "")), item))
-            if (not tokens and not bulan and tahun is None and found) or (
-                len(found) >= count and not bulan and tahun is None
-            ):
-                break
     except BpsError as exc:
-        return {"error": str(exc)}
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
 
     found.sort(key=lambda x: (x[0], x[1]), reverse=True)
     result = {
@@ -807,7 +1052,7 @@ def publikasi_terbaru(kata_kunci: Optional[str] = None, jumlah: int = 5) -> dict
 
 def _static_table_rows(keyword: str, domain: str) -> list[dict]:
     tables_by_id: dict[str, dict] = {}
-    for query in _search_keyword_variants(keyword)[:4]:
+    for query in _search_keyword_variants(keyword)[:8]:
         base = f"list/model/statictable/domain/{domain}/keyword/{quote_plus(query)}"
         for page in (1, 2):
             path = base if page == 1 else f"{base}/page/{page}"
@@ -860,7 +1105,7 @@ def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
         kata_kunci: topik inti tabel, misalnya "upah minimum" atau "gaji".
         jumlah: jumlah tabel teratas yang diminta, dibatasi 1 sampai 3.
     """
-    keyword = _remove_region_names(" ".join((kata_kunci or "").split()))[:80]
+    keyword = _clean_search_keyword(kata_kunci or "")
     if not keyword:
         return {"jumlah_ditemukan": 0, "hasil": [], "status_hasil": "kosong"}
 

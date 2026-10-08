@@ -188,7 +188,137 @@ class ChatRoutingTests(unittest.TestCase):
 
     def test_month_and_year_are_routed_to_brs(self):
         self.assertEqual(main._monthly_intent("inflasi Agustus 2026"), ("inflasi", "agustus", 2026))
+        self.assertEqual(main._monthly_intent("inflasi 2024"), ("inflasi", None, 2024))
         self.assertIsNone(main._monthly_intent("jumlah penduduk tahun 2025"))
+        self.assertEqual(main._year_range_intent("Jumlah warga PALI 2023-2026"), (2023, 2026))
+
+    def test_full_pali_name_is_removed_from_dynamic_keyword(self):
+        self.assertEqual(
+            main._dynamic_variable_intent(
+                "Jumlah warga Kabupaten Penukal Abab Lematang Ilir 2023-2026"
+            ),
+            ("penduduk", "2023", "Kabupaten Penukal Abab Lematang Ilir"),
+        )
+
+    def test_dynamic_keyword_removes_filler_month_and_year(self):
+        self.assertEqual(
+            main._dynamic_variable_intent(
+                "Tolong berapa jumlah warga Kota Palembang pada bulan Maret tahun 2024?"
+            ),
+            ("penduduk", "2024", "Kota Palembang"),
+        )
+
+    def test_canonical_chat_routes_requested_year_range(self):
+        reply = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="Jumlah penduduk PALI tahun 2023 sampai 2026.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type("FakeModels", (), {"generate_content": lambda *_args, **_kwargs: reply})()},
+        )()
+        data = {
+            "judul": "Jumlah Penduduk Menurut Kabupaten/Kota",
+            "tahun_mulai": 2023,
+            "tahun_akhir": 2026,
+            "data_per_tahun": [],
+            "tahun_tersedia": [],
+            "tahun_tidak_tersedia": [],
+        }
+        request = main.ChatRequest(
+            question="Jumlah warga Kabupaten Penukal Abab Lematang Ilir 2023-2026"
+        )
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "indikator_utama", return_value=data) as indicator,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            main.chat_endpoint(request)
+
+        indicator.assert_called_once_with(
+            "jumlah_penduduk",
+            wilayah="Kabupaten Penukal Abab Lematang Ilir",
+            tahun_mulai="2023",
+            tahun_akhir="2026",
+        )
+
+    def test_year_only_monthly_query_uses_historical_brs_search(self):
+        reply = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="Rilis inflasi 2024 ditemukan.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type("FakeModels", (), {"generate_content": lambda *_args, **_kwargs: reply})()},
+        )()
+        request = main.ChatRequest(question="inflasi 2024")
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(
+                main.bps_tools,
+                "berita_resmi_statistik",
+                return_value={
+                    "hasil": [{
+                        "judul": "Inflasi Sumatera Selatan 2024",
+                        "ringkasan": "Inflasi tercatat.",
+                    }]
+                },
+            ) as brs,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            main.chat_endpoint(request)
+
+        brs.assert_called_once_with(
+            kata_kunci="inflasi",
+            jumlah=5,
+            tahun=2024,
+            bulan=None,
+        )
+
+    def test_empty_minimum_wage_search_returns_source_explanation(self):
+        request = main.ChatRequest(question="Penghasilan minimum di Sumsel berapa?")
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(
+                main.bps_tools,
+                "tabel_statis",
+                return_value={"hasil": [], "status_hasil": "kosong"},
+            ) as table_search,
+            patch.object(
+                main.bps_tools,
+                "cari_variabel",
+                return_value={"hasil": [], "status_hasil": "kosong"},
+            ) as variable_search,
+            patch.object(main, "get_client") as gemini,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(request)
+
+        table_search.assert_called_once_with("upah minimum")
+        variable_search.assert_called_once_with("upah")
+        gemini.assert_not_called()
+        self.assertIn("tidak menemukan data", result["reply"])
+        self.assertIn("keputusan Gubernur", result["reply"])
 
     def test_tool_results_distinguish_empty_and_technical_failure(self):
         self.assertEqual(main._label_tool_result({"hasil": []})["status_hasil"], "kosong")
