@@ -600,6 +600,8 @@ class BpsWebApiService
             'var_id' => $variableId,
             'title' => $variable['label'],
             'level' => ($region['kind'] ?? null) === 'province' ? 'province' : 'kab_kota',
+            'sifat_data' => $variable['sifat_data'] ?? null,
+            'catatan_sumber' => $variable['catatan_sumber'] ?? null,
         ];
 
         return [
@@ -1398,7 +1400,7 @@ class BpsWebApiService
         $categories = is_array($payload['kategori'] ?? null) ? $payload['kategori'] : [];
         if ($populationQuestion) {
             $categories = array_values(array_filter($categories, fn ($category) => is_array($category)
-                && preg_match('/^(jumlah|total|laki-laki\s*\+\s*perempuan)$/iu', trim((string) ($category['label'] ?? ''))) === 1));
+                && preg_match('/^(jumlah|total|tidak ada|laki-laki\s*\+\s*perempuan)$/iu', trim((string) ($category['label'] ?? ''))) === 1));
             if ($categories === []) {
                 return null;
             }
@@ -1423,7 +1425,9 @@ class BpsWebApiService
 
             $categoryLabel = preg_match('/^laki-laki\s*\+\s*perempuan$/iu', (string) ($category['label'] ?? ''))
                 ? 'Total'
-                : ($category['label'] ?? 'Nilai');
+                : (preg_match('/^tidak ada$/iu', (string) ($category['label'] ?? ''))
+                    ? 'Total'
+                    : ($category['label'] ?? 'Nilai'));
             $rawValue = (string) reset($matchesForCategory);
             $decimalPart = explode('.', $rawValue, 2)[1] ?? '';
             $decimalPlaces = min(strlen(rtrim($decimalPart, '0')), 6);
@@ -1833,6 +1837,9 @@ class BpsWebApiService
             'indikator' => $response->json('var.0.label', $variable['title']),
             'definisi' => $response->json('var.0.def'),
             'satuan' => $response->json('var.0.unit'),
+            'sifat_data' => $variable['sifat_data']
+                ?? (preg_match('/\bproyeksi\b/iu', (string) ($variable['title'] ?? '')) === 1 ? 'proyeksi' : null),
+            'catatan_sumber' => $variable['catatan_sumber'] ?? null,
             'subjek' => $variable['subject'] ?? null,
             'level' => $variable['level'] ?? $this->explicitVariableLevel((string) ($variable['title'] ?? '')),
             'vertical' => $variable['vertical'] ?? null,

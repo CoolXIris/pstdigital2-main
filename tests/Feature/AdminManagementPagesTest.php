@@ -390,10 +390,10 @@ class AdminManagementPagesTest extends BaseTestCase
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/th/domain/1600/var/980/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 2026]]]]);
+            if (str_contains($url, '/model/th/domain/1600/var/959/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
             }
-            if (str_contains($url, '/model/data/domain/1600/var/980/')) {
+            if (str_contains($url, '/model/data/domain/1600/var/959/')) {
                 return Http::response(['status' => 'OK', 'datacontent' => ['1600' => 75.5]]);
             }
 
@@ -403,7 +403,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $context = app(BpsWebApiService::class)->contextFor('IPM terbaru');
 
         $this->assertStringContainsString('Indeks Pembangunan Manusia', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/980/th/2026/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/var/'));
         Carbon::setTestNow();
     }
@@ -414,15 +414,15 @@ class AdminManagementPagesTest extends BaseTestCase
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
-            if (str_contains($request->url(), '/model/th/domain/1600/var/980/')) {
+            if (str_contains($request->url(), '/model/th/domain/1600/var/959/')) {
                 return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
             }
-            if (str_contains($request->url(), '/model/data/domain/1600/var/980/')) {
+            if (str_contains($request->url(), '/model/data/domain/1600/var/959/')) {
                 return Http::response([
                     'status' => 'OK',
-                    'var' => [['val' => 980, 'label' => 'Indeks Pembangunan Manusia', 'unit' => 'Indeks']],
+                    'var' => [['val' => 959, 'label' => 'Indeks Pembangunan Manusia', 'unit' => 'Indeks']],
                     'vervar' => [['val' => 1600, 'label' => 'Sumatera Selatan']],
-                    'datacontent' => ['16009802025' => 75.5],
+                    'datacontent' => ['16009592025' => 75.5],
                 ]);
             }
 
@@ -434,24 +434,27 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringContainsString('[TAHUN_FALLBACK]', $context);
         $this->assertStringContainsString('"tahun":"2025"', $context);
         $this->assertStringContainsString('75.5', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/980/th/2025/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
         Carbon::setTestNow();
     }
 
-    public function test_curated_population_variable_uses_verified_projection_var_id(): void
+    public function test_curated_population_variable_uses_verified_estimate_var_id(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
         Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/th/domain/1600/var/51/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
+            if (str_contains($url, '/model/th/domain/1600/var/262/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 2026]]]]);
             }
-            if (str_contains($url, '/model/data/domain/1600/var/51/')) {
+            if (str_contains($url, '/model/data/domain/1600/var/262/')) {
                 return Http::response([
                     'status' => 'OK',
+                    'var' => [['val' => 262, 'label' => 'Jumlah Penduduk Menurut Kabupaten/Kota', 'unit' => 'Jiwa']],
                     'vervar' => [['val' => 1600, 'label' => 'Sumatera Selatan']],
-                    'datacontent' => ['1600513820250' => 9000000],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => ['160026202026' => 9000000],
                 ]);
             }
 
@@ -460,10 +463,43 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $context = app(BpsWebApiService::class)->contextFor('berapa jumlah penduduk?');
 
-        $this->assertStringContainsString('Proyeksi Jumlah Penduduk', $context);
-        $this->assertStringContainsString('"tahun":"2025"', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/51/th/2025/'));
+        $this->assertStringContainsString('Jumlah Penduduk Menurut Kabupaten/Kota', $context);
+        $this->assertStringContainsString('"sifat_data":"estimasi"', $context);
+        $this->assertStringContainsString('"tahun":"2026"', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/2026/'));
         Http::assertNotSent(fn ($request) => preg_match('/\/var\/(317|320|322)\//', $request->url()) === 1);
+        Carbon::setTestNow();
+    }
+
+    public function test_explicit_population_projection_uses_the_projection_series(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/51/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2035', 'th_id' => 2035], ['th' => '2026', 'th_id' => 2026]]]]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/51/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 51, 'label' => 'Proyeksi Jumlah Penduduk', 'unit' => 'Jiwa']],
+                    'vervar' => [['val' => 1600, 'label' => 'Sumatera Selatan']],
+                    'turvar' => [['val' => '38', 'label' => 'Laki-Laki + Perempuan']],
+                    'datacontent' => ['160051382026' => 9707356],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('proyeksi jumlah penduduk');
+
+        $this->assertStringContainsString('"sifat_data":"proyeksi"', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/51/th/2026/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/'));
+        Carbon::setTestNow();
     }
 
     public function test_fallback_returns_population_total_for_a_requested_district_and_province(): void
@@ -472,29 +508,21 @@ class AdminManagementPagesTest extends BaseTestCase
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/th/domain/1600/var/51/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2035', 'th_id' => 135], ['th' => '2026', 'th_id' => 126]]]]);
+            if (str_contains($url, '/model/th/domain/1600/var/262/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 126]]]]);
             }
-            if (str_contains($url, '/model/data/domain/1600/var/51/')) {
+            if (str_contains($url, '/model/data/domain/1600/var/262/')) {
                 return Http::response([
                     'status' => 'OK',
-                    'var' => [['val' => 51, 'label' => 'Proyeksi Jumlah Penduduk', 'unit' => 'Jiwa']],
+                    'var' => [['val' => 262, 'label' => 'Jumlah Penduduk Menurut Kabupaten/Kota', 'unit' => 'Jiwa']],
                     'vervar' => [
                         ['val' => 1600, 'label' => 'Sumatera Selatan'],
                         ['val' => 1612, 'label' => 'Pali'],
                     ],
-                    'turvar' => [
-                        ['val' => 36, 'label' => 'Laki-Laki'],
-                        ['val' => 37, 'label' => 'Perempuan'],
-                        ['val' => 38, 'label' => 'Laki-Laki + Perempuan'],
-                    ],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
                     'datacontent' => [
-                        '160051361260' => 4902871,
-                        '160051371260' => 4804485,
-                        '160051381260' => 9707356,
-                        '161251361260' => 116814,
-                        '161251371260' => 115230,
-                        '161251381260' => 232044,
+                        '160026201260' => 9707356,
+                        '161226201260' => 232044,
                     ],
                 ]);
             }
@@ -509,7 +537,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringContainsString('Total: 232.044 Jiwa', $regionalReply);
         $this->assertStringContainsString('Provinsi Sumatera Selatan tahun 2026', $provinceReply);
         $this->assertStringContainsString('Total: 9.707.356 Jiwa', $provinceReply);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/51/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/domain/1612/'));
     }
 
@@ -683,26 +711,62 @@ class AdminManagementPagesTest extends BaseTestCase
     public function test_population_projection_is_not_used_for_disaggregated_population_questions(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
-        Http::fake();
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/262/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 2026]]]]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/262/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 262, 'label' => 'Jumlah Penduduk Menurut Kabupaten/Kota', 'unit' => 'Jiwa']],
+                    'vervar' => [['val' => 1600, 'label' => 'Sumatera Selatan']],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => ['160026202026' => 9000000],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
 
         $context = app(BpsWebApiService::class)->contextFor('jumlah penduduk menurut kabupaten kota');
 
-        $this->assertStringContainsString('[INDIKATOR_TIDAK_DITEMUKAN]', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/var/domain/1600/keyword/penduduk/'));
+        $this->assertStringContainsString('Jumlah Penduduk Menurut Kabupaten/Kota', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/2026/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/th/domain/1600/var/51/'));
+        Carbon::setTestNow();
     }
 
     public function test_poverty_count_does_not_use_the_verified_poverty_percentage_variable(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
         Cache::flush();
-        Http::fake();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/157/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 2026]]]]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/157/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 157, 'label' => 'Jumlah Penduduk Miskin Maret', 'unit' => 'Ribu Jiwa']],
+                    'vervar' => [['val' => 1600, 'label' => 'Sumatera Selatan']],
+                    'datacontent' => ['16001572026' => 100],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
 
         $context = app(BpsWebApiService::class)->contextFor('berapa jumlah penduduk miskin?');
 
-        $this->assertStringContainsString('[INDIKATOR_TIDAK_DITEMUKAN]', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/var/domain/1600/keyword/penduduk/'));
+        $this->assertStringContainsString('Jumlah Penduduk Miskin Maret', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/157/th/2026/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/th/domain/1600/var/608/'));
+        Carbon::setTestNow();
     }
 
     public function test_historical_monthly_indicator_uses_dated_bps_press_release(): void
@@ -778,10 +842,10 @@ class AdminManagementPagesTest extends BaseTestCase
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/th/domain/1600/var/980/')) {
+            if (str_contains($url, '/model/th/domain/1600/var/959/')) {
                 return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
             }
-            if (str_contains($url, '/model/data/domain/1600/var/980/')) {
+            if (str_contains($url, '/model/data/domain/1600/var/959/')) {
                 return Http::response(['status' => 'OK', 'datacontent' => ['1600' => 75.5]]);
             }
 
@@ -791,7 +855,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $context = app(BpsWebApiService::class)->contextFor('IPM tahun 2025');
 
         $this->assertStringContainsString('"tahun":"2025"', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/980/th/2025/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
     }
 
     public function test_static_tables_without_main_keyword_are_rejected(): void
