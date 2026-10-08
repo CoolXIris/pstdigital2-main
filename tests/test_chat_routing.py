@@ -1,0 +1,355 @@
+import unittest
+from unittest.mock import patch
+
+import main
+
+
+class ChatRoutingTests(unittest.TestCase):
+    def test_greetings_do_not_route_to_data_tools(self):
+        self.assertTrue(main.GREETING_ONLY.fullmatch("halo, terima kasih"))
+        self.assertTrue(main.GREETING_ONLY.fullmatch("terima kasih"))
+        self.assertFalse(main.GREETING_ONLY.fullmatch("halo, berapa IPM?"))
+
+    def test_canonical_indicator_uses_region_and_requested_level(self):
+        self.assertEqual(
+            main._canonical_indicator_intent("jumlah penduduk"),
+            ("jumlah_penduduk", "", "Provinsi Sumatera Selatan"),
+        )
+        self.assertEqual(
+            main._canonical_indicator_intent("jumlah penduduk miskin Palembang"),
+            ("kemiskinan_jumlah_kab_kota", "", "Kota Palembang"),
+        )
+        self.assertEqual(
+            main._canonical_indicator_intent("jumlah penduduk kabupaten/kota"),
+            ("jumlah_penduduk", "", None),
+        )
+        self.assertEqual(
+            main._canonical_indicator_intent("proyeksi penduduk tahun 2030"),
+            ("proyeksi_penduduk", "2030", "Provinsi Sumatera Selatan"),
+        )
+
+    def test_previous_year_followup_keeps_the_prior_canonical_series(self):
+        history = [
+            main.Turn(
+                prompt="Jumlah penduduk Sumatera Selatan tahun 2025",
+                response="Jumlah Penduduk di Sumatera Selatan tahun 2025: 8.9 juta jiwa. Angka ini merupakan estimasi.",
+            )
+        ]
+        self.assertEqual(
+            main._followup_data_intent("bagaimana tahun lalu?", history),
+            ("canonical", ("jumlah_penduduk", "2024", "Provinsi Sumatera Selatan")),
+        )
+
+        projection_history = [
+            main.Turn(
+                prompt="Proyeksi jumlah penduduk tahun 2026",
+                response="Proyeksi Jumlah Penduduk di Sumatera Selatan tahun 2026: 9 juta jiwa.",
+            )
+        ]
+        self.assertEqual(
+            main._followup_data_intent("bagaimana tahun lalu?", projection_history),
+            ("canonical", ("proyeksi_penduduk", "2025", "Provinsi Sumatera Selatan")),
+        )
+
+    def test_previous_year_followup_reuses_dynamic_topic(self):
+        history = [
+            main.Turn(
+                prompt="Berapa produksi padi tahun 2025?",
+                response="Produksi padi tahun 2025 tercatat menurut seri tahunan.",
+            )
+        ]
+        self.assertEqual(
+            main._followup_data_intent("dan tahun lalu?", history),
+            ("dynamic", ("produksi padi", "2024", "Provinsi Sumatera Selatan")),
+        )
+
+    def test_previous_year_followup_fetches_the_same_canonical_indicator(self):
+        history = [
+            main.Turn(
+                prompt="Jumlah penduduk Sumatera Selatan tahun 2025",
+                response="Jumlah Penduduk di Sumatera Selatan tahun 2025: 8.9 juta jiwa.",
+            )
+        ]
+        request = main.ChatRequest(question="bagaimana tahun lalu?", history=history)
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="Jumlah penduduk tahun 2024.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type("FakeModels", (), {"generate_content": lambda *_args, **_kwargs: response})()},
+        )()
+        data = {
+            "judul": "Jumlah Penduduk Menurut Kabupaten/Kota",
+            "tahun": "2024",
+            "satuan": "Jiwa",
+            "sifat_data": "estimasi",
+            "data": [{"wilayah": "Sumatera Selatan", "nilai": 8_900_000}],
+        }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "indikator_utama", return_value=data) as indicator,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            main.chat_endpoint(request)
+
+        indicator.assert_called_once_with(
+            "jumlah_penduduk",
+            tahun="2024",
+            wilayah="Provinsi Sumatera Selatan",
+        )
+
+    def test_upah_uses_static_table_and_removes_notes_before_gemini(self):
+        class FakeModels:
+            def __init__(self):
+                self.calls = []
+
+            def generate_content(self, **kwargs):
+                self.calls.append(kwargs)
+                return main.types.GenerateContentResponse(
+                    candidates=[
+                        main.types.Candidate(
+                            content=main.types.Content(
+                                role="model",
+                                parts=[main.types.Part(text="Upah minimum tahun 2025 tercantum di tabel.")],
+                            )
+                        )
+                    ]
+                )
+
+        fake_models = FakeModels()
+        fake_client = type("FakeClient", (), {"models": fake_models})()
+        request = main.ChatRequest(question="Berapa upah minimum Sumsel tahun 2025?")
+        table_result = {
+            "status_hasil": "ditemukan",
+            "hasil": [{
+                "judul": "Upah Minimum Provinsi",
+                "domain": "1600",
+                "isi": "2025: 3.500.000",
+                "notes": "<p>html-encoded long note</p>",
+            }],
+            "notes": "<p>top-level note</p>",
+        }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "tabel_statis", return_value=table_result) as static_table,
+            patch.object(main.bps_tools, "cari_variabel") as variable_search,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(request)
+
+        static_table.assert_called_once_with("upah minimum")
+        variable_search.assert_not_called()
+        self.assertEqual(result["reply"], "Upah minimum tahun 2025 tercantum di tabel.")
+        gemini_text = fake_models.calls[0]["contents"][-1].parts[0].text
+        self.assertIn("3.500.000", gemini_text)
+        self.assertNotIn("notes", gemini_text.lower())
+        self.assertNotIn("html-encoded", gemini_text)
+
+    def test_dynamic_search_excludes_region_and_year(self):
+        self.assertEqual(
+            main._dynamic_variable_intent("berapa produksi padi Palembang tahun 2025"),
+            ("produksi padi", "2025", "Kota Palembang"),
+        )
+        self.assertEqual(
+            main._dynamic_variable_intent("produksi padi menurut kabupaten/kota"),
+            ("produksi padi", "", None),
+        )
+
+    def test_variable_ranking_prefers_matching_regional_indicator(self):
+        result = main._rank_variable_candidates(
+            {
+                "hasil": [
+                    {
+                        "var_id": 10,
+                        "judul": "Produksi Padi Menurut Kabupaten/Kota",
+                        "tahun_terbaru": "2025",
+                    },
+                    {"var_id": 11, "judul": "Produksi Jagung", "tahun_terbaru": "2025"},
+                ]
+            },
+            "produksi padi",
+            "Kota Palembang",
+        )
+        self.assertEqual(result["var_id"], 10)
+
+    def test_month_and_year_are_routed_to_brs(self):
+        self.assertEqual(main._monthly_intent("inflasi Agustus 2026"), ("inflasi", "agustus", 2026))
+        self.assertIsNone(main._monthly_intent("jumlah penduduk tahun 2025"))
+
+    def test_tool_results_distinguish_empty_and_technical_failure(self):
+        self.assertEqual(main._label_tool_result({"hasil": []})["status_hasil"], "kosong")
+        self.assertEqual(
+            main._label_tool_result({"error": "WebAPI BPS mengalami gangguan."})["status_hasil"],
+            "gagal_teknis",
+        )
+        self.assertEqual(
+            main._label_tool_result({"data": [{"nilai": 1}]})["status_hasil"],
+            "ditemukan",
+        )
+        instructions = main.build_instructions()
+        self.assertIn("Jika status_hasil='gagal_teknis'", instructions)
+        self.assertIn("jangan menyatakan data tidak ada di BPS", instructions)
+
+    def test_tool_logs_redact_api_keys(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"BPS_API_KEY": "bps-secret", "GEMINI_API_KEY": "gemini-secret"},
+            ),
+            self.assertLogs(main.logger, level="INFO") as captured,
+        ):
+            main._safe_tool_log(
+                "lookup",
+                {"query": "example"},
+                {"echo": "bps-secret gemini-secret"},
+            )
+
+        self.assertNotIn("bps-secret", "\n".join(captured.output))
+        self.assertNotIn("gemini-secret", "\n".join(captured.output))
+
+    def test_manual_tool_limit_summarizes_without_tools(self):
+        def lookup(keyword):
+            return {
+                "hasil": [{"keyword": keyword}],
+                "notes": "<p>encoded table note</p>",
+            }
+
+        function_call_response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[
+                            main.types.Part(
+                                function_call=main.types.FunctionCall(
+                                    name="lookup",
+                                    args={"keyword": "miskin"},
+                                )
+                            )
+                        ],
+                    )
+                )
+            ]
+        )
+        summary_response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="Ringkasan hasil tool.")],
+                    )
+                )
+            ]
+        )
+
+        class FakeModels:
+            def __init__(self):
+                self.calls = []
+
+            def generate_content(self, **kwargs):
+                self.calls.append(kwargs)
+                return function_call_response if len(self.calls) == 1 else summary_response
+
+        fake_models = FakeModels()
+        fake_client = type("FakeClient", (), {"models": fake_models})()
+        with (
+            patch.object(main.bps_tools, "TOOLS", [lookup]),
+            patch.object(main, "get_client", return_value=fake_client),
+        ):
+            response, records = main._generate_with_manual_tools([], 1)
+
+        self.assertEqual(response.text, "Ringkasan hasil tool.")
+        self.assertEqual(len(fake_models.calls), 2)
+        self.assertIsNone(fake_models.calls[1]["config"].tools)
+        self.assertIn("Batas panggilan tool tercapai", fake_models.calls[1]["contents"][-1].parts[0].text)
+        self.assertEqual(records[0]["result"]["status_hasil"], "ditemukan")
+        self.assertNotIn("notes", records[0]["result"])
+
+    def test_empty_gemini_answer_returns_server_error(self):
+        empty_response = main.types.GenerateContentResponse(candidates=[])
+        request = main.ChatRequest(question="Jelaskan layanan statistik BPS.")
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "_generate_with_manual_tools", return_value=(empty_response, [])),
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            with self.assertRaises(main.HTTPException) as raised:
+                main.chat_endpoint(request)
+
+        self.assertEqual(raised.exception.status_code, 502)
+
+    def test_indicator_fallback_formats_verified_value_and_period(self):
+        reply = main._format_indicator_fallback(
+            {
+                "judul": "Jumlah Penduduk Menurut Kabupaten/Kota",
+                "tahun": "2025",
+                "satuan": "Jiwa",
+                "sifat_data": "estimasi",
+                "data": [{"wilayah": "Palembang", "nilai": 1234567}],
+            },
+            "Kota Palembang",
+            "",
+        )
+        self.assertIn("Palembang tahun 2025", reply)
+        self.assertIn("1.234.567 Jiwa", reply)
+        self.assertIn("estimasi", reply)
+
+    def test_indicator_fallback_describes_empty_result_from_returned_metadata(self):
+        reply = main._format_indicator_fallback(
+            {
+                "judul": "Jumlah Penduduk Menurut Kabupaten/Kota",
+                "tahun": "2025",
+                "satuan": "Jiwa",
+                "sifat_data": "estimasi",
+                "data": [
+                    {"wilayah": "Sumatera Selatan", "kategori": "Laki-Laki", "nilai": 4},
+                    {"wilayah": "Sumatera Selatan", "kategori": "Perempuan", "nilai": 5},
+                ],
+            },
+            "Provinsi Sumatera Selatan",
+            "2025",
+        )
+        self.assertIn("tidak memuat baris total/agregat", reply)
+        self.assertIn("kategori yang tersedia tidak dijumlahkan", reply)
+        self.assertIn("estimasi", reply)
+        self.assertNotEqual(reply, main.NOT_FOUND)
+
+    def test_indicator_fallback_uses_explicit_total_category_only(self):
+        reply = main._format_indicator_fallback(
+            {
+                "judul": "Proyeksi Jumlah Penduduk",
+                "tahun": "2026",
+                "satuan": "Jiwa",
+                "sifat_data": "proyeksi",
+                "data": [
+                    {"wilayah": "Sumatera Selatan", "kategori": "Laki-Laki", "nilai": 4},
+                    {"wilayah": "Sumatera Selatan", "kategori": "Perempuan", "nilai": 5},
+                    {"wilayah": "Sumatera Selatan", "kategori": "Laki-Laki + Perempuan", "nilai": 9},
+                    {"wilayah": "Sumatera Selatan", "kategori": "Tidak ada", "nilai": 99},
+                ],
+            },
+            "Provinsi Sumatera Selatan",
+            "",
+        )
+        self.assertIn(": 9 Jiwa.", reply)
+        self.assertIn("proyeksi", reply)
+        self.assertNotIn("99", reply)
+
+
+if __name__ == "__main__":
+    unittest.main()

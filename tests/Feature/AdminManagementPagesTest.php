@@ -307,7 +307,7 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/608/th/126/'));
     }
 
-    public function test_variable_index_derives_vertical_levels_and_prefers_regional_indicators(): void
+    public function test_variable_index_uses_titles_and_prefers_regional_indicators(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
         Cache::flush();
@@ -365,14 +365,21 @@ class AdminManagementPagesTest extends BaseTestCase
         $service = app(BpsWebApiService::class);
         $summary = $service->refreshVariableIndex();
         $context = $service->contextFor('persentase penduduk miskin di Palembang tahun 2026');
+        $typoContext = $service->contextFor('persentse penduduk miskin di Palembang tahun 2026');
+        $synonymContext = $service->contextFor('kemiskinan penduduk di Palembang tahun 2026');
         $okuContext = $service->contextFor('persentase penduduk miskin Ogan Komering Ulu tahun 2026');
 
         $this->assertSame(5, $summary['count']);
-        $this->assertSame('kab_kota', $summary['vertical_levels'][8]);
-        $this->assertSame('subdistrict', $summary['vertical_levels'][9]);
-        $this->assertSame('province', $summary['vertical_levels'][2]);
+        $this->assertArrayNotHasKey('vertical_levels', $summary);
+        $indexedVariables = collect(Cache::get('bps-webapi:variables:index:1600')['variables'])->keyBy('var_id');
+        $this->assertSame('kab_kota', $indexedVariables['11']['level']);
+        $this->assertSame('subdistrict', $indexedVariables['12']['level']);
+        $this->assertSame('province', $indexedVariables['13']['level']);
+        $this->assertSame('unknown', $indexedVariables['15']['level']);
         $this->assertSame(['Kemiskinan', 'Pembangunan Manusia'], $summary['vertical_evidence'][8]['kab_kota']);
         $this->assertStringContainsString('"indikator":"'.$title.'"', $context);
+        $this->assertStringContainsString('"indikator":"'.$title.'"', $typoContext);
+        $this->assertStringContainsString('"indikator":"'.$title.'"', $synonymContext);
         $this->assertStringContainsString('"level":"kab_kota"', $context);
         $this->assertStringContainsString('"nilai":{"160111126":3.4}', $okuContext);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/11/th/126/'));
@@ -405,6 +412,79 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringContainsString('Indeks Pembangunan Manusia', $context);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/var/'));
+        Carbon::setTestNow();
+    }
+
+    public function test_canonical_map_is_loaded_from_shared_json_and_lists_all_seventeen_regions(): void
+    {
+        $sharedMap = json_decode(
+            file_get_contents(base_path('config/bps_indicators.json')),
+            true,
+            512,
+            JSON_THROW_ON_ERROR
+        );
+
+        $this->assertSame($sharedMap, config('bps_indicators'));
+        $this->assertCount(17, config('sumsel_regions'));
+        $this->assertSame(
+            959,
+            collect(config('bps_indicators.groups'))
+                ->flatMap(fn (array $group) => $group['variables'])
+                ->firstWhere('name', 'ipm')['var_id']
+        );
+    }
+
+    public function test_canonical_coverage_checks_live_api_values_by_vervar_and_flags_missing_regions(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/262/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[], [['th' => '2026', 'th_id' => 2026]]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/262/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'vervar' => [
+                        ['val' => 1671, 'label' => 'Kota Palembang'],
+                        ['val' => 1600, 'label' => 'Sumatera Selatan'],
+                    ],
+                    'datacontent' => [
+                        '16712622026' => 1900000,
+                        '16002622026' => 9000000,
+                    ],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $service = app(BpsWebApiService::class);
+        $observations = $service->checkCanonicalCoverage(['jumlah_penduduk']);
+        $palembang = collect($observations)->firstWhere('region', 'Kota Palembang');
+        $province = collect($observations)->firstWhere('region', 'Provinsi Sumatera Selatan');
+        $missingRegion = collect($observations)->firstWhere('status', 'missing');
+        $goldens = $service->verifyCanonicalGoldens([[
+            'question' => 'Berapa jumlah penduduk Kota Palembang?',
+            'indicator' => 'jumlah_penduduk',
+            'expected_var_id' => 262,
+            'region' => 'Kota Palembang',
+            'expected_year' => null,
+            'expected_value' => 1900000,
+        ]]);
+
+        $this->assertCount(18, $observations);
+        $this->assertSame(2026, $palembang['latest_year']);
+        $this->assertSame('current', $palembang['status']);
+        $this->assertSame(9000000, $province['value']);
+        $this->assertSame('missing', $missingRegion['status']);
+        $this->assertTrue($goldens[0]['passed']);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/2026/'));
         Carbon::setTestNow();
     }
 
@@ -890,6 +970,37 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringNotContainsString('Jumlah Hotel', $context);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/view/model/statictable/') && str_contains($request->url(), '/2/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/view/model/statictable/') && str_contains($request->url(), '/1/'));
+    }
+
+    public function test_upah_uses_a_static_table_before_monthly_releases(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/view/model/statictable/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => ['table' => '<table><tr><td>Tahun</td><td>Upah</td></tr><tr><td>2025</td><td>3.500.000</td></tr></table>'],
+                ]);
+            }
+            if (str_contains($url, '/model/statictable/')) {
+                $tables = str_contains($url, '/keyword/upah/')
+                    ? [['table_id' => 42, 'title' => 'Rata-rata Upah Buruh Sumatera Selatan']]
+                    : [];
+
+                return Http::response(['status' => 'OK', 'data' => [['pages' => 1], $tables]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('Berapa upah terbaru?');
+
+        $this->assertStringContainsString('Rata-rata Upah Buruh Sumatera Selatan', $context);
+        $this->assertStringContainsString('3.500.000', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/statictable/domain/1600/keyword/upah/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/'));
     }
 
     public function test_dynamic_bps_context_prefers_annual_variable_for_per_tahun_question(): void

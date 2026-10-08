@@ -1,113 +1,14 @@
 <?php
 
-return [
-    // Curated IDs were checked against debugVariables; years are fetched at runtime.
-    'groups' => [
-        [
-            'terms' => ['miskin', 'kemiskinan'],
-            'variables' => [
-                [
-                    'name' => 'kemiskinan_persen',
-                    'var_id' => 608,
-                    'title' => 'Persentase Penduduk Miskin Maret',
-                    'terms' => ['miskin', 'kemiskinan', 'persentase'],
-                    'excludes' => ['jumlah', 'kabupaten', 'kota'],
-                ],
-                [
-                    'name' => 'kemiskinan_persen_kab_kota',
-                    'var_id' => 604,
-                    'title' => 'Persentase Penduduk Miskin menurut Kabupaten/Kota',
-                    'terms' => ['miskin', 'persentase', 'kabupaten', 'kota'],
-                    'excludes' => ['jumlah'],
-                ],
-                [
-                    'name' => 'kemiskinan_jumlah',
-                    'var_id' => 157,
-                    'title' => 'Jumlah Penduduk Miskin Maret',
-                    'terms' => ['miskin', 'jumlah'],
-                    'excludes' => ['persentase', 'kabupaten', 'kota'],
-                ],
-                [
-                    'name' => 'kemiskinan_jumlah_kab_kota',
-                    'var_id' => 683,
-                    'title' => 'Jumlah Penduduk Miskin Maret Menurut Kab/Kota',
-                    'terms' => ['miskin', 'jumlah', 'kabupaten', 'kota'],
-                    'excludes' => ['persentase'],
-                ],
-            ],
-        ],
-        [
-            'terms' => ['ipm', 'pembangunan', 'manusia'],
-            'variables' => [
-                [
-                    'name' => 'ipm',
-                    'var_id' => 959,
-                    'title' => '[Metode Baru] Indeks Pembangunan Manusia (UHH Hasil Long Form SP2020) Sumatera Selatan Menurut Kabupaten/Kota',
-                    'terms' => ['ipm', 'indeks', 'pembangunan', 'manusia'],
-                ],
-            ],
-        ],
-        [
-            'terms' => ['penduduk', 'warga'],
-            'variables' => [
-                [
-                    'name' => 'jumlah_penduduk',
-                    'var_id' => 262,
-                    'title' => 'Jumlah Penduduk Menurut Kabupaten/Kota',
-                    'terms' => ['jumlah', 'penduduk', 'warga', 'kabupaten', 'kota'],
-                    'excludes' => ['miskin', 'kemiskinan', 'kepadatan', 'proyeksi', 'angkatan', 'kerja', 'ketenagakerjaan', 'penganggur', 'tpt', 'umur', 'usia', 'bekerja'],
-                    'sifat_data' => 'estimasi',
-                    'catatan_sumber' => 'Catatan metadata BPS mencantumkan sumber sensus, proyeksi, dan laporan kabupaten/kota untuk periode berbeda; bedakan dari seri proyeksi jangka panjang.',
-                ],
-            ],
-        ],
-        [
-            'terms' => ['proyeksi'],
-            'variables' => [
-                [
-                    'name' => 'proyeksi_penduduk',
-                    'var_id' => 51,
-                    'title' => 'Proyeksi Jumlah Penduduk',
-                    'terms' => ['proyeksi', 'penduduk', 'warga'],
-                    'excludes' => ['miskin', 'kemiskinan', 'angkatan', 'kerja', 'ketenagakerjaan', 'penganggur', 'tpt', 'umur', 'usia', 'bekerja'],
-                    'sifat_data' => 'proyeksi',
-                    'catatan_sumber' => 'Seri proyeksi jangka panjang hingga 2035; angka tahun yang sama dapat berbeda dari estimasi jumlah penduduk menurut kabupaten/kota (var_id 262).',
-                ],
-            ],
-        ],
-        [
-            'terms' => ['kepadatan', 'penduduk'],
-            'variables' => [
-                [
-                    'name' => 'kepadatan_penduduk',
-                    'var_id' => 268,
-                    'title' => 'Kepadatan Penduduk',
-                    'terms' => ['kepadatan', 'penduduk'],
-                    'excludes' => ['miskin', 'kemiskinan', 'angkatan', 'kerja', 'ketenagakerjaan', 'penganggur', 'tpt'],
-                ],
-            ],
-        ],
-        [
-            'terms' => ['harapan', 'hidup', 'uhh'],
-            'variables' => [
-                [
-                    'name' => 'angka_harapan_hidup',
-                    'var_id' => 960,
-                    'title' => '[Metode Baru] Umur Harapan Hidup Saat Lahir (UHH) Hasil Long Form SP2020 (Tahun) Sumatera Selatan Menurut Kabupaten/Kota',
-                    'terms' => ['harapan', 'hidup', 'uhh'],
-                ],
-            ],
-        ],
-        [
-            'terms' => ['gini', 'rasio'],
-            'variables' => [
-                [
-                    'name' => 'gini',
-                    'var_id' => 257,
-                    'title' => 'Distribusi Pembagian Pengeluaran per Kapita dan Rasio Gini',
-                    'terms' => ['gini', 'rasio', 'pengeluaran'],
-                ],
-            ],
-        ],
-    ],
-];
+$mapPath = __DIR__.'/bps_indicators.json';
+$contents = file_get_contents($mapPath);
+if ($contents === false) {
+    throw new RuntimeException('Shared BPS indicator map is unavailable.');
+}
+
+$configuration = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+if (! is_array($configuration) || ! is_array($configuration['groups'] ?? null)) {
+    throw new RuntimeException('Shared BPS indicator map has an invalid format.');
+}
+
+return $configuration;

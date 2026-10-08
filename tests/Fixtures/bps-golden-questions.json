@@ -1,0 +1,26 @@
+[
+  {
+    "question": "Berapa jumlah penduduk Sumatera Selatan terbaru?",
+    "indicator": "jumlah_penduduk",
+    "expected_var_id": 262,
+    "region": "Provinsi Sumatera Selatan",
+    "expected_year": 2026,
+    "expected_value": 9017142
+  },
+  {
+    "question": "Berapa IPM Kota Palembang terbaru?",
+    "indicator": "ipm",
+    "expected_var_id": 959,
+    "region": "Kota Palembang",
+    "expected_year": 2025,
+    "expected_value": 83.27
+  },
+  {
+    "question": "Berapa umur harapan hidup Kota Palembang terbaru?",
+    "indicator": "angka_harapan_hidup",
+    "expected_var_id": 960,
+    "region": "Kota Palembang",
+    "expected_year": 2025,
+    "expected_value": 76.26
+  }
+]

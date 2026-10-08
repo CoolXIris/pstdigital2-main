@@ -24,6 +24,175 @@ class BpsWebApiService
         return DB::table('chatbot_settings')->where('key', self::SETTING_KEY)->exists();
     }
 
+    public function checkCanonicalCoverage(array $indicatorNames = []): array
+    {
+        $apiKey = $this->apiKey();
+        if ($apiKey === null) {
+            throw new RuntimeException('API key WebAPI BPS belum dikonfigurasi.');
+        }
+
+        $currentYear = now('Asia/Jakarta')->year;
+        $maxLagYears = (int) config('bps_indicators.max_lag_years', 1);
+        $regions = config('sumsel_regions', []);
+        if (count($regions) !== 17) {
+            throw new RuntimeException('Pemeriksaan kanonik membutuhkan tepat 17 wilayah kabupaten/kota.');
+        }
+        $province = $this->provinceFallbackRegion();
+        $variables = [];
+        foreach (config('bps_indicators.groups', []) as $group) {
+            foreach ($group['variables'] ?? [] as $variable) {
+                if ($indicatorNames !== [] && ! in_array($variable['name'] ?? null, $indicatorNames, true)) {
+                    continue;
+                }
+                $variables[] = $variable;
+            }
+        }
+
+        $observations = [];
+        foreach ($variables as $variable) {
+            $variableId = (int) ($variable['var_id'] ?? 0);
+            $title = (string) ($variable['title'] ?? '');
+            if ($variableId <= 0 || $title === '') {
+                throw new RuntimeException('Peta indikator kanonik memuat variabel tanpa ID atau judul.');
+            }
+
+            $regional = $this->explicitVariableLevel($title) === 'kab_kota';
+            $targets = array_merge($regions, [$province]);
+            $pending = [];
+            foreach ($targets as $target) {
+                $label = $target['label'];
+                if ($label !== $province['label'] && ! $regional) {
+                    $observations[] = [
+                        'name' => $variable['name'],
+                        'var_id' => $variableId,
+                        'title' => $title,
+                        'region' => $label,
+                        'latest_year' => null,
+                        'value' => null,
+                        'status' => 'not_applicable',
+                    ];
+                    continue;
+                }
+                $pending[$label] = $target;
+            }
+
+            $periods = $this->canonicalPeriods($variableId, $apiKey);
+            $periods = array_values(array_filter(
+                $periods,
+                fn (array $period) => (int) ($period['th'] ?? 0) <= $currentYear
+            ));
+            foreach ($periods as $period) {
+                if ($pending === []) {
+                    break;
+                }
+                $year = (int) ($period['th'] ?? 0);
+                $periodId = (int) ($period['th_id'] ?? 0);
+                if ($year <= 0 || $periodId <= 0) {
+                    continue;
+                }
+                $response = $this->canonicalDataForPeriod($variableId, $periodId, $apiKey);
+                if ($response === null) {
+                    continue;
+                }
+
+                $values = $response->json('datacontent');
+                if (! is_array($values)) {
+                    continue;
+                }
+                $vervar = $response->json('vervar');
+                foreach ($pending as $label => $target) {
+                    $regionRow = $label === $province['label']
+                        ? (isset($variable['vervar_label'])
+                            ? $this->vervarRowByLabel($vervar, (string) $variable['vervar_label'])
+                            : $this->provinceVervarRow($vervar))
+                        : $this->regionVervarRow($target, $vervar);
+                    if ($regionRow === null) {
+                        continue;
+                    }
+                    $regionalValues = $this->valuesForRegion($values, $regionRow);
+                    foreach ($regionalValues as $value) {
+                        if (! is_scalar($value) || trim((string) $value) === '') {
+                            continue;
+                        }
+                        $observations[] = [
+                            'name' => $variable['name'],
+                            'var_id' => $variableId,
+                            'title' => $title,
+                            'region' => $label,
+                            'latest_year' => $year,
+                            'value' => $value,
+                            'status' => $year < $currentYear - $maxLagYears ? 'stale' : 'current',
+                        ];
+                        unset($pending[$label]);
+                        break;
+                    }
+                }
+            }
+
+            foreach ($pending as $label => $_target) {
+                $observations[] = [
+                    'name' => $variable['name'],
+                    'var_id' => $variableId,
+                    'title' => $title,
+                    'region' => $label,
+                    'latest_year' => null,
+                    'value' => null,
+                    'status' => 'missing',
+                ];
+            }
+        }
+
+        return $observations;
+    }
+
+    public function verifyCanonicalGoldens(array $cases): array
+    {
+        $indicatorNames = array_values(array_unique(array_map(
+            fn (array $case) => (string) ($case['indicator'] ?? ''),
+            $cases
+        )));
+        $observations = $this->checkCanonicalCoverage($indicatorNames);
+        $results = [];
+        foreach ($cases as $case) {
+            $indicatorName = (string) ($case['indicator'] ?? '');
+            $question = (string) ($case['question'] ?? '');
+            $regionName = (string) ($case['region'] ?? '');
+            $expectedId = (int) ($case['expected_var_id'] ?? 0);
+            $expectedYear = (int) ($case['expected_year'] ?? 0);
+            $expectedValue = $case['expected_value'] ?? null;
+            $routedVariables = $this->curatedVariables($this->keywords($question));
+            $routedId = (int) ($routedVariables[0]['var_id'] ?? 0);
+            $actual = null;
+            foreach ($observations as $observation) {
+                if ($observation['name'] === $indicatorName && $observation['region'] === $regionName) {
+                    $actual = $observation;
+                    break;
+                }
+            }
+
+            $passed = $actual !== null
+                && $routedId === $expectedId
+                && $actual['var_id'] === $expectedId
+                && $actual['status'] === 'current'
+                && ($expectedYear === 0 || $actual['latest_year'] === $expectedYear)
+                && (is_numeric($actual['value'] ?? null))
+                && ($expectedValue === null || (float) $actual['value'] === (float) $expectedValue);
+            $results[] = [
+                'question' => (string) ($case['question'] ?? ''),
+                'expected_indicator' => $indicatorName,
+                'expected_var_id' => $expectedId,
+                'routed_var_id' => $routedId,
+                'region' => $regionName,
+                'expected_year' => $expectedYear ?: null,
+                'expected_value' => $expectedValue,
+                'actual' => $actual,
+                'passed' => $passed,
+            ];
+        }
+
+        return $results;
+    }
+
     public function saveApiKey(string $apiKey): void
     {
         DB::table('chatbot_settings')->updateOrInsert(
@@ -100,19 +269,12 @@ class BpsWebApiService
                 $verticalEvidence[$variable['vertical']][$variable['level']][$subjectName] = true;
             }
         }
-        $verticalLevels = [];
-        foreach ($verticalCounts as $vertical => $count) {
-            $scopes = $verticalEvidence[$vertical] ?? [];
-            if (count($scopes) === 1) {
-                $verticalLevels[$vertical] = array_key_first($scopes);
-            }
-        }
         $verticalEvidenceReport = [];
         foreach ($verticalCounts as $vertical => $count) {
             $verticalEvidenceReport[$vertical] = array_map('array_keys', $verticalEvidence[$vertical] ?? []);
         }
         foreach ($variables as &$variable) {
-            $variable['level'] ??= $verticalLevels[$variable['vertical'] ?? ''] ?? 'unknown';
+            $variable['level'] ??= 'unknown';
         }
         unset($variable);
 
@@ -120,7 +282,6 @@ class BpsWebApiService
             'variables' => $variables,
             'vertical_evidence' => $verticalEvidenceReport,
             'vertical_counts' => $verticalCounts,
-            'vertical_levels' => $verticalLevels,
             'refreshed_at' => now()->toIso8601String(),
         ], now()->addHours(26));
 
@@ -128,7 +289,6 @@ class BpsWebApiService
             'count' => count($variables),
             'vertical_evidence' => $verticalEvidenceReport,
             'vertical_counts' => $verticalCounts,
-            'vertical_levels' => $verticalLevels,
         ];
     }
 
@@ -202,6 +362,13 @@ class BpsWebApiService
             $domain = $this->domainFor($question);
             if ($catalog !== null) {
                 return $this->catalogContext($catalog, $domain, $apiKey);
+            }
+
+            if ($this->isStaticWageQuestion($question)) {
+                $tableContext = $this->staticTableContext($keywords, $domain, $apiKey);
+                if ($tableContext !== null) {
+                    return $tableContext;
+                }
             }
 
             if ($this->isMonthlyBpsTopic($question) && ! $regionalFallbackQuestion) {
@@ -312,6 +479,13 @@ class BpsWebApiService
         $closing = $config['closing'];
 
         $apiKey = $this->apiKey();
+        if ($apiKey !== null && $this->isStaticWageQuestion($question)) {
+            $tableContext = $this->staticTableContext($this->keywords($question), '1600', $apiKey);
+            if ($tableContext !== null) {
+                return $notice."\n\n".$tableContext."\n\n".$closing;
+            }
+        }
+
         $topics = array_slice($this->matchFallbackTopics($question), 0, 3);
         $regions = array_slice($this->regionsMentioned($question), 0, 3);
         if ($regions === []) {
@@ -850,7 +1024,7 @@ class BpsWebApiService
         }
         $synonyms = ['laju' => 'pertumbuhan', 'ekonomi' => 'pdrb', 'kemiskinan' => 'miskin'];
         $terms = array_values(array_unique(array_map(fn (string $term) => $synonyms[$term] ?? $term, $terms)));
-        $terms = array_slice($terms, 0, 3);
+        $terms = array_slice($terms, 0, 10);
         if ($terms === []) {
             return $this->isRegionalDataQuestion($question)
                 ? '[WebAPI BPS][DATA_BELUM_TERSEDIA][INDIKATOR_TIDAK_DITEMUKAN] Indikator yang diminta belum ditemukan di indeks WebAPI BPS.'
@@ -890,8 +1064,7 @@ class BpsWebApiService
         $region = $this->regionMentioned($question);
         $compatibleVariables = [];
         foreach ($variables as $variable) {
-            $variable['level'] = $this->explicitVariableLevel((string) ($variable['title'] ?? ''))
-                ?? ($variable['level'] ?? 'unknown');
+            $variable['level'] = $this->explicitVariableLevel((string) ($variable['title'] ?? '')) ?? 'unknown';
             if ($region !== null) {
                 if (in_array($variable['level'], ['province', 'subdistrict'], true)) {
                     continue;
@@ -1466,6 +1639,27 @@ class BpsWebApiService
         return null;
     }
 
+    private function vervarRowByLabel(mixed $vervar, string $expectedLabel): ?array
+    {
+        if (! is_array($vervar)) {
+            return null;
+        }
+
+        $expected = Str::lower(trim($expectedLabel));
+        foreach ($vervar as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $label = Str::lower(trim((string) ($row['label'] ?? '')));
+            $label = trim(preg_replace('/^\d+\s*[\.\-\)]?\s*/u', '', $label) ?? $label);
+            if ($label === $expected) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
     private function matchingVariables(array $terms, string $question, string $domain, string $apiKey): array
     {
         $mainKeyword = $this->mainKeyword($terms);
@@ -1476,7 +1670,20 @@ class BpsWebApiService
         $variables = [];
         $relevantTerms = array_values(array_filter($terms, fn (string $term) => ! in_array($term, self::GENERIC_TERMS, true)));
         $phrase = implode(' ', $relevantTerms);
-        foreach ($this->variablesForKeyword($mainKeyword, $domain, $apiKey) as $variable) {
+        $searchTerms = [];
+        foreach ($relevantTerms ?: [$mainKeyword] as $term) {
+            $searchTerms = array_merge($searchTerms, $this->keywordVariants($term));
+        }
+        $indexedVariables = [];
+        foreach (array_unique($searchTerms) as $searchTerm) {
+            foreach ($this->variablesForKeyword($searchTerm, $domain, $apiKey) as $variable) {
+                if (isset($variable['var_id'])) {
+                    $indexedVariables[(string) $variable['var_id']] = $variable;
+                }
+            }
+        }
+
+        foreach ($indexedVariables as $variable) {
             $id = $variable['var_id'] ?? null;
             $title = $variable['title'] ?? null;
             if (! is_scalar($id) || ! is_string($title)) {
@@ -1484,14 +1691,17 @@ class BpsWebApiService
             }
 
             $normalizedTitle = Str::lower($title);
-            if (! Str::contains($normalizedTitle, $mainKeyword)) {
+            if ($this->titleTermScore($normalizedTitle, $mainKeyword) === 0.0) {
                 continue;
             }
 
             $score = 0;
             foreach ($terms as $searchTerm) {
-                if (Str::contains($normalizedTitle, $searchTerm)) {
-                    $score += in_array($searchTerm, self::GENERIC_TERMS, true) ? 1 : min(Str::length($searchTerm), 10);
+                $termScore = $this->titleTermScore($normalizedTitle, $searchTerm);
+                if ($termScore > 0) {
+                    $score += in_array($searchTerm, self::GENERIC_TERMS, true)
+                        ? 1
+                        : min(Str::length($searchTerm), 10) * $termScore;
                 }
             }
             if ($phrase !== '' && Str::contains($normalizedTitle, $phrase)) {
@@ -1513,7 +1723,7 @@ class BpsWebApiService
                 $score += 10;
             }
 
-            $variable['level'] = $this->explicitVariableLevel($title) ?? ($variable['level'] ?? 'unknown');
+            $variable['level'] = $this->explicitVariableLevel($title) ?? 'unknown';
             $variable['_score'] = $score;
             if (! isset($variables[(string) $id]) || $score > ($variables[(string) $id]['_score'] ?? 0)) {
                 $variables[(string) $id] = $variable;
@@ -1648,10 +1858,22 @@ class BpsWebApiService
     {
         $index = Cache::get(self::VARIABLE_INDEX_CACHE_PREFIX.$domain);
         if (is_array($index) && is_array($index['variables'] ?? null)) {
-            return array_values(array_filter(
+            $variables = array_values(array_filter(
                 $index['variables'],
-                fn (array $variable) => Str::contains(Str::lower((string) ($variable['title'] ?? '')), Str::lower($keyword))
+                fn (array $variable) => $this->titleTermScore(
+                    (string) ($variable['title'] ?? ''),
+                    $keyword
+                ) > 0
             ));
+            usort(
+                $variables,
+                fn (array $left, array $right) => $this->titleTermScore(
+                    (string) ($right['title'] ?? ''),
+                    $keyword
+                ) <=> $this->titleTermScore((string) ($left['title'] ?? ''), $keyword)
+            );
+
+            return $variables;
         }
 
         return Cache::remember('bps-webapi:variables:'.$domain.':'.sha1($keyword), now()->addHours(6), function () use ($keyword, $domain, $apiKey) {
@@ -1672,6 +1894,67 @@ class BpsWebApiService
 
             return $variables;
         });
+    }
+
+    private function keywordVariants(string $keyword): array
+    {
+        $keyword = Str::lower(trim(Str::ascii($keyword)));
+        $synonyms = [
+            'kemiskinan' => ['miskin'],
+            'miskin' => ['kemiskinan'],
+            'pengangguran' => ['penganggur'],
+            'penganggur' => ['pengangguran'],
+            'penduduk' => ['populasi', 'warga'],
+            'populasi' => ['penduduk', 'warga'],
+            'warga' => ['penduduk', 'populasi'],
+            'upah' => ['gaji', 'pendapatan'],
+            'gaji' => ['upah', 'pendapatan'],
+            'pendapatan' => ['penghasilan', 'upah', 'gaji'],
+            'penghasilan' => ['pendapatan', 'upah', 'gaji'],
+            'pertumbuhan' => ['tumbuh', 'kenaikan'],
+            'tumbuh' => ['pertumbuhan'],
+            'presentase' => ['persentase'],
+            'persentase' => ['presentase'],
+        ];
+        $variants = [$keyword, ...($synonyms[$keyword] ?? [])];
+        foreach (['kan', 'nya', 'an', 'i'] as $suffix) {
+            if (Str::endsWith($keyword, $suffix) && Str::length($keyword) - Str::length($suffix) >= 4) {
+                $variants[] = Str::substr(
+                    $keyword,
+                    0,
+                    Str::length($keyword) - Str::length($suffix)
+                );
+                break;
+            }
+        }
+
+        return array_values(array_unique(array_filter($variants)));
+    }
+
+    private function titleTermScore(string $title, string $term): float
+    {
+        $normalizedTitle = Str::lower(Str::ascii($title));
+        $variants = $this->keywordVariants($term);
+        foreach ($variants as $variant) {
+            if ($variant !== '' && Str::contains($normalizedTitle, $variant)) {
+                return 1.0;
+            }
+        }
+
+        $best = 0.0;
+        $minimumScore = Str::length($term) >= 8 ? 0.78 : (Str::length($term) >= 5 ? 0.84 : 0.92);
+        $titleWords = preg_split('/[^a-z0-9]+/u', $normalizedTitle, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($variants as $variant) {
+            if (Str::length($variant) < 5) {
+                continue;
+            }
+            foreach ($titleWords as $titleWord) {
+                similar_text($variant, $titleWord, $percentage);
+                $best = max($best, $percentage / 100);
+            }
+        }
+
+        return $best >= $minimumScore ? $best : 0.0;
     }
 
     public function debugVariables(string $keyword): array
@@ -1798,6 +2081,52 @@ class BpsWebApiService
         });
     }
 
+    private function canonicalPeriods(int $variableId, string $apiKey): array
+    {
+        try {
+            $response = Http::timeout(8)->get(
+                "https://webapi.bps.go.id/v1/api/list/model/th/domain/1600/var/{$variableId}/key/{$apiKey}/"
+            );
+        } catch (ConnectionException) {
+            throw new RuntimeException("WebAPI BPS gagal diakses saat memeriksa var_id {$variableId}.");
+        }
+
+        if (strtolower((string) $response->header('data-availability')) === 'list-not-available') {
+            return [];
+        }
+        if (! $response->successful() || $response->json('status') !== 'OK') {
+            throw new RuntimeException("WebAPI BPS gagal memeriksa periode var_id {$variableId}.");
+        }
+
+        $periods = $response->json('data.1');
+        if (! is_array($periods)) {
+            throw new RuntimeException("Format periode var_id {$variableId} tidak dikenali.");
+        }
+        usort($periods, fn (array $left, array $right) => (int) ($right['th'] ?? 0) <=> (int) ($left['th'] ?? 0));
+
+        return $periods;
+    }
+
+    private function canonicalDataForPeriod(int $variableId, int $periodId, string $apiKey): ?\Illuminate\Http\Client\Response
+    {
+        try {
+            $response = Http::timeout(8)->get(
+                "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/{$variableId}/th/{$periodId}/key/{$apiKey}/"
+            );
+        } catch (ConnectionException) {
+            throw new RuntimeException("WebAPI BPS gagal diakses saat memeriksa var_id {$variableId} tahun {$periodId}.");
+        }
+
+        if (strtolower((string) $response->header('data-availability')) === 'list-not-available') {
+            return null;
+        }
+        if (! $response->successful() || $response->json('status') !== 'OK') {
+            throw new RuntimeException("WebAPI BPS gagal memeriksa var_id {$variableId} tahun {$periodId}.");
+        }
+
+        return $response;
+    }
+
     private function domainFor(string $question): string
     {
         return '1600';
@@ -1841,8 +2170,7 @@ class BpsWebApiService
                 ?? (preg_match('/\bproyeksi\b/iu', (string) ($variable['title'] ?? '')) === 1 ? 'proyeksi' : null),
             'catatan_sumber' => $variable['catatan_sumber'] ?? null,
             'subjek' => $variable['subject'] ?? null,
-            'level' => $variable['level'] ?? $this->explicitVariableLevel((string) ($variable['title'] ?? '')),
-            'vertical' => $variable['vertical'] ?? null,
+            'level' => $this->explicitVariableLevel((string) ($variable['title'] ?? '')) ?? 'unknown',
             'wilayah' => $regionRow === null ? $response->json('vervar') : [$regionRow],
             'kategori' => $response->json('turvar'),
             'tahun' => $year,
@@ -1924,15 +2252,16 @@ class BpsWebApiService
                 if (! is_scalar($tableId) || ! is_string($title)) {
                     continue;
                 }
-                if (! Str::contains(Str::lower($title), $mainKeyword)) {
-                    continue;
-                }
 
                 $score = 0;
                 foreach ($keywords as $term) {
-                    if (Str::contains(Str::lower($title), $term)) {
-                        $score += min(Str::length($term), 10);
-                    }
+                    $score += min(Str::length($term), 10) * $this->titleTermScore($title, $term);
+                }
+                if ($score === 0.0) {
+                    continue;
+                }
+                if (Str::contains(Str::lower($title), Str::lower($mainKeyword))) {
+                    $score += 4;
                 }
                 $matches[(string) $tableId] = ['table' => $table, 'score' => $score];
             }
@@ -1942,13 +2271,48 @@ class BpsWebApiService
         $ranked = array_values($matches);
         $best = $ranked[0] ?? null;
         $runnerUp = $ranked[1] ?? null;
-        if ($best === null
-            || $best['score'] < 6
-            || ($runnerUp !== null && $best['score'] - $runnerUp['score'] < 4)) {
+        $requiredScore = count(array_filter(
+            $keywords,
+            fn (string $term) => ! in_array($term, self::GENERIC_TERMS, true)
+        )) > 1 ? 6 : max(2.5, Str::length($mainKeyword) * 0.65);
+        if ($best === null || $best['score'] < $requiredScore) {
             return [];
+        }
+        if ($runnerUp !== null && $best['score'] - $runnerUp['score'] < 2) {
+            return array_column(array_slice($ranked, 0, 3), 'table');
         }
 
         return [$best['table']];
+    }
+
+    private function staticTableContext(array $keywords, string $domain, string $apiKey): ?string
+    {
+        $tables = $this->matchingTables($keywords, $domain, $apiKey);
+        $tableDomain = $domain;
+        if ($tables === [] && $domain !== '0000') {
+            $tableDomain = '0000';
+            $tables = $this->matchingTables($keywords, $tableDomain, $apiKey);
+        }
+
+        $context = [];
+        foreach ($tables as $table) {
+            $tableId = $table['table_id'] ?? null;
+            if (! is_scalar($tableId) || ! isset($table['title'])) {
+                continue;
+            }
+            $detail = $this->tableDetail((string) $tableId, $tableDomain, $apiKey);
+            if ($detail !== null) {
+                $scope = $tableDomain === '0000' ? 'domain nasional' : 'domain Sumatera Selatan';
+                $context[] = '[Sumber: BPS WebAPI, '.$scope.', '.$table['title'].'] '.$detail;
+            }
+        }
+
+        return $context === [] ? null : implode("\n\n", $context);
+    }
+
+    private function isStaticWageQuestion(string $question): bool
+    {
+        return preg_match('/\b(upah|gaji|ump|umk|umr)\b/i', $question) === 1;
     }
 
     private function mainKeyword(array $keywords): ?string
@@ -1994,9 +2358,18 @@ class BpsWebApiService
             }
             $stopWords = array_merge($stopWords, $regionWords);
         }
-        $synonyms = ['total' => 'jumlah', 'warga' => 'penduduk', 'masyarakat' => 'penduduk', 'presentase' => 'persentase', 'laju' => 'pertumbuhan', 'kemiskinan' => 'miskin'];
+        $synonyms = [
+            'total' => 'jumlah',
+            'masyarakat' => 'penduduk',
+            'laju' => 'pertumbuhan',
+        ];
         $keywords = array_diff($matches[0] ?? [], $stopWords);
+        $expanded = [];
+        foreach ($keywords as $keyword) {
+            $normalized = $synonyms[$keyword] ?? $keyword;
+            $expanded = array_merge($expanded, $this->keywordVariants($normalized));
+        }
 
-        return array_values(array_unique(array_map(fn (string $keyword) => $synonyms[$keyword] ?? $keyword, $keywords)));
+        return array_values(array_unique($expanded));
     }
 }

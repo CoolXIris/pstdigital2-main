@@ -1,6 +1,8 @@
 """Tools WebAPI BPS untuk Gemini (function calling)."""
 import functools
+import html
 import itertools
+import json
 import logging
 import os
 import re
@@ -9,7 +11,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Literal, Optional
+from pathlib import Path
+from typing import Any, Callable, Optional
 from urllib.parse import quote_plus
 
 import httpx
@@ -25,6 +28,7 @@ _http = httpx.Client(timeout=8.0)
 _cache: dict[str, tuple[float, Any]] = {}
 _cache_lock = threading.Lock()
 _REGIONS = (
+    ("Provinsi Sumatera Selatan", ("sumatera selatan", "sumsel")),
     ("Kabupaten Ogan Komering Ulu", ("ogan komering ulu", "oku")),
     ("Kabupaten Ogan Komering Ilir", ("ogan komering ilir", "oki")),
     ("Kabupaten Muara Enim", ("muara enim",)),
@@ -44,6 +48,45 @@ _REGIONS = (
     ("Kota Lubuklinggau", ("lubuklinggau", "lubuk linggau")),
 )
 _SHORT_REGION_ALIASES = {"oku", "oki", "pali", "muba"}
+_VARIABLE_INDEX_TTL = 24 * 60 * 60
+_VARIABLE_SYNONYMS = {
+    "kemiskinan": "miskin",
+    "miskin": "kemiskinan",
+    "pengangguran": "penganggur",
+    "penganggur": "pengangguran",
+    "nganggur": "pengangguran",
+    "pertumbuhan": "tumbuh",
+    "tumbuh": "pertumbuhan",
+    "penduduk": "populasi",
+    "populasi": "penduduk",
+    "warga": "penduduk",
+    "upah": "gaji",
+    "gaji": "upah",
+    "penghasilan": "pendapatan",
+    "pendapatan": "penghasilan",
+}
+
+
+def _load_canonical_indicators() -> dict[str, dict[str, Any]]:
+    path = Path(__file__).resolve().parent / "config" / "bps_indicators.json"
+    with path.open(encoding="utf-8") as source:
+        configuration = json.load(source)
+
+    indicators: dict[str, dict[str, Any]] = {}
+    for group in configuration["groups"]:
+        for variable in group["variables"]:
+            name = variable["name"]
+            indicators[name] = {
+                key: variable[key]
+                for key in ("var_id", "title", "sifat_data", "catatan_sumber", "vervar_label")
+                if key in variable
+            }
+    if not indicators:
+        raise ValueError("Shared BPS indicator map is empty.")
+    return indicators
+
+
+_INDIKATOR_UTAMA = _load_canonical_indicators()
 
 
 class BpsError(Exception):
@@ -61,19 +104,45 @@ def _cached(key: str, ttl: int, loader: Callable[[], Any]) -> Any:
     return value
 
 
+def strip_notes(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_notes(item)
+            for key, item in value.items()
+            if str(key).casefold() != "notes"
+        }
+    if isinstance(value, list):
+        return [strip_notes(item) for item in value]
+    return value
+
+
 def _get(path: str) -> dict:
     api_key = os.getenv("BPS_API_KEY")
     if not api_key:
         raise BpsError("BPS_API_KEY belum dikonfigurasi.")
     try:
         response = _http.get(f"{BASE}/{path.strip('/')}/key/{api_key}/")
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
+    except httpx.RequestError:
         # Sengaja tanpa pesan asli: URL pada exception memuat API key.
         raise BpsError("WebAPI BPS tidak dapat diakses saat ini.") from None
+    try:
+        payload = response.json()
+    except ValueError:
+        raise BpsError("WebAPI BPS mengembalikan JSON yang tidak valid.") from None
+    if not isinstance(payload, dict):
+        raise BpsError("Format respons BPS tidak dikenali.")
+    if response.status_code >= 500:
+        raise BpsError("WebAPI BPS mengalami gangguan.")
+    availability = response.headers.get("data-availability", "").strip().lower()
+    if availability == "list-not-available":
+        payload["status"] = "OK"
+        payload["data"] = [{"pages": 1}, []]
+        payload["data_availability"] = availability
+        return payload
     if payload.get("status") != "OK":
-        raise BpsError("WebAPI BPS tidak mengembalikan data.")
+        payload["status"] = "OK"
+        payload["data"] = [{"pages": 1}, []]
+        return payload
     return payload
 
 
@@ -100,15 +169,175 @@ def _periods(var_id: int) -> list[dict]:
 
 
 def _latest_year(var_id: int) -> tuple[Optional[str], int, bool]:
-    try:
-        periods = _periods(var_id)
-    except BpsError:
-        return None, 0, False
+    periods = _periods(var_id)
     this_year = datetime.now(WIB).year
     past = [p for p in periods if int(p["th"]) <= this_year]
     latest = past or periods
     has_future = any(int(p["th"]) > this_year for p in periods)
     return (str(latest[0]["th"]) if latest else None), len(periods), has_future
+
+
+def _remove_region_names(keyword: str) -> str:
+    result = keyword.lower()
+    regions = sorted(_REGIONS, key=lambda item: max(len(alias) for alias in item[1]), reverse=True)
+    for canonical, aliases in regions:
+        for name in (canonical, *aliases):
+            result = re.sub(rf"(?<!\w){re.escape(name.lower())}(?!\w)", " ", result)
+    result = re.sub(r"\b(kabupaten|kab|kota|provinsi)\b", " ", result)
+    return " ".join(result.split())
+
+
+def _stem_keyword(word: str) -> str:
+    stem = word
+    for prefix in ("meng", "meny", "mem", "men", "peng", "peny", "pem", "pen", "per", "ber", "ter", "ke", "se", "pe", "me"):
+        if stem.startswith(prefix) and len(stem) - len(prefix) >= 4:
+            stem = stem[len(prefix):]
+            break
+    for suffix in ("kan", "nya", "an", "i"):
+        if stem.endswith(suffix) and len(stem) - len(suffix) >= 4:
+            stem = stem[:-len(suffix)]
+            break
+    return stem
+
+
+def _search_keyword_variants(keyword: str) -> list[str]:
+    words = keyword.split()
+    candidates = [keyword]
+    synonym_phrase = " ".join(_VARIABLE_SYNONYMS.get(word, word) for word in words)
+    if synonym_phrase != keyword:
+        candidates.append(synonym_phrase)
+    for word in sorted(set(words), key=len, reverse=True):
+        if len(word) < 4:
+            continue
+        candidates.extend((word, _stem_keyword(word), _VARIABLE_SYNONYMS.get(word, word)))
+    return list(dict.fromkeys(query for query in candidates if query))[:7]
+
+
+def _variable_index_key() -> str:
+    return f"variables-index:{DOMAIN}"
+
+
+def _load_model_rows(path: str) -> list[dict]:
+    rows: list[dict] = []
+    pages = 1
+    page = 1
+    while page <= pages:
+        page_path = path if page == 1 else f"{path}/page/{page}"
+        payload = _get(page_path)
+        data = payload.get("data")
+        if not isinstance(data, list) or len(data) < 2 or not isinstance(data[1], list):
+            raise BpsError("Format daftar variabel BPS tidak dikenali.")
+        page_rows, pages = _list_rows(payload)
+        if pages > 200:
+            raise BpsError("WebAPI BPS melaporkan jumlah halaman variabel yang tidak wajar.")
+        rows.extend(row for row in page_rows if isinstance(row, dict))
+        page += 1
+    return rows
+
+
+def _load_variable_index() -> dict:
+    subject_rows = _load_model_rows(f"list/model/subject/domain/{DOMAIN}")
+    subjects = [
+        (
+            str(row.get("sub_id") or row.get("subject_id")),
+            str(row.get("sub_name") or row.get("subject") or row.get("name") or ""),
+        )
+        for row in subject_rows
+        if row.get("sub_id") is not None or row.get("subject_id") is not None
+    ]
+
+    def load_subject(subject: tuple[str, str]) -> list[dict]:
+        subject_id, subject_name = subject
+        rows = _load_model_rows(
+            f"list/model/var/domain/{DOMAIN}/subject/{quote_plus(subject_id)}"
+        )
+        variables = []
+        for row in rows:
+            var_id = row.get("var_id")
+            title = row.get("title") or row.get("var_name")
+            if var_id is None or not isinstance(title, str) or not title.strip():
+                continue
+            variables.append({
+                "var_id": str(var_id),
+                "title": title.strip(),
+                "unit": row.get("unit") or row.get("unit_name") or row.get("satuan"),
+                "subject": subject_name,
+            })
+        return variables
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        subject_variables = list(pool.map(load_subject, subjects))
+    variables_by_id: dict[str, dict] = {}
+    for variables in subject_variables:
+        for variable in variables:
+            variables_by_id.setdefault(variable["var_id"], variable)
+    variables = sorted(
+        variables_by_id.values(),
+        key=lambda variable: (variable["title"].casefold(), variable["var_id"]),
+    )
+    return {
+        "variables": variables,
+        "refreshed_at": datetime.now(WIB).isoformat(timespec="seconds"),
+    }
+
+
+def refresh_variable_index() -> dict:
+    index = _load_variable_index()
+    with _cache_lock:
+        _cache[_variable_index_key()] = (time.time(), index)
+    return index
+
+
+def _variable_index() -> dict:
+    return _cached(_variable_index_key(), _VARIABLE_INDEX_TTL, _load_variable_index)
+
+
+def _token_match_score(term: str, title_tokens: set[str]) -> float:
+    variants = {term, _stem_keyword(term), _VARIABLE_SYNONYMS.get(term, term)}
+    for variant in tuple(variants):
+        variants.add(_stem_keyword(variant))
+        variants.add(_VARIABLE_SYNONYMS.get(variant, variant))
+    if variants & title_tokens:
+        return 1.0
+
+    threshold = 0.78 if len(term) >= 7 else 0.84 if len(term) >= 5 else 0.9
+    best_score = max(
+        (
+            SequenceMatcher(None, variant, title_token).ratio()
+            for variant in variants
+            for title_token in title_tokens
+            if min(len(variant), len(title_token)) >= 4
+        ),
+        default=0.0,
+    )
+    return best_score if best_score >= threshold else 0.0
+
+
+def _rank_local_variables(keyword: str, variables: list[dict]) -> list[dict]:
+    terms = [
+        word for word in re.findall(r"[a-z0-9]+", keyword.casefold())
+        if len(word) >= 3
+    ]
+    ranked: list[tuple[int, float, dict]] = []
+    for variable in variables:
+        title = " ".join(
+            str(variable.get(field) or "")
+            for field in ("title", "subject")
+        ).casefold()
+        title_tokens = set(re.findall(r"[a-z0-9]+", title))
+        scores = [_token_match_score(term, title_tokens) for term in terms]
+        matches = sum(score > 0 for score in scores)
+        if matches:
+            ranked.append((matches, sum(scores), variable))
+    ranked.sort(
+        key=lambda item: (
+            item[0],
+            item[1],
+            str(item[2].get("title") or "").casefold(),
+        ),
+        reverse=True,
+    )
+    return [variable for _, _, variable in ranked]
 
 
 def cari_variabel(kata_kunci: str) -> dict:
@@ -123,44 +352,26 @@ def cari_variabel(kata_kunci: str) -> dict:
     Args:
         kata_kunci: kata inti indikator yang dicari.
     """
-    keyword = " ".join((kata_kunci or "").split())[:80]
+    keyword = _remove_region_names(" ".join((kata_kunci or "").split()))[:80]
     if not keyword:
-        return {"error": "kata_kunci kosong."}
-
-    def search(q: str) -> list[dict]:
-        def load() -> list[dict]:
-            found: list[dict] = []
-            for page in (1, 2, 3):
-                path = f"list/model/var/domain/{DOMAIN}/keyword/{quote_plus(q)}"
-                if page > 1:
-                    path += f"/page/{page}"
-                payload = _get(path)
-                data = payload.get("data")
-                if not isinstance(data, list) or len(data) < 2 or not isinstance(data[1], list):
-                    raise BpsError("Format respons BPS tidak dikenali.")
-                rows, pages = _list_rows(payload)
-                found += rows
-                if page >= pages:
-                    break
-            return found
-
-        return _cached(f"var:{DOMAIN}:{q.lower()}", 3600, load)
+        return {
+            "jumlah_ditemukan": 0,
+            "hasil": [],
+            "status_hasil": "kosong",
+            "petunjuk": "Masukkan kata inti indikator tanpa nama wilayah.",
+        }
 
     try:
-        variables: list[dict] = []
-        words = sorted({word for word in keyword.split() if len(word) >= 4}, key=len, reverse=True)
-        for query in [keyword, *[word for word in words if word != keyword]][:3]:
-            variables = search(query)
-            if variables:
-                break
+        index = _variable_index()
+        variables = _rank_local_variables(keyword, index["variables"])
 
         candidates = variables[:15]
         with ThreadPoolExecutor(max_workers=6) as pool:
             latest = list(pool.map(lambda v: _latest_year(int(v["var_id"])), candidates))
     except BpsError as exc:
-        return {"error": str(exc)}
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
     except (KeyError, ValueError, TypeError):
-        return {"error": "Format respons BPS tidak dikenali."}
+        return {"error": "Format respons BPS tidak dikenali.", "status_hasil": "gagal_teknis"}
 
     hasil = [
         {
@@ -178,7 +389,11 @@ def cari_variabel(kata_kunci: str) -> dict:
         item["seri_lama"] = bool(item["tahun_terbaru"]) and int(item["tahun_terbaru"]) < newest - 2
     hasil.sort(key=lambda item: item["seri_lama"])
 
-    result = {"jumlah_ditemukan": len(variables), "hasil": hasil}
+    result = {
+        "jumlah_ditemukan": len(variables),
+        "hasil": hasil,
+        "status_hasil": "ditemukan" if variables else "kosong",
+    }
     if not variables:
         result["petunjuk"] = "Tidak ada hasil. Coba satu kata inti tanpa nama wilayah."
     return result
@@ -196,13 +411,21 @@ def warm_cache() -> None:
 
     cutoff = time.time() - 600
     with _cache_lock:
-        stale_keys = [key for key, (timestamp, _) in _cache.items() if timestamp < cutoff]
+        stale_keys = [
+            key for key, (timestamp, _) in _cache.items()
+            if key != _variable_index_key() and timestamp < cutoff
+        ]
         for key in stale_keys:
             if _cache[key][0] < cutoff:
                 _cache.pop(key, None)
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(brs, range(12)))
+    try:
+        _variable_index()
+    except BpsError as exc:
+        logger.warning("Indeks variabel BPS belum dapat diperbarui: %s", exc)
+        return
     for keyword in (
         "jumlah penduduk",
         "penduduk miskin",
@@ -264,6 +487,24 @@ def _resolve_region(wilayah: str) -> tuple[Optional[str], list[str]]:
             return scores[0][2], []
 
     return None, candidates
+
+
+def resolve_region_from_text(text: str) -> tuple[Optional[str], list[str]]:
+    normalized = _norm_region(text)
+    for canonical, aliases in sorted(_REGIONS, key=lambda item: max(map(len, item[1])), reverse=True):
+        if any(re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", normalized) for alias in aliases):
+            return canonical, []
+
+    tokens = normalized.split()
+    candidates: set[str] = set()
+    for size in range(min(4, len(tokens)), 0, -1):
+        for start in range(len(tokens) - size + 1):
+            target = " ".join(tokens[start:start + size])
+            resolved, suggestions = _resolve_region(target)
+            if resolved:
+                return resolved, []
+            candidates.update(suggestions)
+    return None, sorted(candidates)[:3]
 
 
 def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str], available: list[str]) -> dict:
@@ -384,59 +625,22 @@ def ambil_data(var_id: int, tahun: Optional[str] = None, wilayah: Optional[str] 
         return {"error": "Format respons BPS tidak dikenali."}
 
 
-_INDIKATOR_UTAMA: dict[str, dict[str, Any]] = {
-    "jumlah_penduduk": {
-        "var_id": 262,
-        "sifat_data": "estimasi",
-        "catatan_sumber": (
-            "Catatan metadata BPS mencantumkan sumber sensus, proyeksi, dan laporan kabupaten/kota "
-            "untuk periode berbeda; bedakan dari seri proyeksi jangka panjang."
-        ),
-    },
-    "proyeksi_penduduk": {
-        "var_id": 51,
-        "sifat_data": "proyeksi",
-        "catatan_sumber": (
-            "Seri proyeksi jangka panjang hingga 2035; angka tahun yang sama dapat berbeda "
-            "dari estimasi jumlah penduduk menurut kabupaten/kota (var_id 262)."
-        ),
-    },
-    "kepadatan_penduduk": {"var_id": 268},
-    "angka_harapan_hidup": {"var_id": 960},
-    "gini": {"var_id": 257},
-    "kemiskinan_persen": {"var_id": 608},
-    "kemiskinan_persen_kab_kota": {"var_id": 604},
-    "kemiskinan_jumlah": {"var_id": 157},
-    "kemiskinan_jumlah_kab_kota": {"var_id": 683},
-    "ipm": {"var_id": 959},
-}
-
-
 def indikator_utama(
-    nama: Literal[
-        "jumlah_penduduk",
-        "proyeksi_penduduk",
-        "kepadatan_penduduk",
-        "angka_harapan_hidup",
-        "gini",
-        "kemiskinan_persen",
-        "kemiskinan_persen_kab_kota",
-        "kemiskinan_jumlah",
-        "kemiskinan_jumlah_kab_kota",
-        "ipm",
-    ],
+    nama: str,
+    tahun: Optional[str] = None,
+    wilayah: Optional[str] = None,
 ) -> dict:
-    """Mengambil data terbaru untuk indikator BPS Sumatera Selatan yang sudah dikurasi.
+    """Mengambil data indikator kanonik untuk tahun dan wilayah yang diminta.
 
-    nama wajib persis salah satu dari: jumlah_penduduk, proyeksi_penduduk,
-    kepadatan_penduduk, angka_harapan_hidup, gini, kemiskinan_persen,
-    kemiskinan_persen_kab_kota, kemiskinan_jumlah, kemiskinan_jumlah_kab_kota, ipm.
-    Tool ini mengembalikan data seluruh wilayah dan tidak menerima nama wilayah atau
-    var_id bebas. Jumlah penduduk menggunakan seri estimasi var_id 262; proyeksi
-    menggunakan var_id 51. Untuk indikator yang tidak tercantum, gunakan cari_variabel.
+    nama wajib persis salah satu nama di peta kanonik bersama config/bps_indicators.json.
+    Tool ini tidak menerima var_id bebas. Tanpa tahun, mengambil tahun berjalan terbaru
+    yang tersedia; tanpa wilayah, mengembalikan semua wilayah. Jumlah penduduk memakai
+    estimasi var_id 262; proyeksi memakai seri berbeda, var_id 51.
 
     Args:
         nama: nama indikator kanonik dari daftar tetap.
+        tahun: tahun yang diminta (opsional).
+        wilayah: nama wilayah (opsional); kosongkan untuk semua wilayah.
     """
     if not isinstance(nama, str) or nama not in _INDIKATOR_UTAMA:
         return {
@@ -445,15 +649,36 @@ def indikator_utama(
         }
 
     indicator = _INDIKATOR_UTAMA[nama]
-    result = ambil_data(int(indicator["var_id"]))
+    result = ambil_data(int(indicator["var_id"]), tahun=tahun, wilayah=wilayah)
     if "error" in result:
-        return result
+        return {"nama_indikator": nama, "var_id": int(indicator["var_id"]), **result}
     result["nama_indikator"] = nama
+    result["var_id"] = int(indicator["var_id"])
+    if indicator.get("vervar_label") and isinstance(result.get("data"), list):
+        expected_label = str(indicator["vervar_label"]).casefold().strip()
+        matching_rows = [
+            row for row in result["data"]
+            if str(row.get("wilayah", "")).casefold().strip().lstrip("0123456789. )-") == expected_label
+        ]
+        if not matching_rows:
+            return {
+                "nama_indikator": nama,
+                "var_id": int(indicator["var_id"]),
+                "error": f"Kategori '{indicator['vervar_label']}' tidak tersedia pada periode ini.",
+                "status_hasil": "kosong",
+            }
+        result["data"] = matching_rows
+        result["jumlah_baris"] = len(matching_rows)
     if "sifat_data" in indicator:
         result["sifat_data"] = indicator["sifat_data"]
     if "catatan_sumber" in indicator:
         result["catatan_sumber"] = indicator["catatan_sumber"]
     return result
+
+
+def nama_indikator_utama() -> list[str]:
+    """Nama-nama indikator kanonik yang dimuat dari peta bersama."""
+    return list(_INDIKATOR_UTAMA)
 
 
 def _brs_month(year: int, month: int) -> list[dict]:
@@ -468,7 +693,12 @@ def _brs_month(year: int, month: int) -> list[dict]:
     return _cached(f"brs:{DOMAIN}:{year}-{month}", 1800, load)
 
 
-def berita_resmi_statistik(kata_kunci: Optional[str] = None, jumlah: int = 5) -> dict:
+def berita_resmi_statistik(
+    kata_kunci: Optional[str] = None,
+    jumlah: int = 5,
+    tahun: Optional[int] = None,
+    bulan: Optional[str] = None,
+) -> dict:
     """Mengambil Berita Resmi Statistik (BRS) terbaru BPS Sumatera Selatan.
 
     Gunakan untuk indikator bulanan/triwulanan dan pertanyaan "terbaru": inflasi, NTP,
@@ -479,11 +709,29 @@ def berita_resmi_statistik(kata_kunci: Optional[str] = None, jumlah: int = 5) ->
     Args:
         kata_kunci: kata inti topik, misalnya "inflasi" atau "penduduk miskin".
         jumlah: banyak entri yang diminta (1-10).
+        tahun: filter tahun yang tercantum pada judul BRS (opsional).
+        bulan: filter nama bulan yang tercantum pada judul BRS (opsional).
     """
     count = max(1, min(int(jumlah or 5), 10))
     tokens = [t for t in (kata_kunci or "").lower().split() if len(t) >= 3]
     now = datetime.now(WIB)
     found: list[tuple[int, str, dict]] = []
+    month_names = {
+        "januari": ("januari", "jan"),
+        "februari": ("februari", "feb"),
+        "maret": ("maret", "mar"),
+        "april": ("april", "apr"),
+        "mei": ("mei",),
+        "juni": ("juni", "jun"),
+        "juli": ("juli", "jul"),
+        "agustus": ("agustus", "agu", "ags"),
+        "september": ("september", "sep"),
+        "oktober": ("oktober", "okt"),
+        "november": ("november", "nov"),
+        "desember": ("desember", "des"),
+    }
+    requested_month = (bulan or "").strip().lower()
+    month_variants = month_names.get(requested_month, (requested_month,)) if requested_month else ()
     try:
         for back in range(12):
             year, month0 = divmod(now.year * 12 + (now.month - 1) - back, 12)
@@ -492,14 +740,23 @@ def berita_resmi_statistik(kata_kunci: Optional[str] = None, jumlah: int = 5) ->
                 score = sum(t in title.lower() for t in tokens)
                 if tokens and score == 0:
                     continue
+                if tahun is not None and not re.search(rf"\b{int(tahun)}\b", title):
+                    continue
+                if month_variants and not any(
+                    re.search(rf"\b{re.escape(variant)}\b", title.lower())
+                    for variant in month_variants
+                ):
+                    continue
                 found.append((score, str(item.get("rl_date", "")), item))
-            if (not tokens and found) or len(found) >= count:
+            if (not tokens and not bulan and tahun is None and found) or (
+                len(found) >= count and not bulan and tahun is None
+            ):
                 break
     except BpsError as exc:
         return {"error": str(exc)}
 
     found.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    return {
+    result = {
         "hasil": [
             {
                 "judul": item.get("title"),
@@ -510,6 +767,12 @@ def berita_resmi_statistik(kata_kunci: Optional[str] = None, jumlah: int = 5) ->
             for _, _, item in found[:count]
         ]
     }
+    if (bulan or tahun is not None) and not found:
+        result["periode_diminta_tidak_ditemukan"] = {
+            "bulan": bulan,
+            "tahun": tahun,
+        }
+    return result
 
 
 def publikasi_terbaru(kata_kunci: Optional[str] = None, jumlah: int = 5) -> dict:
@@ -542,12 +805,103 @@ def publikasi_terbaru(kata_kunci: Optional[str] = None, jumlah: int = 5) -> dict
     }
 
 
+def _static_table_rows(keyword: str, domain: str) -> list[dict]:
+    tables_by_id: dict[str, dict] = {}
+    for query in _search_keyword_variants(keyword)[:4]:
+        base = f"list/model/statictable/domain/{domain}/keyword/{quote_plus(query)}"
+        for page in (1, 2):
+            path = base if page == 1 else f"{base}/page/{page}"
+            payload = _get(path)
+            rows, pages = _list_rows(payload)
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                table_id = row.get("table_id")
+                title = row.get("title")
+                if table_id is not None and isinstance(title, str) and title.strip():
+                    tables_by_id.setdefault(str(table_id), {
+                        "table_id": str(table_id),
+                        "title": title.strip(),
+                        "domain": domain,
+                    })
+            if page >= pages:
+                break
+    return list(tables_by_id.values())
+
+
+def _static_table_text(payload: dict) -> Optional[str]:
+    data = payload.get("data")
+    table_html = data.get("table") if isinstance(data, dict) else None
+    if not isinstance(table_html, str) or not table_html.strip():
+        return None
+    table_html = html.unescape(table_html)
+    table_html = re.sub(
+        r"<(?:br\s*/?|/(?:td|th|tr|p|div|li|h[1-6]))[^>]*>",
+        "\n",
+        table_html,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"<[^>]+>", " ", table_html)
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in text.splitlines()
+    ]
+    cleaned = "\n".join(line for line in lines if line)
+    return cleaned[:5000].rstrip() or None
+
+
+def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
+    """Mencari dan membaca tabel statis BPS, termasuk topik yang tidak ada di variabel.
+
+    Gunakan untuk tabel seperti upah/gaji, tabel tematik, atau ketika cari_variabel
+    tidak menemukan indikator yang sesuai. Hasil hanya memuat judul dan isi tabel bersih.
+
+    Args:
+        kata_kunci: topik inti tabel, misalnya "upah minimum" atau "gaji".
+        jumlah: jumlah tabel teratas yang diminta, dibatasi 1 sampai 3.
+    """
+    keyword = _remove_region_names(" ".join((kata_kunci or "").split()))[:80]
+    if not keyword:
+        return {"jumlah_ditemukan": 0, "hasil": [], "status_hasil": "kosong"}
+
+    count = max(1, min(int(jumlah or 1), 3))
+    try:
+        results = []
+        domains = [DOMAIN] if DOMAIN == "0000" else [DOMAIN, "0000"]
+        for domain in domains:
+            ranked = _rank_local_variables(keyword, _static_table_rows(keyword, domain))
+            for table in ranked[:count]:
+                path = (
+                    f"view/model/statictable/domain/{table['domain']}/lang/ind/id/"
+                    f"{quote_plus(table['table_id'])}"
+                )
+                text = _static_table_text(_get(path))
+                if text:
+                    results.append({
+                        "table_id": table["table_id"],
+                        "judul": table["title"],
+                        "domain": table["domain"],
+                        "cakupan": "nasional" if table["domain"] == "0000" else "Sumatera Selatan",
+                        "isi": text,
+                    })
+            if results:
+                break
+    except BpsError as exc:
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
+
+    return {
+        "jumlah_ditemukan": len(results),
+        "hasil": results,
+        "status_hasil": "ditemukan" if results else "kosong",
+    }
+
+
 def _logged(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         started = time.time()
         logger.info("TOOL mulai: %s args=%s kwargs=%s", func.__name__, args, kwargs)
-        result = func(*args, **kwargs)
+        result = strip_notes(func(*args, **kwargs))
         logger.info(
             "TOOL selesai: %s %.1fs error=%s",
             func.__name__, time.time() - started,
@@ -557,4 +911,14 @@ def _logged(func):
     return wrapper
 
 
-TOOLS = [_logged(f) for f in (cari_variabel, ambil_data, indikator_utama, berita_resmi_statistik, publikasi_terbaru)]
+TOOLS = [
+    _logged(f)
+    for f in (
+        cari_variabel,
+        ambil_data,
+        indikator_utama,
+        berita_resmi_statistik,
+        publikasi_terbaru,
+        tabel_statis,
+    )
+]

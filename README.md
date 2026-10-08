@@ -42,6 +42,33 @@ and set `GEMINI_API_KEY` for the Python process. `GEMINI_MODEL` defaults to
 `gemini-flash-lite-latest`. For a separately hosted service, set
 `GEMINI_CHAT_API_URL` to its private or HTTPS `/api/chat` URL.
 
+## Canonical BPS indicators
+
+`config/bps_indicators.json` is the shared source of canonical indicator IDs
+and metadata. Laravel loads it through `config/bps_indicators.php`; the Python
+service reads the JSON directly. Keep changes in the JSON source, not in
+language-specific copies.
+
+Use Laravel's stored WebAPI BPS credential to run the live golden checks and
+coverage check:
+
+```powershell
+php artisan bps:verify-canonical-goldens
+php artisan bps:check-canonical-indicators
+```
+
+The daily coverage check is scheduled for 03:00 Asia/Jakarta. It checks every
+canonical indicator against all 17 regencies/cities when the variable title
+indicates kabupaten/kota coverage, checks the province row for province-level
+series, and warns when the latest data is more than one year behind. Golden
+questions and optional expected year/value snapshots are maintained in
+`tests/Fixtures/bps-golden-questions.json`. Update the snapshot deliberately
+after checking the published API value when BPS releases a newer period.
+
+Unresolved data requests are emitted by the Python service as structured
+`BPS_QUERY_UNRESOLVED` warning log events. The logged question is length-limited
+and email addresses and phone numbers are redacted.
+
 ## Learning Laravel
 
 Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
