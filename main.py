@@ -8,6 +8,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -52,12 +53,59 @@ _rate_lock = threading.Lock()
 MAX_CHATS_PER_MINUTE = int(os.getenv("GEMINI_MAX_CHATS_PER_MINUTE", "4"))
 
 DATA_QUESTION = re.compile(
-    r"\b(berapa|persen\w*|jumlah|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|"
+    r"\b(berapa|persen\w*|jumlah|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|tpt|"
     r"\w*miskin\w*|penduduk|warga|jiwa|populasi|pdrb|ekspor|impor|upah|penganggur\w*|"
     r"ntp|terbaru|produksi|gaji|penghasilan|pendapatan|minimum|ump|umk|umr|padi|beras|"
     r"luas|panen|pertanian|perkebunan|perikanan|konsumsi)\b",
     re.IGNORECASE,
 )
+_STATISTIC_TOPIC = re.compile(
+    r"\b(ipm|indeks pembangunan manusia|kepadatan|penduduk|warga|jiwa|populasi|"
+    r"kemiskinan|miskin\w*|penganggur\w*|tpt|upah|gaji|penghasilan|pendapatan|"
+    r"ump|umk|umr|inflasi|ntp|nilai tukar petani|ekspor|impor|pdrb|"
+    r"produk domestik regional bruto|pertumbuhan|rasio gini|gini|"
+    r"angka harapan hidup|umur harapan hidup|uhh|produksi|padi|"
+    r"beras|luas panen|pertanian|perkebunan|perikanan|konsumsi)\b",
+    re.IGNORECASE,
+)
+_SERVICE_GUIDANCE = re.compile(
+    r"\b(di mana|dimana|cara|bagaimana|prosedur|layanan|permintaan)\b.{0,80}"
+    r"\b(minta|meminta|mencari|mendapatkan|mengakses|mengunduh|memperoleh|"
+    r"minta data|data|statistik|layanan)\b"
+    r"|\b(cara minta data|cara meminta data|cara mencari data|di mana mencari data|"
+    r"dimana mencari data|permintaan data|layanan statistik|layanan bps)\b",
+    re.IGNORECASE,
+)
+_CONCEPT_QUESTION = re.compile(
+    r"\b(apa itu|apa perbedaan|perbedaan|definisi|pengertian|arti|makna|maksud|konsep|bagaimana|"
+    r"cara membaca|cara menafsir\w*|cara menghitung|rumus|metodologi|jelaskan)\b",
+    re.IGNORECASE,
+)
+_CONCEPT_VALUE_CUE = re.compile(
+    r"\b(berapa|nilai|angka|terbaru|terkini|tahun|periode)\b|\b20\d{2}\b",
+    re.IGNORECASE,
+)
+_PUBLICATION_QUESTION = re.compile(r"\b(publikasi|katalog)\b", re.IGNORECASE)
+_BRS_QUESTION = re.compile(
+    r"\b(brs|berita resmi statistik|rilis(?:an)?|siaran pers)\b",
+    re.IGNORECASE,
+)
+_NUMBER_TOKEN = re.compile(
+    r"(?<![\w.])(?P<number>-?\d+(?:[.,]\d+)*)(?:\s*(?P<scale>triliun|miliar|juta|ribu))?"
+    r"(?:\s*%)?(?!\w)",
+    re.IGNORECASE,
+)
+_NUMERIC_RESULT_FIELDS = {
+    "nilai", "tahun", "tahun_mulai", "tahun_akhir", "tahun_tersedia",
+    "tahun_tidak_tersedia", "tahun_terbaru", "tahun_diminta_tidak_tersedia",
+    "judul", "title", "ringkasan",
+    "abstract", "isi", "tanggal_rilis", "periode", "rentang_tahun_tersedia",
+    "satuan", "error",
+}
+_NUMERIC_RESULT_CONTAINERS = {
+    "data", "data_per_tahun", "hasil", "hasil_terbaru",
+    "periode_diminta_tidak_ditemukan",
+}
 GREETING_ONLY = re.compile(
     r"^\s*(?:(?:halo|hai|hi|hello|assalamu['’]?alaikum|selamat\s+(?:pagi|siang|sore|malam))"
     r"(?:[\s,]+(?:terima kasih|makasih|trims))?|(?:terima kasih|makasih|trims)"
@@ -111,12 +159,19 @@ def build_instructions() -> str:
         f"Kamu adalah asisten chatbot resmi BPS Provinsi Sumatera Selatan. Tanggal hari ini: {today} (WIB). "
         "Jawab dalam Bahasa Indonesia yang jelas, sopan, ringkas, dan profesional; jangan memperkenalkan diri berulang.\n\n"
         "ATURAN DATA:\n"
-        "1. Semua angka statistik WAJIB berasal dari hasil tools. Jangan menjawab angka dari ingatan.\n"
+        "1. Semua angka statistik WAJIB berasal dari hasil tools. Jangan menjawab angka dari ingatan. "
+        "Pertanyaan definisi/konsep, cara membaca indikator, dan panduan layanan tidak boleh memanggil tools; "
+        "gunakan context/glosarium jika tersedia dan boleh dijawab tanpa tools "
+        "serta tanpa memaksakan angka statistik. Untuk menjelaskan rumus/konsep, contoh angka hipotetis boleh "
+        "digunakan tanpa tool asalkan jelas dilabeli sebagai ilustrasi, bukan data aktual BPS; pengaman angka "
+        "hasil tool hanya berlaku untuk maksud pertanyaan yang memang meminta data aktual.\n"
         "2. Backend lebih dahulu memilih indikator kanonik dan mengambil datanya. Jika pesan memuat "
         "DATA TERVERIFIKASI, gunakan hanya angka, periode, dan wilayah di dalamnya; jangan memilih tool atau "
         f"variabel ulang. Nama indikator utama yang sah: {', '.join(bps_tools.nama_indikator_utama())}. "
         "IPM umum gunakan nama ipm (var_id kanonik 959), bukan seri menurut jenis kelamin yang lebih lama. "
         "Jumlah penduduk adalah estimasi (var_id 262); proyeksi_penduduk adalah seri proyeksi berbeda (var_id 51). "
+        "Untuk angka tingkat pengangguran Sumatera Selatan, gunakan indikator kanonik tingkat_pengangguran "
+        "(var_id 334) dan kategori 'Jumlah'; seri ini hanya mencakup tingkat provinsi. "
         "Bedakan jumlah kemiskinan dari persentasenya dan pilih tingkat kab/kota bila wilayah diminta. "
         "Sebelum memakai angka, pastikan kata pembeda dalam pertanyaan—misalnya kepadatan, laju, rasio, lansia, "
         "miskin, atau usia—sesuai dengan judul indikator terpilih; jika konsep itu tidak tercakup, jangan tampilkan "
@@ -127,8 +182,8 @@ def build_instructions() -> str:
         "sebutkan periode terakhirnya. Untuk tahun tertentu, gunakan var_id yang dikembalikan tool kanonik saat "
         "memanggil ambil_data. Jika hasil tool memuat wilayah_ditafsirkan, sebutkan tafsirannya secara eksplisit. "
         "Jika tool memberi wilayah_kandidat, jangan ambil data; minta pengguna memilih wilayah yang dimaksud.\n"
-        "3. Indikator bulanan/triwulanan dan pertanyaan 'terbaru' (inflasi, NTP, ekspor-impor, pariwisata, pengangguran, "
-        "kemiskinan terbaru, pertumbuhan ekonomi triwulan): panggil berita_resmi_statistik dengan kata kunci inti; "
+        "3. Indikator bulanan/triwulanan dan pertanyaan tentang rilis terbaru (inflasi, NTP, ekspor-impor, pariwisata, "
+        "kemiskinan, dan pertumbuhan ekonomi triwulan): panggil berita_resmi_statistik dengan kata kunci inti; "
         "angka utama dapat ada pada judul atau ringkasan. Jika pengguna meminta bulan dan tahun tertentu, cari BRS "
         "yang judulnya memuat keduanya; jika hanya tahun yang disebut, cari seluruh rilis yang membahas tahun itu. "
         "Jika periode yang diminta tidak ditemukan, sebutkan periode itu dengan jelas lalu bedakan dengan rilis terbaru. "
@@ -168,7 +223,9 @@ def build_instructions() -> str:
         "'terima kasih' dijawab satu kalimat singkat tanpa memanggil tools atau menampilkan daftar BRS. "
         "Jawab ringkas: sebut angka yang ditanya beserta periode dan satuannya. Jangan menampilkan rincian per "
         "kabupaten/kota kecuali diminta.\n"
-        "17. Tolak dengan sopan permintaan di luar statistik BPS Sumatera Selatan (puisi, opini, dan sejenisnya).\n"
+        "17. Jangan menolak pertanyaan statistik umum atau konsep hanya karena tidak tersedia di WebAPI BPS Sumatera Selatan. "
+        "Jawab pengetahuan statistik umum secara wajar dan tandai sebagai penjelasan umum, bukan angka resmi BPS Sumatera Selatan. "
+        "Jangan mengarang angka aktual, tahun, atau rincian wilayah yang tidak didukung tools; aturan keselamatan tetap berlaku.\n"
     )
 
 
@@ -206,8 +263,19 @@ def _tool_result_status(result: dict) -> str:
         empty_errors = (
             "tidak tersedia",
             "tidak memiliki data",
+            "tidak ditemukan",
+            "belum ditemukan",
+            "belum tersedia",
+            "tidak ada data",
+            "tidak ada hasil",
+            "hasil kosong",
+            "data kosong",
             "tahun ",
             "tidak dikenali",
+            "list-not-available",
+            "no data",
+            "no results",
+            "not found",
         )
         return "kosong" if any(marker in error for marker in empty_errors) else "gagal_teknis"
     if result.get("periode_diminta_tidak_ditemukan"):
@@ -219,6 +287,98 @@ def _tool_result_status(result: dict) -> str:
         if isinstance(value, list):
             return "ditemukan" if value else "kosong"
     return "ditemukan"
+
+
+def _parse_number_token(text: str) -> tuple[Decimal, int, Decimal]:
+    match = _NUMBER_TOKEN.fullmatch(text.strip())
+    if match is None:
+        raise ValueError("Numeric token is not valid.")
+
+    raw_number = match.group("number")
+    dot_count = raw_number.count(".")
+    comma_count = raw_number.count(",")
+    decimal_separator: str | None = None
+    if dot_count and comma_count:
+        decimal_separator = "." if raw_number.rfind(".") > raw_number.rfind(",") else ","
+    elif dot_count + comma_count == 1:
+        separator = "." if dot_count else ","
+        trailing_digits = len(raw_number.rsplit(separator, 1)[1])
+        if trailing_digits != 3:
+            decimal_separator = separator
+
+    if decimal_separator:
+        thousands_separator = "," if decimal_separator == "." else "."
+        normalized = raw_number.replace(thousands_separator, "").replace(decimal_separator, ".")
+        precision = len(normalized.rsplit(".", 1)[1])
+    else:
+        normalized = raw_number.replace(".", "").replace(",", "")
+        precision = 0
+
+    try:
+        number = Decimal(normalized)
+    except InvalidOperation as exc:
+        raise ValueError("Numeric token is not valid.") from exc
+
+    scale = {
+        "ribu": Decimal(1_000),
+        "juta": Decimal(1_000_000),
+        "miliar": Decimal(1_000_000_000),
+        "triliun": Decimal(1_000_000_000_000),
+    }.get((match.group("scale") or "").lower(), Decimal(1))
+    return number, precision, scale
+
+
+def _numbers_in_text(value: str) -> list[tuple[Decimal, int, Decimal]]:
+    numbers = []
+    range_normalized = re.sub(r"(?<=\d)\s*[-–—]\s*(?=\d)", " ", value)
+    for match in _NUMBER_TOKEN.finditer(range_normalized):
+        try:
+            numbers.append(_parse_number_token(match.group(0)))
+        except ValueError:
+            continue
+    return numbers
+
+
+def _tool_numbers(records: list[dict]) -> list[Decimal]:
+    numbers: list[Decimal] = []
+
+    def collect(value: object, key: str | None = None) -> None:
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                normalized_key = str(child_key).casefold()
+                if normalized_key in _NUMERIC_RESULT_FIELDS or normalized_key in _NUMERIC_RESULT_CONTAINERS:
+                    collect(child, normalized_key)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, key)
+        elif key in _NUMERIC_RESULT_FIELDS:
+            if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                numbers.extend(number for number, _, _ in _numbers_in_text(str(value)))
+
+    for record in records:
+        collect(record.get("result"))
+    return numbers
+
+
+def _reply_numbers_are_verified(reply: str, records: list[dict]) -> bool:
+    reply_numbers = _numbers_in_text(reply)
+    if not reply_numbers:
+        return True
+
+    source_numbers = _tool_numbers(records)
+    if not source_numbers:
+        return False
+
+    for answer_number, precision, scale in reply_numbers:
+        candidates = {answer_number, answer_number * scale}
+        tolerance = Decimal("0.5") * (Decimal(10) ** -precision) * max(scale, Decimal(1))
+        if not any(
+            abs(candidate - source_number) <= tolerance
+            for candidate in candidates
+            for source_number in source_numbers
+        ):
+            return False
+    return True
 
 
 def _label_tool_result(value: object) -> dict:
@@ -272,6 +432,7 @@ def _generate_without_tools(contents: list[types.Content], instruction: str):
 def _generate_with_manual_tools(
     contents: list[types.Content],
     maximum_calls: int,
+    force_tool: bool = False,
 ) -> tuple[object, list[dict]]:
     tool_map = {tool.__name__: tool for tool in bps_tools.TOOLS}
     records: list[dict] = []
@@ -284,10 +445,21 @@ def _generate_with_manual_tools(
         tools=bps_tools.TOOLS,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
+    initial_config = config
+    if force_tool:
+        initial_config = types.GenerateContentConfig(
+            system_instruction=build_instructions(),
+            temperature=0.2,
+            tools=bps_tools.TOOLS,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            tool_config=types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode="ANY")
+            ),
+        )
     response = None if hit_limit else get_client().models.generate_content(
         model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
         contents=pending_contents,
-        config=config,
+        config=initial_config,
     )
 
     while response is not None:
@@ -354,7 +526,16 @@ def _canonical_indicator_intent(question: str) -> tuple[str, str, Optional[str]]
     year_match = re.search(r"\b(20\d{2})\b", text)
     year = year_match.group(1) if year_match else None
 
-    if re.search(r"\b(ipm|indeks pembangunan manusia)\b", text):
+    if re.search(r"\b(pdrb|produk domestik regional bruto)\b", text):
+        if re.search(r"\b(pertumbuhan|laju)\b", text):
+            name = "pdrb_pertumbuhan_kab_kota"
+        elif re.search(r"\b(adhk|konstan)\b", text):
+            name = "pdrb_adhk_kab_kota"
+        else:
+            name = "pdrb_adhb_kab_kota"
+    elif re.search(r"\b(penganggur\w*|tpt)\b", text):
+        name = "tingkat_pengangguran"
+    elif re.search(r"\b(ipm|indeks pembangunan manusia)\b", text):
         name = "ipm"
     elif re.search(r"\b(kepadatan|kepadatan penduduk)\b", text):
         name = "kepadatan_penduduk"
@@ -394,6 +575,54 @@ def _year_range_intent(question: str) -> tuple[int, int] | None:
     if not match:
         return None
     return int(match.group(1)), int(match.group(2))
+
+
+def _classify_question_intent(question: str) -> str:
+    text = re.sub(r"\s+", " ", question.casefold()).strip()
+    if GREETING_ONLY.fullmatch(text):
+        return "sapaan"
+    if _SERVICE_GUIDANCE.search(text):
+        return "panduan"
+    has_concept_marker = _CONCEPT_QUESTION.search(text) is not None
+    resolved_region, _ = bps_tools.resolve_region_from_text(text)
+    has_province_scope = re.search(
+        r"\b(sumsel|sumatera\s+selatan|provinsi(?:\s+sumatera\s+selatan)?)\b",
+        text,
+    ) is not None
+    if has_concept_marker and not _CONCEPT_VALUE_CUE.search(text) and not resolved_region and not has_province_scope:
+        return "definisi"
+    if _PUBLICATION_QUESTION.search(text):
+        return "publikasi"
+    if _BRS_QUESTION.search(text):
+        return "brs"
+
+    has_topic = _STATISTIC_TOPIC.search(text) is not None
+    if _year_range_intent(text) and has_topic:
+        return "rentang_waktu"
+    if has_topic:
+        is_pdrb_question = re.search(
+            r"\b(pdrb|produk domestik regional bruto)\b",
+            text,
+        ) is not None
+        explicit_value_request = (
+            re.search(r"\b(berapa|jumlah|nilai|angka|persen\w*|persentase|laju|tingkat)\b", text)
+            is not None
+            or resolved_region is not None
+        )
+        if (
+            re.search(r"\b(terbaru|terkini|bulan ini|bulan lalu|rilis)\b", text)
+            or re.search(r"\b20\d{2}\b", text)
+        ) and re.search(
+            r"\b(inflasi|ntp|nilai tukar petani|ekspor|impor|pariwisata|hotel|"
+            r"wisatawan|penganggur\w*|tpt|miskin\w*|kemiskinan|gini|ketimpangan|"
+            r"pertumbuhan|pdrb|ekonomi)\b",
+            text,
+        ) and not explicit_value_request and not is_pdrb_question:
+            return "brs"
+        return "nilai"
+    if DATA_QUESTION.search(text):
+        return "nilai"
+    return "umum"
 
 
 def _minimum_wage_question(question: str) -> bool:
@@ -678,7 +907,12 @@ def _format_indicator_fallback(
                     )
                 else:
                     value_text = str(value)
-                scope = row.get("wilayah") or wilayah or "Sumatera Selatan"
+                scope = (
+                    data.get("wilayah_cakupan")
+                    or row.get("wilayah")
+                    or wilayah
+                    or "Sumatera Selatan"
+                )
                 unit = str(yearly_result.get("satuan") or data.get("satuan") or "").strip()
                 lines.append(
                     f"{yearly_result.get('tahun')}, {scope}: "
@@ -811,7 +1045,7 @@ def _format_indicator_fallback(
         if requested_year and requested_year != actual_year
         else ""
     )
-    scope = row.get("wilayah") or wilayah or "Sumatera Selatan"
+    scope = data.get("wilayah_cakupan") or row.get("wilayah") or wilayah or "Sumatera Selatan"
     return (
         f"{year_note}{data.get('judul', 'Indikator BPS')} di {scope} tahun {actual_year}: "
         f"{value_text}{' ' + unit if unit else ''}.{nature_note}"
@@ -852,15 +1086,31 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         reply = "Halo! Ada yang bisa saya bantu terkait statistik BPS Sumatera Selatan?"
         return {"reply": reply, "data": reply, "tools_used": False}
 
+    intent_kind = _classify_question_intent(question)
+    if (
+        intent_kind == "umum"
+        and _relative_previous_year(question)
+        and _followup_data_intent(question, request.history) is not None
+    ):
+        intent_kind = "nilai"
+    requires_tool = intent_kind in {"nilai", "rentang_waktu", "brs", "publikasi"}
     canonical_data: dict | None = None
-    year_range = _year_range_intent(question)
-    monthly_intent = _monthly_intent(question)
-    canonical_intent = None if monthly_intent else _canonical_indicator_intent(question)
+    year_range = _year_range_intent(question) if requires_tool else None
+    monthly_intent = _monthly_intent(question) if intent_kind == "brs" else None
+    canonical_intent = (
+        _canonical_indicator_intent(question)
+        if requires_tool and intent_kind not in {"brs", "publikasi"} and monthly_intent is None
+        else None
+    )
     dynamic_intent = None
     continuation_instruction: str | None = None
     canonical_fallback: str | None = None
     canonical_tool_call: str | None = None
-    followup_intent = _followup_data_intent(question, request.history, canonical_intent)
+    followup_intent = (
+        _followup_data_intent(question, request.history, canonical_intent)
+        if requires_tool
+        else None
+    )
     if monthly_intent is None and year_range is None and followup_intent is not None:
         intent_kind, followup_value = followup_intent
         if intent_kind == "canonical":
@@ -874,7 +1124,10 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         )
     static_table_keyword = (
         _static_table_intent(question)
-        if monthly_intent is None and canonical_intent is None
+        if requires_tool
+        and intent_kind not in {"brs", "publikasi"}
+        and monthly_intent is None
+        and canonical_intent is None
         else None
     )
     static_table_result: dict | None = None
@@ -1001,13 +1254,19 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
 
     if canonical_intent is not None:
         indicator_name, requested_year, region = canonical_intent
+        data_region = region
+        if (
+            bps_tools._INDIKATOR_UTAMA.get(indicator_name, {}).get("province_only")
+            and region == "Provinsi Sumatera Selatan"
+        ):
+            data_region = None
         if year_range:
             requested_year = ""
         try:
             if year_range:
                 canonical_data = bps_tools.indikator_utama(
                     indicator_name,
-                    wilayah=region,
+                    wilayah=data_region,
                     tahun_mulai=str(year_range[0]),
                     tahun_akhir=str(year_range[1]),
                 )
@@ -1021,7 +1280,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 canonical_data = bps_tools.indikator_utama(
                     indicator_name,
                     tahun=requested_year or None,
-                    wilayah=region,
+                    wilayah=data_region,
                 )
                 canonical_tool_call = (
                     f"indikator_utama(nama='{indicator_name}', "
@@ -1033,7 +1292,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 and not canonical_data.get("input_tidak_valid")
                 and canonical_data.get("tahun_tersedia")
             ):
-                latest = bps_tools.indikator_utama(indicator_name, wilayah=region)
+                latest = bps_tools.indikator_utama(indicator_name, wilayah=data_region)
                 if "error" not in latest:
                     latest["tahun_diminta_tidak_tersedia"] = requested_year
                     canonical_data = latest
@@ -1043,7 +1302,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     alternate = bps_tools.ambil_data(
                         alternative_id,
                         tahun=requested_year,
-                        wilayah=region,
+                        wilayah=data_region,
                     )
                     if "error" not in alternate:
                         alternate["var_id"] = alternative_id
@@ -1054,7 +1313,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         )
                         break
                 if canonical_data.get("tahun_tersedia"):
-                    latest = bps_tools.indikator_utama(indicator_name, wilayah=region)
+                    latest = bps_tools.indikator_utama(indicator_name, wilayah=data_region)
                     if "error" not in latest:
                         canonical_data = latest
                         canonical_data["tahun_diminta_tidak_tersedia"] = requested_year
@@ -1070,6 +1329,8 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
 
     if (
         canonical_data is None
+        and requires_tool
+        and intent_kind not in {"brs", "publikasi"}
         and monthly_intent is None
         and canonical_intent is None
         and not _minimum_wage_question(question)
@@ -1146,7 +1407,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             static_table_query or "",
         )
 
-    if DATA_QUESTION.search(question):
+    if requires_tool and DATA_QUESTION.search(question):
         if canonical_data is not None:
             result_status = _tool_result_status(canonical_data)
         else:
@@ -1191,8 +1452,10 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         contents.append(types.Content(role="model", parts=[types.Part(text=turn.response)]))
 
     user_text = question
+    user_text = f"KLASIFIKASI MAKSUD: {intent_kind}.\n{user_text}"
     if request.context:
         user_text = (
+            f"KLASIFIKASI MAKSUD: {intent_kind}.\n"
             "Panduan layanan dan definisi dari basis pengetahuan (BUKAN sumber angka):\n"
             f"<referensi_panduan>\n{request.context}\n</referensi_panduan>\n\n"
             f"PERTANYAAN:\n{question}"
@@ -1227,12 +1490,27 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     temperature=0.2,
                 ),
             )
-        else:
+        elif requires_tool:
             maximum_calls = max(
                 0,
                 min(int(os.getenv("GEMINI_MAX_TOOL_CALLS", "4")), 12),
             )
             response, tool_records = _generate_with_manual_tools(contents, maximum_calls)
+            if not tool_records:
+                response, tool_records = _generate_with_manual_tools(
+                    contents,
+                    max(1, maximum_calls),
+                    force_tool=True,
+                )
+        else:
+            response = get_client().models.generate_content(
+                model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=build_instructions(),
+                    temperature=0.2,
+                ),
+            )
     except genai_errors.APIError as exc:
         code = getattr(exc, "code", None)
         logger.warning("Gemini API error, code=%s", code)
@@ -1256,7 +1534,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             }
         raise HTTPException(status_code=502, detail="Gemini tidak dapat memproses pesan saat ini.") from exc
 
-    if canonical_data is None and DATA_QUESTION.search(question):
+    if requires_tool and canonical_data is None and DATA_QUESTION.search(question):
         statuses = [record["result"].get("status_hasil") for record in tool_records]
         if not statuses or all(status == "kosong" for status in statuses):
             _record_unresolved_question(
@@ -1278,11 +1556,25 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         logger.warning("Jawaban kosong: finish_reason=%s", finish_info(response))
         raise HTTPException(status_code=502, detail="Gemini tidak menghasilkan jawaban.")
 
+    if requires_tool and not tool_records:
+        logger.error("Intent %s selesai tanpa hasil tool terverifikasi", intent_kind)
+        raise HTTPException(
+            status_code=502,
+            detail="Jawaban data belum dapat diverifikasi dari hasil tool.",
+        )
+    if requires_tool and not _reply_numbers_are_verified(reply, tool_records):
+        logger.warning("Jawaban mengandung angka yang tidak ada pada hasil tool")
+        _record_unresolved_question(
+            question,
+            "unverified_numeric_output",
+            dynamic_intent[0] if dynamic_intent else None,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Jawaban memuat angka yang tidak terverifikasi dari hasil tool.",
+        )
+
     used_tools = canonical_data is not None or bool(tool_records)
-    # Pengaman: jawaban berangka untuk pertanyaan data tanpa satu pun panggilan tool dianggap tebakan.
-    if not used_tools and DATA_QUESTION.search(request.question) and re.search(r"\d", reply):
-        logger.warning("Jawaban berangka tanpa tool call diblokir")
-        reply = NOT_FOUND
 
     result: dict[str, object] = {"reply": reply, "data": reply, "tools_used": used_tools}
     if os.getenv("GEMINI_DEBUG") == "1":

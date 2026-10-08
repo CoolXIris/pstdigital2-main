@@ -369,21 +369,53 @@ class BpsWebApiService
                 if ($tableContext !== null) {
                     return $tableContext;
                 }
+                if ($regionalFallbackQuestion) {
+                    $tableContext = $this->staticTableContext($keywords, '1600', $apiKey);
+                    if ($tableContext !== null) {
+                        return $this->provinceScopeFallbackContext($tableContext, $this->regionMentioned($question));
+                    }
+                }
             }
 
-            if ($this->isMonthlyBpsTopic($question) && ! $regionalFallbackQuestion) {
-                $pressReleaseContext = $this->pressReleaseContextFor($question, $domain, $apiKey);
+            if ($this->isMonthlyBpsTopic($question)) {
+                $region = $this->regionMentioned($question);
+                $releaseDomain = ($region['domain'] ?? null) ?: $domain;
+                $pressReleaseContext = $this->pressReleaseContextFor($question, $releaseDomain, $apiKey);
+                if ($pressReleaseContext !== null) {
+                    return $pressReleaseContext;
+                }
 
-                return $pressReleaseContext ?? $this->monthlyReleaseUnavailableContext($question);
+                if ($regionalFallbackQuestion) {
+                    $pressReleaseContext = $this->pressReleaseContextFor($question, '1600', $apiKey);
+                    if ($pressReleaseContext !== null) {
+                        return $this->provinceScopeFallbackContext($pressReleaseContext, $this->regionMentioned($question));
+                    }
+                }
+
+                return $this->monthlyReleaseUnavailableContext($question);
             }
 
             $dynamicContext = $this->dynamicContextFor($question, $keywords, $domain, $apiKey);
-            if ($dynamicContext !== null) {
+            if ($dynamicContext !== null && ! $this->isUnavailableDataContext($dynamicContext)) {
                 return $dynamicContext;
             }
 
-            if ($regionalFallbackQuestion) {
-                return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk wilayah yang diminta belum ditemukan pada variabel BPS yang cocok. Jangan menggunakan nilai tingkat provinsi sebagai pengganti.';
+            if ($regionalFallbackQuestion
+                && ($dynamicContext === null || $this->isUnavailableDataContext($dynamicContext))) {
+                $provinceQuestion = $this->questionWithoutRegionalScope($question);
+                $provinceContext = $this->dynamicContextFor(
+                    $provinceQuestion,
+                    $this->keywords($provinceQuestion),
+                    '1600',
+                    $apiKey
+                );
+                $provinceContext = $this->provinceOnlyDynamicContext($provinceContext);
+                if ($provinceContext !== null) {
+                    return $this->provinceScopeFallbackContext($provinceContext, $this->regionMentioned($question));
+                }
+                if ($dynamicContext !== null) {
+                    return $dynamicContext;
+                }
             }
 
             if ($this->isDataQuestion($question) && $this->isCurrentPeriodRequest($question)) {
@@ -391,8 +423,13 @@ class BpsWebApiService
             }
 
             $tables = $this->matchingTables($keywords, $domain, $apiKey);
-            if ($tables === []) {
+            $tableDomain = $domain;
+            if ($tables === [] && $regionalFallbackQuestion) {
+                $tableDomain = '1600';
+                $tables = $this->matchingTables($keywords, $tableDomain, $apiKey);
+            } elseif ($tables === []) {
                 $domain = '0000';
+                $tableDomain = $domain;
                 $tables = $this->matchingTables($keywords, $domain, $apiKey);
             }
 
@@ -403,14 +440,22 @@ class BpsWebApiService
                     continue;
                 }
 
-                $detail = $this->tableDetail((string) $tableId, $domain, $apiKey);
+                $detail = $this->tableDetail((string) $tableId, $tableDomain, $apiKey);
                 if ($detail !== null) {
                     $context[] = '[Sumber: BPS WebAPI, '.$table['title'].'] '.$detail;
                 }
             }
 
             if ($context !== []) {
-                return implode("\n\n", $context);
+                $tableContext = implode("\n\n", $context);
+
+                return $regionalFallbackQuestion
+                    ? $this->provinceScopeFallbackContext($tableContext, $this->regionMentioned($question))
+                    : $tableContext;
+            }
+
+            if ($regionalFallbackQuestion) {
+                return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk wilayah yang diminta maupun data tingkat Provinsi Sumatera Selatan belum ditemukan pada pencarian WebAPI BPS. Jangan menyimpulkan bahwa data tidak tersedia di seluruh BPS.';
             }
 
             return null;
@@ -485,6 +530,12 @@ class BpsWebApiService
                 return $notice."\n\n".$tableContext."\n\n".$closing;
             }
         }
+        if ($apiKey !== null) {
+            $canonicalAnswer = $this->canonicalIndicatorFallback($question, $apiKey, $notice, $closing);
+            if ($canonicalAnswer !== null) {
+                return $canonicalAnswer;
+            }
+        }
 
         $topics = array_slice($this->matchFallbackTopics($question), 0, 3);
         $regions = array_slice($this->regionsMentioned($question), 0, 3);
@@ -541,6 +592,71 @@ class BpsWebApiService
         $regionLabel = $region['label'] ?? (preg_match('/\b(kabupaten|kab|kota)\b/iu', $question) ? 'kabupaten/kota' : null);
 
         return $this->formatFallbackPressReleases($items, $notice, $intro, $closing, $regionLabel);
+    }
+
+    private function canonicalIndicatorFallback(
+        string $question,
+        string $apiKey,
+        string $notice,
+        string $closing
+    ): ?string {
+        if (preg_match('/\b(brs|berita\s+resmi\s+statistik|rilis|siaran\s+pers)\b/iu', $question) === 1) {
+            return null;
+        }
+
+        $isPdrb = preg_match('/\b(pdrb|produk\s+domestik\s+regional\s+bruto)\b/iu', $question) === 1;
+        $isUnemployment = preg_match('/\b(penganggur\w*|tpt)\b/iu', $question) === 1;
+        if ($isPdrb === $isUnemployment || count($this->matchFallbackTopics($question)) > 1) {
+            return null;
+        }
+
+        $requestedRegion = $this->regionMentioned($question);
+        if ($isPdrb) {
+            if (($requestedRegion['kind'] ?? null) !== 'region') {
+                return null;
+            }
+            $indicatorName = preg_match('/\b(pertumbuhan|laju)\b/iu', $question) === 1
+                ? 'pdrb_pertumbuhan_kab_kota'
+                : (preg_match('/\b(adhk|konstan)\b/iu', $question) === 1
+                    ? 'pdrb_adhk_kab_kota'
+                    : 'pdrb_adhb_kab_kota');
+            $dataRegion = $requestedRegion;
+        } else {
+            $indicatorName = 'tingkat_pengangguran';
+            $dataRegion = $this->provinceFallbackRegion();
+        }
+
+        $variable = null;
+        foreach (config('bps_indicators.groups', []) as $group) {
+            foreach ($group['variables'] ?? [] as $candidate) {
+                if (($candidate['name'] ?? null) === $indicatorName) {
+                    $variable = $candidate;
+                    break 2;
+                }
+            }
+        }
+        if ($variable === null) {
+            throw new RuntimeException("Variabel kanonik {$indicatorName} tidak ditemukan.");
+        }
+        $variable['label'] = $variable['title'];
+
+        $lookup = $this->fallbackVariableLookup($variable, $question, $dataRegion, $apiKey);
+        if ($lookup['context'] === null) {
+            return null;
+        }
+        $details = $this->dynamicFallbackDetails($question, $dataRegion, false, $lookup['context']);
+        if ($details === null) {
+            return null;
+        }
+        if ($lookup['year_notice'] !== null) {
+            $details = $lookup['year_notice']."\n".$details;
+        }
+        if ($isUnemployment && ($requestedRegion['kind'] ?? null) === 'region') {
+            $details = 'Tingkat pengangguran pada seri ini hanya tersedia untuk Provinsi Sumatera Selatan, bukan data khusus '
+                .$requestedRegion['label'].".\n".$details;
+        }
+
+        return $notice."\n\n".$details."\n\nDitampilkan pada ".now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.'."\n\n".$closing;
     }
 
     private function fallbackForTopicRegions(
@@ -759,9 +875,11 @@ class BpsWebApiService
             return ['context' => null, 'reason' => 'nilai '.$variable['label'].' tahun '.$year.' tidak dikembalikan WebAPI BPS.', 'year_notice' => $yearNotice];
         }
 
-        $regionRow = ($region['kind'] ?? null) === 'province'
-            ? $this->provinceVervarRow($response->json('vervar'))
-            : $this->regionVervarRow($region, $response->json('vervar'));
+        $regionRow = filled($variable['vervar_label'] ?? null)
+            ? $this->vervarRowByLabel($response->json('vervar'), (string) $variable['vervar_label'])
+            : (($region['kind'] ?? null) === 'province'
+                ? $this->provinceVervarRow($response->json('vervar'))
+                : $this->regionVervarRow($region, $response->json('vervar')));
         if ($regionRow === null) {
             return ['context' => null, 'reason' => 'baris '.$region['label'].' tidak tersedia pada indikator '.$variable['label'].'.', 'year_notice' => $yearNotice];
         }
@@ -776,6 +894,10 @@ class BpsWebApiService
             'level' => ($region['kind'] ?? null) === 'province' ? 'province' : 'kab_kota',
             'sifat_data' => $variable['sifat_data'] ?? null,
             'catatan_sumber' => $variable['catatan_sumber'] ?? null,
+            'vervar_label' => $variable['vervar_label'] ?? null,
+            'wilayah_cakupan' => ($variable['province_only'] ?? false)
+                ? 'Provinsi Sumatera Selatan'
+                : null,
         ];
 
         return [
@@ -1545,6 +1667,10 @@ class BpsWebApiService
         if ($context === null || $this->isUnavailableDataContext($context)) {
             return null;
         }
+        $provinceFallback = str_starts_with($context, '[WebAPI BPS][CAKUPAN_PROVINSI] ');
+        if ($provinceFallback) {
+            $context = substr($context, strlen('[WebAPI BPS][CAKUPAN_PROVINSI] '));
+        }
         if (! preg_match('/^\[Sumber: WebAPI BPS Sumatera Selatan, [^\]]+\]\s+(\{.*\})$/su', $context, $matches)) {
             return null;
         }
@@ -1559,7 +1685,10 @@ class BpsWebApiService
         }
 
         $vervar = $payload['wilayah'] ?? null;
-        if ($region !== null) {
+        if (filled($payload['vervar_label'] ?? null)) {
+            $regionRow = $this->vervarRowByLabel($vervar, (string) $payload['vervar_label']);
+            $regionLabel = (string) ($payload['wilayah_cakupan'] ?? $region['label'] ?? 'Provinsi Sumatera Selatan');
+        } elseif ($region !== null && ! $provinceFallback) {
             $regionRow = $this->regionVervarRow($region, $vervar);
             $regionLabel = $region['label'];
         } else {
@@ -1616,7 +1745,63 @@ class BpsWebApiService
             ? ' '.$payload['periode']
             : '';
 
-        return 'Data WebAPI BPS untuk '.$payload['indikator'].' di '.$regionLabel.' tahun '.$payload['tahun'].$period.":\n".implode("\n", $details);
+        $answer = 'Data WebAPI BPS untuk '.$payload['indikator'].' di '.$regionLabel.' tahun '.$payload['tahun'].$period.":\n".implode("\n", $details);
+        if ($provinceFallback && $region !== null) {
+            return 'Data khusus '.$region['label'].' tidak ditemukan; berikut data tingkat Provinsi Sumatera Selatan.'."\n".$answer;
+        }
+
+        return $answer;
+    }
+
+    private function questionWithoutRegionalScope(string $question): string
+    {
+        foreach ($this->regionsMentioned($question) as $region) {
+            $names = array_merge($region['aliases'] ?? [], [$region['label'] ?? '']);
+            usort($names, fn (string $left, string $right) => mb_strlen($right) <=> mb_strlen($left));
+            foreach ($names as $name) {
+                if ($name !== '') {
+                    $question = preg_replace('/\b'.preg_quote($name, '/').'\b/iu', ' ', $question) ?? $question;
+                }
+            }
+        }
+
+        return trim(preg_replace('/\s+/u', ' ', $question) ?? $question);
+    }
+
+    private function provinceScopeFallbackContext(string $context, ?array $region): string
+    {
+        $label = $region['label'] ?? 'wilayah yang diminta';
+
+        return '[WebAPI BPS][CAKUPAN_PROVINSI] Data khusus '.$label.' tidak ditemukan; hasil berikut hanya berlaku untuk tingkat Provinsi Sumatera Selatan. '
+            .$context;
+    }
+
+    private function provinceOnlyDynamicContext(?string $context): ?string
+    {
+        if ($context === null
+            || $this->isUnavailableDataContext($context)
+            || ! preg_match('/^(\[Sumber: WebAPI BPS Sumatera Selatan, [^\]]+\]\s+)(\{.*\})$/su', $context, $matches)) {
+            return null;
+        }
+
+        $payload = json_decode($matches[2], true);
+        if (! is_array($payload) || ! is_array($payload['nilai'] ?? null)) {
+            return null;
+        }
+        $provinceRow = $this->provinceVervarRow($payload['wilayah'] ?? null);
+        if ($provinceRow === null || ! is_scalar($provinceRow['val'] ?? null)) {
+            return null;
+        }
+        $values = $this->valuesForRegion($payload['nilai'], $provinceRow);
+        if ($values === []) {
+            return null;
+        }
+
+        $payload['wilayah'] = [$provinceRow];
+        $payload['nilai'] = $values;
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return is_string($json) ? $matches[1].$json : null;
     }
 
     private function provinceVervarRow(mixed $vervar): ?array
@@ -1936,7 +2121,10 @@ class BpsWebApiService
         $normalizedTitle = Str::lower(Str::ascii($title));
         $variants = $this->keywordVariants($term);
         foreach ($variants as $variant) {
-            if ($variant !== '' && Str::contains($normalizedTitle, $variant)) {
+            if ($variant !== '' && preg_match(
+                '/(?<![a-z0-9])'.preg_quote($variant, '/').'(?![a-z0-9])/i',
+                $normalizedTitle
+            ) === 1) {
                 return 1.0;
             }
         }
@@ -2173,6 +2361,8 @@ class BpsWebApiService
             'level' => $this->explicitVariableLevel((string) ($variable['title'] ?? '')) ?? 'unknown',
             'wilayah' => $regionRow === null ? $response->json('vervar') : [$regionRow],
             'kategori' => $response->json('turvar'),
+            'vervar_label' => $variable['vervar_label'] ?? null,
+            'wilayah_cakupan' => $variable['wilayah_cakupan'] ?? null,
             'tahun' => $year,
             'periode' => $quarter ?? 'Tahunan',
             'var_id' => $response->json('var.0.val', $variable['var_id']),
@@ -2260,7 +2450,10 @@ class BpsWebApiService
                 if ($score === 0.0) {
                     continue;
                 }
-                if (Str::contains(Str::lower($title), Str::lower($mainKeyword))) {
+                if (preg_match(
+                    '/(?<![\pL\pN])'.preg_quote($mainKeyword, '/').'(?![\pL\pN])/iu',
+                    $title
+                ) === 1) {
                     $score += 4;
                 }
                 $matches[(string) $tableId] = ['table' => $table, 'score' => $score];
@@ -2339,9 +2532,11 @@ class BpsWebApiService
             return null;
         }
 
-        $text = preg_replace('/<\/(?:td|th|tr|p|div)>/i', "\n", $table) ?? $table;
-        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $text = trim(preg_replace('/[ \t]+|\R{2,}/u', ' ', $text) ?? '');
+        $text = html_entity_decode($table, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace('/<\/(?:td|th|tr|p|div)>/i', "\n", $text) ?? $text;
+        $text = strip_tags($text);
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = trim(preg_replace('/\s+/u', ' ', strip_tags($text)) ?? '');
 
         return Str::limit($text, 5000, '...');
     }
@@ -2366,6 +2561,10 @@ class BpsWebApiService
         $keywords = array_diff($matches[0] ?? [], $stopWords);
         $expanded = [];
         foreach ($keywords as $keyword) {
+            if (in_array($keyword, ['ump', 'umk', 'umr'], true)) {
+                $expanded = array_merge($expanded, [$keyword, 'upah', 'minimum']);
+                continue;
+            }
             $normalized = $synonyms[$keyword] ?? $keyword;
             $expanded = array_merge($expanded, $this->keywordVariants($normalized));
         }

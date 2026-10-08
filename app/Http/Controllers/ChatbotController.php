@@ -6,6 +6,7 @@ use App\Models\ChatbotConversation;
 use App\Models\ChatbotKnowledgeSource;
 use App\Services\BpsWebApiService;
 use App\Services\ChatbotKnowledgeService;
+use App\Services\ChatbotSafetyService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -96,16 +97,26 @@ class ChatbotController extends Controller
         return back()->with('message', "Sumber '{$source->title}' dan indeksnya berhasil dihapus.");
     }
 
-    public function testMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
+    public function testMessage(
+        Request $request,
+        ChatbotKnowledgeService $knowledge,
+        BpsWebApiService $bps,
+        ChatbotSafetyService $safety
+    ): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        return $this->sendMessageToService($validated['message'], (string) Str::uuid(), $knowledge, $bps);
+        return $this->sendMessageToService($validated['message'], (string) Str::uuid(), $knowledge, $bps, $safety);
     }
 
-    public function sendMessage(Request $request, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
+    public function sendMessage(
+        Request $request,
+        ChatbotKnowledgeService $knowledge,
+        BpsWebApiService $bps,
+        ChatbotSafetyService $safety
+    ): JsonResponse
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
@@ -119,18 +130,24 @@ class ChatbotController extends Controller
         $sessionKey = $conversation?->session_key ?? (string) Str::uuid();
         $context = null;
         $aiReply = null;
+        $safetyResult = $safety->check($validated['message']);
 
-        try {
-            $context = $this->knowledgeContextFor($knowledge, $validated['message']);
-            $history = $this->conversationHistory($conversation);
-            $aiReply = $this->askAi($knowledge, $validated['message'], $sessionKey, $context, $history);
-        } catch (\Throwable $exception) {
-            report($exception);
-            $aiReply = null;
+        if ($safetyResult === null) {
+            try {
+                $context = $this->knowledgeContextFor($knowledge, $validated['message']);
+                $history = $this->conversationHistory($conversation);
+                $aiReply = $this->askAi($knowledge, $validated['message'], $sessionKey, $context, $history);
+            } catch (\Throwable $exception) {
+                report($exception);
+                $aiReply = null;
+            }
         }
 
-        $reply = $aiReply ?? $this->fallbackAnswer($bps, $validated['message']);
-        $knowledgeUsed = $aiReply !== null && $context !== null;
+        $reply = $safetyResult['reply']
+            ?? $aiReply
+            ?? $this->fallbackAnswer($bps, $validated['message'], $context);
+        $knowledgeUsed = $context !== null
+            && ($aiReply !== null || ($safetyResult === null && $this->isConceptQuestion($validated['message'])));
         $title = $conversation?->title ?? Str::limit(trim($validated['message']), 180, '...');
 
         try {
@@ -152,7 +169,7 @@ class ChatbotController extends Controller
         return response()->json([
             'reply' => $reply,
             'knowledge_used' => $knowledgeUsed,
-            'safety_blocked' => false,
+            'safety_blocked' => $safetyResult !== null,
             'conversation_id' => $conversation?->id,
             'title' => $conversation?->title ?? $title,
         ]);
@@ -179,16 +196,32 @@ class ChatbotController extends Controller
         return response()->json(['message' => 'Riwayat percakapan berhasil dihapus.']);
     }
 
-    private function sendMessageToService(string $message, string $sessionId, ChatbotKnowledgeService $knowledge, BpsWebApiService $bps): JsonResponse
+    private function sendMessageToService(
+        string $message,
+        string $sessionId,
+        ChatbotKnowledgeService $knowledge,
+        BpsWebApiService $bps,
+        ChatbotSafetyService $safety
+    ): JsonResponse
     {
+        $safetyResult = $safety->check($message);
+        if ($safetyResult !== null) {
+            return response()->json([
+                'reply' => $safetyResult['reply'],
+                'knowledge_used' => false,
+                'safety_blocked' => true,
+            ]);
+        }
+
         try {
             $context = $this->knowledgeContextFor($knowledge, $message);
             $aiReply = $this->askAi($knowledge, $message, $sessionId, $context);
-            $reply = $aiReply ?? $this->fallbackAnswer($bps, $message);
+            $reply = $aiReply ?? $this->fallbackAnswer($bps, $message, $context);
 
             return response()->json([
                 'reply' => $reply,
-                'knowledge_used' => $aiReply !== null && $context !== null,
+                'knowledge_used' => $context !== null
+                    && ($aiReply !== null || $this->isConceptQuestion($message)),
                 'safety_blocked' => false,
             ]);
         } catch (\Throwable $exception) {
@@ -204,7 +237,14 @@ class ChatbotController extends Controller
         try {
             $cached = Cache::get($cacheKey);
             if (is_string($cached) && trim($cached) !== '') {
-                return $cached;
+                if (! (
+                    $this->isStatisticalDataQuestion($message)
+                    && $this->isUnverifiedDataReply($cached)
+                )) {
+                    return $cached;
+                }
+                Cache::forget($cacheKey);
+                Log::warning('chatbot.cached_unverified_data_reply');
             }
         } catch (\Throwable $exception) {
             report($exception);
@@ -237,6 +277,14 @@ class ChatbotController extends Controller
 
             return null;
         }
+        if (
+            $this->isStatisticalDataQuestion($message)
+            && $this->isUnverifiedDataReply($reply)
+        ) {
+            Log::warning('chatbot.ai_unverified_data_reply');
+
+            return null;
+        }
 
         try {
             Cache::put($cacheKey, $reply, now()->addMinutes(20));
@@ -245,6 +293,35 @@ class ChatbotController extends Controller
         }
 
         return $reply;
+    }
+
+    private function isStatisticalDataQuestion(string $message): bool
+    {
+        $hasValueCue = preg_match(
+            '/\b(berapa|jumlah|nilai|angka|persen\w*|persentase|tingkat|laju|terbaru|terkini|tahun|periode)\b|\b20\d{2}\b/iu',
+            $message
+        ) === 1;
+        if ($this->isConceptQuestion($message) && ! $hasValueCue) {
+            return false;
+        }
+
+        return preg_match(
+            '/\b(pdrb|produk\s+domestik\s+regional\s+bruto|ipm|indeks\s+pembangunan\s+manusia|'
+            .'penganggur\w*|tpt|penduduk|warga|populasi|kemiskinan|miskin\w*|inflasi|'
+            .'rasio\s+gini|gini|upah|gaji|ump|umk|umr|ntp|nilai\s+tukar\s+petani|'
+            .'ekspor|impor|produksi|padi|beras|kepadatan|harapan\s+hidup)\b/iu',
+            $message
+        ) === 1;
+    }
+
+    private function isUnverifiedDataReply(string $reply): bool
+    {
+        return preg_match(
+            '/\b(?:belum\s+(?:dapat\s+)?(?:ditemukan|tersedia|terverifikasi|diverifikasi|dirilis|dipastikan|diperoleh|'
+            .'tercantum|dijawab)|tidak\s+(?:dapat\s+)?(?:ditemukan|tersedia|diverifikasi|diakses|dipastikan)|'
+            .'tidak\s+ada\s+(?:data|informasi)|belum\s+ada\s+(?:data|informasi))\b/iu',
+            $reply
+        ) === 1;
     }
 
     private function knowledgeContextFor(ChatbotKnowledgeService $knowledge, string $message): ?string
@@ -279,8 +356,18 @@ class ChatbotController extends Controller
         }
     }
 
-    private function fallbackAnswer(BpsWebApiService $bps, string $message): string
+    private function fallbackAnswer(BpsWebApiService $bps, string $message, ?string $context = null): string
     {
+        if ($this->isConceptQuestion($message)) {
+            if (filled($context)) {
+                return "Berikut penjelasan dari basis pengetahuan BPS yang tersedia:\n\n"
+                    .Str::limit(trim($context), 4000, '...');
+            }
+
+            return 'Maaf, penjelasan konsep tersebut belum tersedia pada basis pengetahuan saat ini. '
+                .'Silakan coba lagi setelah referensi yang sesuai tersedia.';
+        }
+
         try {
             return $bps->fallbackAnswerFor($message);
         } catch (\Throwable $exception) {
@@ -288,6 +375,33 @@ class ChatbotController extends Controller
 
             return config('chatbot_fallback.notice')."\n\n".config('chatbot_fallback.closing');
         }
+    }
+
+    private function isConceptQuestion(string $message): bool
+    {
+        if (preg_match(
+            '/\b(apa\s+itu|apa\s+perbedaan|perbedaan|pengertian|definisi|arti|maksud|konsep|cara\s+membaca|'
+            .'cara\s+menghitung|cara\s+menafsir\w*|rumus|jelaskan)\b/iu',
+            $message
+        ) !== 1) {
+            return false;
+        }
+        if (preg_match('/\b(berapa|nilai|angka|terbaru|terkini|tahun|periode|rilis)\b|\b20\d{2}\b/iu', $message)) {
+            return false;
+        }
+        if (preg_match('/\b(sumsel|sumatera\s+selatan)\b/iu', $message)) {
+            return false;
+        }
+
+        foreach (config('sumsel_regions', []) as $region) {
+            foreach (array_merge($region['aliases'] ?? [], [$region['label'] ?? '']) as $name) {
+                if ($name !== '' && preg_match('/\b'.preg_quote($name, '/').'\b/iu', $message)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**

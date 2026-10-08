@@ -22,5 +22,37 @@
     "region": "Kota Palembang",
     "expected_year": 2025,
     "expected_value": 76.26
+  },
+  {
+    "question": "Berapa PDRB atas dasar harga berlaku Kota Palembang tahun 2025?",
+    "indicator": "pdrb_adhb_kab_kota",
+    "expected_var_id": 860,
+    "region": "Kota Palembang",
+    "expected_year": 2025,
+    "expected_value": 226466.1
+  },
+  {
+    "question": "Berapa PDRB Palembang tahun 2024?",
+    "indicator": "pdrb_adhb_kab_kota",
+    "expected_var_id": 860,
+    "region": "Kota Palembang",
+    "expected_year": 2024,
+    "expected_value": 208196.7
+  },
+  {
+    "question": "Berapa PDRB ADHK Palembang tahun 2025?",
+    "indicator": "pdrb_adhk_kab_kota",
+    "expected_var_id": 859,
+    "region": "Kota Palembang",
+    "expected_year": 2025,
+    "expected_value": 131646.95
+  },
+  {
+    "question": "Berapa tingkat pengangguran Sumatera Selatan terbaru?",
+    "indicator": "tingkat_pengangguran",
+    "expected_var_id": 334,
+    "region": "Provinsi Sumatera Selatan",
+    "expected_year": 2025,
+    "expected_value": 3.69
   }
 ]

@@ -258,8 +258,13 @@ class BpsToolsTests(unittest.TestCase):
             if path == "list/model/subject/domain/1600/page/2":
                 return {
                     "status": "OK",
-                    "data": [{"pages": 2}, [{"sub_id": "2", "sub_name": "Tenaga Kerja"}]],
+                    "data": [{"pages": 2}, [
+                        {"sub_id": "2", "sub_name": "Tenaga Kerja"},
+                        {"sub_id": "3", "sub_name": "Subjek tanpa variabel"},
+                    ]],
                 }
+            if path == "list/model/var/domain/1600/subject/3":
+                return {"status": "OK", "data": ""}
             if path == "list/model/var/domain/1600/subject/1":
                 return {
                     "status": "OK",
@@ -368,6 +373,26 @@ class BpsToolsTests(unittest.TestCase):
         fetch.assert_called_once_with(608, tahun=None, wilayah=None)
         self.assertEqual(result["data"], [{"wilayah": "Perkotaan+Pedesaan", "nilai": 9.2}])
         self.assertEqual(result["jumlah_baris"], 1)
+
+    def test_unemployment_indicator_selects_total_sex_category_as_provincial_value(self):
+        with patch.object(
+            bps_tools,
+            "ambil_data",
+            return_value={
+                "tahun": "2025",
+                "jumlah_baris": 3,
+                "data": [
+                    {"wilayah": "Laki-Laki", "nilai": 3.56},
+                    {"wilayah": "Perempuan", "nilai": 3.92},
+                    {"wilayah": "Jumlah", "nilai": 3.69},
+                ],
+            },
+        ) as fetch:
+            result = bps_tools.indikator_utama("tingkat_pengangguran")
+
+        fetch.assert_called_once_with(334, tahun=None, wilayah=None)
+        self.assertEqual(result["data"], [{"wilayah": "Jumlah", "nilai": 3.69}])
+        self.assertEqual(result["wilayah_cakupan"], "Provinsi Sumatera Selatan")
 
     def test_unresolved_query_log_redacts_contact_details(self):
         import main

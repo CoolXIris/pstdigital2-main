@@ -76,6 +76,8 @@ _VARIABLE_SYNONYM_GROUPS = (
 _SEARCH_FILLER_WORDS = {
     "apa", "apakah", "adakah", "berapa", "berapakah", "bagaimana", "tolong", "mohon", "bisa",
     "carikan", "cari", "menampilkan", "tampilkan", "menunjukkan", "tunjukkan",
+    "perbedaan", "beda", "pengertian", "definisi", "arti", "maksud", "konsep",
+    "cara", "membaca", "menafsirkan", "menghitung", "rumus", "metodologi",
     "data", "terbaru", "terkini", "terakhir", "tahun", "pada", "di", "ke", "dari",
     "untuk", "tentang", "mengenai", "yang", "dan", "atau", "dengan", "saya",
     "ingin", "dong", "kah", "angka", "nilai", "jumlah", "adalah", "tersebut",
@@ -99,7 +101,14 @@ def _load_canonical_indicators() -> dict[str, dict[str, Any]]:
             name = variable["name"]
             indicators[name] = {
                 key: variable[key]
-                for key in ("var_id", "title", "sifat_data", "catatan_sumber", "vervar_label")
+                for key in (
+                    "var_id",
+                    "title",
+                    "sifat_data",
+                    "catatan_sumber",
+                    "vervar_label",
+                    "province_only",
+                )
                 if key in variable
             }
     if not indicators:
@@ -285,6 +294,8 @@ def _load_model_rows(path: str) -> list[dict]:
         page_path = path if page == 1 else f"{path}/page/{page}"
         payload = _get(page_path)
         data = payload.get("data")
+        if data == "":
+            return rows
         if not isinstance(data, list) or len(data) < 2 or not isinstance(data[1], list):
             raise BpsError("Format daftar variabel BPS tidak dikenali.")
         page_rows, pages = _list_rows(payload)
@@ -585,6 +596,7 @@ def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str
                 "judul": judul,
                 "error": f"Nama wilayah '{wilayah}' tidak dikenali dengan yakin.",
                 "wilayah_kandidat": candidates,
+                "status_hasil": "kosong",
             }
     vervar = _labels(payload.get("vervar")) or {"0": ""}
     turvar = _labels(payload.get("turvar")) or {"0": ""}
@@ -625,6 +637,7 @@ def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str
                 "error": f"Data untuk {resolved_region} tidak tersedia pada variabel ini.",
                 "wilayah_ditafsirkan": resolved_region,
                 "wilayah_tersedia": [v for v in vervar.values() if v][:30],
+                "status_hasil": "kosong",
             }
 
     return {
@@ -673,6 +686,7 @@ def ambil_data(
                 return {
                     "error": f"Nama wilayah '{wilayah}' tidak dikenali dengan yakin.",
                     "wilayah_kandidat": candidates,
+                    "status_hasil": "kosong",
                 }
         periods = _periods(vid)
         if not periods:
@@ -837,6 +851,7 @@ def indikator_utama(
         return {
             "error": "Nama indikator tidak didukung.",
             "nama_didukung": list(_INDIKATOR_UTAMA),
+            "status_hasil": "kosong",
         }
 
     indicator = _INDIKATOR_UTAMA[nama]
@@ -853,6 +868,8 @@ def indikator_utama(
         return {"nama_indikator": nama, "var_id": int(indicator["var_id"]), **result}
     result["nama_indikator"] = nama
     result["var_id"] = int(indicator["var_id"])
+    if indicator.get("province_only"):
+        result["wilayah_cakupan"] = "Provinsi Sumatera Selatan"
     if indicator.get("vervar_label") and isinstance(result.get("data"), list):
         expected_label = str(indicator["vervar_label"]).casefold().strip()
         matching_rows = [
@@ -921,10 +938,12 @@ def berita_resmi_statistik(
 ) -> dict:
     """Mengambil Berita Resmi Statistik (BRS) terbaru BPS Sumatera Selatan.
 
-    Gunakan untuk indikator bulanan/triwulanan dan pertanyaan "terbaru": inflasi, NTP,
-    ekspor-impor, pariwisata/hotel, penumpang, ketenagakerjaan/pengangguran, kemiskinan,
-    pertumbuhan ekonomi triwulan. Angka utama biasanya tertulis pada judul. Isi kata_kunci
-    dengan 1-2 kata inti (mis. "inflasi"); kosongkan untuk BRS terbaru secara umum.
+    Gunakan untuk indikator bulanan/triwulanan dan pertanyaan tentang rilis terbaru: inflasi,
+    NTP, ekspor-impor, pariwisata/hotel, penumpang, ketenagakerjaan, kemiskinan, atau
+    pertumbuhan ekonomi triwulan. Untuk nilai tingkat pengangguran provinsi, gunakan
+    indikator kanonik tingkat_pengangguran; gunakan tool ini jika yang ditanya adalah rilisnya.
+    Angka utama BRS biasanya tertulis pada judul. Isi kata_kunci dengan 1-2 kata inti
+    (mis. "inflasi"); kosongkan untuk BRS terbaru secara umum.
 
     Args:
         kata_kunci: kata inti topik, misalnya "inflasi" atau "penduduk miskin".
@@ -933,7 +952,12 @@ def berita_resmi_statistik(
         bulan: filter nama bulan yang tercantum pada judul BRS (opsional).
     """
     count = max(1, min(int(jumlah or 5), 10))
-    tokens = [t for t in (kata_kunci or "").lower().split() if len(t) >= 3]
+    keyword = _clean_search_keyword(kata_kunci or "")
+    token_groups = [
+        [token for token in query.split() if len(token) >= 3]
+        for query in _search_keyword_variants(keyword)
+    ]
+    token_groups = [tokens for tokens in token_groups if tokens]
     now = datetime.now(WIB)
     found: list[tuple[int, str, dict]] = []
     month_names = {
@@ -967,36 +991,48 @@ def berita_resmi_statistik(
         year, month0 = divmod(month_index, 12)
         return year, month0 + 1, _brs_month(year, month0 + 1)
 
+    def matching_score(item: dict) -> Optional[int]:
+        title = str(item.get("title", ""))
+        searchable_text = f"{title} {_strip_html(item.get('abstract'))}".lower()
+        score = max(
+            (
+                sum(token in searchable_text for token in tokens) * 100
+                + len(token_groups) - index
+                for index, tokens in enumerate(token_groups)
+            ),
+            default=0,
+        )
+        if token_groups and score == 0:
+            return None
+        if tahun is not None and not re.search(rf"\b{int(tahun)}\b", title):
+            return None
+        if month_variants and not any(
+            re.search(rf"\b{re.escape(variant)}\b", title.lower())
+            for variant in month_variants
+        ):
+            return None
+        return score
+
     try:
         if tahun is not None:
             with ThreadPoolExecutor(max_workers=6) as pool:
                 month_results = list(pool.map(load_month, month_indices))
+            for _, _, month_rows in month_results:
+                for item in month_rows:
+                    score = matching_score(item)
+                    if score is not None:
+                        found.append((score, str(item.get("rl_date", "")), item))
         else:
-            month_results = []
             for month_index in month_indices:
-                month_result = load_month(month_index)
-                month_results.append(month_result)
-                if (not tokens and not bulan and found) or (
-                    len(found) >= count and not bulan
+                _, _, month_rows = load_month(month_index)
+                for item in month_rows:
+                    score = matching_score(item)
+                    if score is not None:
+                        found.append((score, str(item.get("rl_date", "")), item))
+                if not bulan and (
+                    (not token_groups and found) or len(found) >= count
                 ):
                     break
-
-        for month_result in month_results:
-            month_number = month_result[1]
-            month_rows = month_result[2]
-            for item in month_rows:
-                title = str(item.get("title", ""))
-                score = sum(t in title.lower() for t in tokens)
-                if tokens and score == 0:
-                    continue
-                if tahun is not None and not re.search(rf"\b{int(tahun)}\b", title):
-                    continue
-                if month_variants and not any(
-                    re.search(rf"\b{re.escape(variant)}\b", title.lower())
-                    for variant in month_variants
-                ):
-                    continue
-                found.append((score, str(item.get("rl_date", "")), item))
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
 

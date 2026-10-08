@@ -185,7 +185,12 @@ class ChatbotKnowledgeService
     private function terms(string $text): array
     {
         preg_match_all('/[\pL\pN]{3,}/u', Str::lower($text), $matches);
-        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong'];
+        $stopWords = [
+            'yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah',
+            'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong',
+            'perbedaan', 'beda', 'pengertian', 'definisi', 'arti', 'maksud', 'konsep',
+            'cara', 'membaca', 'menafsirkan', 'menghitung', 'rumus', 'jelaskan',
+        ];
 
         return array_values(array_diff($matches[0] ?? [], $stopWords));
     }

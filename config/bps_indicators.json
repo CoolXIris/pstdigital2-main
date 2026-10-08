@@ -48,6 +48,45 @@
       ]
     },
     {
+      "terms": ["pdrb", "produk", "domestik", "regional", "bruto", "ekonomi"],
+      "variables": [
+        {
+          "name": "pdrb_adhb_kab_kota",
+          "var_id": 860,
+          "title": "Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Berlaku",
+          "terms": ["pdrb", "adhb", "berlaku", "tahunan", "kabupaten", "kota"],
+          "excludes": ["adhk", "konstan", "pertumbuhan", "laju", "kapita", "triwulan"]
+        },
+        {
+          "name": "pdrb_adhk_kab_kota",
+          "var_id": 859,
+          "title": "Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010",
+          "terms": ["pdrb", "adhk", "konstan", "tahunan", "kabupaten", "kota"],
+          "excludes": ["adhb", "berlaku", "pertumbuhan", "laju", "kapita", "triwulan"]
+        },
+        {
+          "name": "pdrb_pertumbuhan_kab_kota",
+          "var_id": 862,
+          "title": "Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010",
+          "terms": ["pdrb", "pertumbuhan", "laju", "adhk", "konstan", "tahunan", "kabupaten", "kota"],
+          "excludes": ["adhb", "berlaku", "kapita", "triwulan"]
+        }
+      ]
+    },
+    {
+      "terms": ["pengangguran", "penganggur", "tingkat", "tpt", "ketenagakerjaan"],
+      "variables": [
+        {
+          "name": "tingkat_pengangguran",
+          "var_id": 334,
+          "title": "Tingkat Pengangguran",
+          "terms": ["pengangguran", "penganggur", "tingkat", "tpt"],
+          "vervar_label": "Jumlah",
+          "province_only": true
+        }
+      ]
+    },
+    {
       "terms": ["penduduk", "warga"],
       "variables": [
         {

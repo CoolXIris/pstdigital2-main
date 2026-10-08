@@ -1315,6 +1315,75 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
     }
 
+    public function test_chatbot_allows_general_statistical_concepts_through_to_ai(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response([
+            'reply' => 'Korelasi menggambarkan hubungan antara dua variabel.',
+        ], 200)]);
+
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => 'Apa arti korelasi dalam statistik?'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'Korelasi menggambarkan hubungan antara dua variabel.')
+            ->assertJsonPath('safety_blocked', false);
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat')
+            && $request['question'] === 'Apa arti korelasi dalam statistik?');
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
+    }
+
+    public function test_concept_answer_uses_uploaded_knowledge_when_python_is_unavailable(): void
+    {
+        Cache::flush();
+        $question = 'Apa perbedaan PDRB ADHB dan ADHK?';
+        $glossary = '[Sumber: Glosarium PDRB] ADHB menggunakan harga yang berlaku; ADHK menggunakan harga konstan.';
+        $knowledge = \Mockery::mock(ChatbotKnowledgeService::class);
+        $knowledge->shouldReceive('contextFor')->once()->with($question)->andReturn($glossary);
+        $knowledge->shouldReceive('askWithContext')
+            ->once()
+            ->andReturn(new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(503, [], '{"error":"busy"}')));
+        $this->app->instance(ChatbotKnowledgeService::class, $knowledge);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $response = $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => $question])
+            ->assertOk()
+            ->assertJsonPath('knowledge_used', true);
+
+        $this->assertStringContainsString('ADHB menggunakan harga yang berlaku', $response->json('reply'));
+        $this->assertStringContainsString('ADHK menggunakan harga konstan', $response->json('reply'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
+    }
+
+    public function test_concept_answer_returns_honest_notice_when_no_glossary_or_python_is_available(): void
+    {
+        Cache::flush();
+        $question = 'Apa perbedaan PDRB ADHB dan ADHK?';
+        $knowledge = \Mockery::mock(ChatbotKnowledgeService::class);
+        $knowledge->shouldReceive('contextFor')->once()->with($question)->andReturn(null);
+        $knowledge->shouldReceive('askWithContext')
+            ->once()
+            ->andReturn(new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(503, [], '{"error":"busy"}')));
+        $this->app->instance(ChatbotKnowledgeService::class, $knowledge);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => $question])
+            ->assertOk()
+            ->assertJsonPath(
+                'reply',
+                'Maaf, penjelasan konsep tersebut belum tersedia pada basis pengetahuan saat ini. Silakan coba lagi setelah referensi yang sesuai tersedia.'
+            )
+            ->assertJsonPath('knowledge_used', false);
+    }
+
     public function test_chatbot_sends_wage_questions_to_ai_without_bps_api_key(): void
     {
         /** @var User $user */
@@ -1594,6 +1663,70 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertSame(1, $aiRequests);
     }
 
+    public function test_unverified_ai_data_reply_uses_bps_fallback_and_is_not_cached(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        $aiRequests = 0;
+        $question = 'Tingkat pengangguran Sumatera Selatan terbaru?';
+        $unverifiedReply = 'Maaf, data tersebut belum dapat diverifikasi dari WebAPI BPS saat ini.';
+        $cacheKey = 'chatbot:ai:'.sha1(
+            mb_strtolower(trim($question)).'|'.sha1(''). '|'.sha1(serialize([]))
+        );
+        Cache::put($cacheKey, $unverifiedReply, now()->addMinutes(20));
+
+        Http::fake(function ($request) use (&$aiRequests, $unverifiedReply) {
+            $url = $request->url();
+            if (str_contains($url, '127.0.0.1:8001/api/chat')) {
+                $aiRequests++;
+
+                return Http::response(['reply' => $unverifiedReply], 200);
+            }
+            if (str_contains($url, '/model/th/domain/1600/var/334/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 1], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/334/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 334, 'label' => 'Tingkat Pengangguran', 'unit' => 'Persen']],
+                    'vervar' => [
+                        ['val' => 1, 'label' => 'Laki-Laki'],
+                        ['val' => 2, 'label' => 'Perempuan'],
+                        ['val' => 3, 'label' => 'Jumlah'],
+                    ],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => [
+                        '133401250' => 3.56,
+                        '233401250' => 3.92,
+                        '333401250' => 3.69,
+                    ],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        foreach (range(1, 2) as $_) {
+            $response = $this->actingAs($user)
+                ->postJson(route('chatbot.message'), ['message' => $question])
+                ->assertOk();
+
+            $this->assertStringContainsString('Total: 3,69 Persen', $response->json('reply'));
+            $this->assertStringNotContainsString(
+                'belum dapat diverifikasi',
+                mb_strtolower($response->json('reply'))
+            );
+        }
+
+        $this->assertSame(2, $aiRequests);
+    }
+
     public function test_inflation_for_current_month_uses_bps_press_release_context(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
@@ -1612,6 +1745,214 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringContainsString('Inflasi Sumatera Selatan Bulan Ini', $context);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/')
             && str_contains($request->url(), '/keyword/inflasi/'));
+    }
+
+    public function test_ump_fallback_rejects_substring_table_matches_and_decodes_html_table_text(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/view/model/statictable/domain/1600/')
+                && str_contains($url, '/id/ump-good/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [
+                        'table' => '&lt;table class=&quot;excel&quot;&gt;&lt;tr&gt;'
+                            .'&lt;td&gt;Upah Minimum Provinsi Sumatera Selatan&lt;/td&gt;'
+                            .'&lt;td&gt;2026&lt;/td&gt;&lt;td&gt;Rp 3.942.000&lt;/td&gt;'
+                            .'&lt;/tr&gt;&lt;/table&gt;',
+                    ],
+                ]);
+            }
+            if (str_contains($url, '/list/model/statictable/domain/1600/keyword/ump/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['total' => 1, 'pages' => 1], [[
+                        'table_id' => 'ump-bad',
+                        'title' => 'Banyaknya Desa Menurut Lokasi Berkumpul Anak Jalanan',
+                    ]]],
+                ]);
+            }
+            if (str_contains($url, '/list/model/statictable/domain/1600/keyword/upah/')
+                || str_contains($url, '/list/model/statictable/domain/1600/keyword/minimum/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['total' => 1, 'pages' => 1], [[
+                        'table_id' => 'ump-good',
+                        'title' => 'Upah Minimum Provinsi Sumatera Selatan',
+                    ]]],
+                ]);
+            }
+
+            return Http::response(['status' => 'OK', 'data' => [['total' => 0, 'pages' => 1], []]]);
+        });
+
+        $answer = app(BpsWebApiService::class)->fallbackAnswerFor('UMP Sumsel');
+
+        $this->assertStringContainsString('Upah Minimum Provinsi Sumatera Selatan', $answer);
+        $this->assertStringContainsString('Rp 3.942.000', $answer);
+        $this->assertStringNotContainsString('Banyaknya Desa', $answer);
+        $this->assertStringNotContainsString('<table', $answer);
+        $this->assertStringNotContainsString('&lt;table', $answer);
+    }
+
+    public function test_fallback_uses_regional_canonical_pdrb_series_for_the_requested_year(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/860/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 1], [
+                        ['th' => '2025', 'th_id' => 125],
+                        ['th' => '2024', 'th_id' => 124],
+                    ]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/860/th/124/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [[
+                        'val' => 860,
+                        'label' => 'Produk Domestik Regional Bruto Atas Dasar Harga Berlaku',
+                        'unit' => 'Miliar Rupiah',
+                    ]],
+                    'vervar' => [['val' => 14, 'label' => 'Palembang']],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => ['1486001240' => 208196.7],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $answer = app(BpsWebApiService::class)->fallbackAnswerFor('Berapa PDRB Palembang 2024?');
+
+        $this->assertStringContainsString('Kota Palembang', $answer);
+        $this->assertStringContainsString('tahun 2024', $answer);
+        $this->assertStringContainsString('208.196,7 Miliar Rupiah', $answer);
+        Http::assertSent(fn ($request) => str_contains(
+            $request->url(),
+            '/model/data/domain/1600/var/860/th/124/'
+        ));
+    }
+
+    public function test_fallback_uses_the_total_category_for_provincial_unemployment(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/334/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 1], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/334/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 334, 'label' => 'Tingkat Pengangguran', 'unit' => 'Persen']],
+                    'vervar' => [
+                        ['val' => 1, 'label' => 'Laki-Laki'],
+                        ['val' => 2, 'label' => 'Perempuan'],
+                        ['val' => 3, 'label' => 'Jumlah'],
+                    ],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => [
+                        '133401250' => 3.56,
+                        '233401250' => 3.92,
+                        '333401250' => 3.69,
+                    ],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $answer = app(BpsWebApiService::class)->fallbackAnswerFor(
+            'Berapa tingkat pengangguran Sumatera Selatan terbaru?'
+        );
+
+        $this->assertStringContainsString('Provinsi Sumatera Selatan tahun 2025', $answer);
+        $this->assertStringContainsString('Total: 3,69 Persen', $answer);
+        $this->assertStringNotContainsString('Data WebAPI BPS untuk Tingkat Pengangguran di Jumlah', $answer);
+    }
+
+    public function test_fallback_uses_adhk_pdrb_when_requested_for_a_city(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/859/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 1], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/859/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [[
+                        'val' => 859,
+                        'label' => 'Produk Domestik Regional Bruto Atas Dasar Harga Konstan 2010',
+                        'unit' => 'Miliar Rupiah',
+                    ]],
+                    'vervar' => [['val' => 14, 'label' => 'Palembang']],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => ['1485901250' => 131646.95],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $answer = app(BpsWebApiService::class)->fallbackAnswerFor(
+            'Berapa PDRB ADHK Palembang 2025?'
+        );
+
+        $this->assertStringContainsString('Kota Palembang', $answer);
+        $this->assertStringContainsString('Atas Dasar Harga Konstan 2010', $answer);
+        $this->assertStringContainsString('131.646,95 Miliar Rupiah', $answer);
+        Http::assertSent(fn ($request) => str_contains(
+            $request->url(),
+            '/model/data/domain/1600/var/859/th/125/'
+        ));
+    }
+
+    public function test_regional_inflation_context_falls_back_to_province_with_scope_notice(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/model/pressrelease/domain/1612/')) {
+                return Http::response(['status' => 'OK', 'data' => [['total' => 0, 'pages' => 1], []]]);
+            }
+            if (str_contains($request->url(), '/model/pressrelease/domain/1600/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['total' => 1, 'pages' => 1], [[
+                        'title' => 'Agustus 2026 inflasi Year on Year Sumatera Selatan sebesar 2,60 persen',
+                        'rl_date' => '2026-09-01',
+                        'abstract' => 'Inflasi Sumatera Selatan tercatat sebesar 2,60 persen.',
+                    ]]],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('inflasi PALI terbaru');
+
+        $this->assertStringContainsString('[WebAPI BPS][CAKUPAN_PROVINSI]', $context);
+        $this->assertStringContainsString('Data khusus Kabupaten Penukal Abab Lematang Ilir tidak ditemukan', $context);
+        $this->assertStringContainsString('2,60 persen', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/domain/1612/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/domain/1600/'));
     }
 
     public function test_admin_chatbot_test_sends_data_questions_to_ai_without_laravel_bps_context(): void
@@ -1669,7 +2010,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertNotSame($sessionIds[0], $sessionIds[1]);
     }
 
-    public function test_chatbot_preserves_ai_safety_responses_without_laravel_interception(): void
+    public function test_chatbot_safety_service_blocks_unsafe_messages_before_calling_ai(): void
     {
         /** @var User $user */
         $user = User::factory()->create();
@@ -1677,16 +2018,13 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var Authenticatable $authenticatedUser */
         $authenticatedUser = $user;
 
-        Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response([
-            'reply' => 'Saya tidak dapat membantu dengan permintaan itu.',
-        ], 200)]);
+        Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response(['reply' => 'Jawaban AI.'], 200)]);
 
         $response = $this->actingAs($authenticatedUser)
             ->postJson(route('chatbot.message'), ['message' => 'kamu goblok'])
             ->assertOk()
             ->assertJsonPath('knowledge_used', false)
-            ->assertJsonPath('safety_blocked', false)
-            ->assertJsonPath('reply', 'Saya tidak dapat membantu dengan permintaan itu.');
+            ->assertJsonPath('safety_blocked', true);
 
         $this->assertDatabaseCount('chatbot_messages', 1);
         $this->assertDatabaseHas('chatbot_messages', [
@@ -1698,10 +2036,9 @@ class AdminManagementPagesTest extends BaseTestCase
             ->postJson(route('admin.chatbot.test'), ['message' => 'kirim konten porno'])
             ->assertOk()
             ->assertJsonPath('knowledge_used', false)
-            ->assertJsonPath('safety_blocked', false)
-            ->assertJsonPath('reply', 'Saya tidak dapat membantu dengan permintaan itu.');
+            ->assertJsonPath('safety_blocked', true);
 
-        Http::assertSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat'));
     }
 
     public function test_user_cannot_read_another_users_chatbot_conversation(): void
