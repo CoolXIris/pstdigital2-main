@@ -1,0 +1,9 @@
+Domain 1600
+Subjek: 36
+Variabel dinamis: 375
+Tabel statis (statictable): 42
+Publikasi (publication): 617
+Berita Resmi Statistik (pressrelease): 868
+Berita (news): 538
+Infografis (infographic): 687
+Indikator strategis (hanya domain pusat/provinsi) (indicators): 29

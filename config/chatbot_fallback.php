@@ -77,10 +77,19 @@ return [
                 ['var_id' => 334, 'label' => 'Tingkat Pengangguran', 'keywords' => ['penganggur', 'tpt']],
             ],
         ],
+        'gini' => [
+            'label' => 'Rasio Gini',
+            'keywords' => ['gini', 'rasio gini', 'ketimpangan'],
+            'title_keywords' => ['Gini Ratio', 'Rasio Gini'],
+            'brs_only' => true,
+            'province_only' => true,
+            'variables' => [],
+            'province_variables' => [],
+        ],
         'kemiskinan' => [
-            'label' => 'kemiskinan dan ketimpangan',
-            'keywords' => ['miskin', 'kemiskinan', 'gini', 'ketimpangan'],
-            'title_keywords' => ['kemiskinan', 'penduduk miskin', 'gini', 'ketimpangan'],
+            'label' => 'kemiskinan',
+            'keywords' => ['miskin', 'kemiskinan'],
+            'title_keywords' => ['kemiskinan', 'penduduk miskin'],
             'province_only' => false,
             'variables' => [
                 ['var_id' => 604, 'label' => 'Persentase Penduduk Miskin menurut Kabupaten/Kota', 'keywords' => ['persentase', 'persen']],

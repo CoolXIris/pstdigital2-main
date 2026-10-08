@@ -65,6 +65,16 @@ questions and optional expected year/value snapshots are maintained in
 `tests/Fixtures/bps-golden-questions.json`. Update the snapshot deliberately
 after checking the published API value when BPS releases a newer period.
 
+## Dynamic BPS catalog
+
+The Python chatbot also searches `katalog_variabel_1600.csv` and
+`katalog_subjek_1600.csv` in the project root. Keep both files alongside
+`bps_tools.py` when deploying the service. Their indicator names, IDs, subjects,
+units, and year coverage expand variable and subject searches; the year coverage
+is catalog metadata, not an observation. Numeric answers must still be fetched
+and verified through WebAPI BPS. Regenerate the CSV files from the BPS API with
+`python dump_bps_catalog.py --tahun`.
+
 Unresolved data requests are emitted by the Python service as structured
 `BPS_QUERY_UNRESOLVED` warning log events. The logged question is length-limited
 and email addresses and phone numbers are redacted.

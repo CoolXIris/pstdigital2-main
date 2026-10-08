@@ -13,7 +13,7 @@ use RuntimeException;
 
 class BpsWebApiService
 {
-    private const GENERIC_TERMS = ['jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia'];
+    private const GENERIC_TERMS = ['jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia', 'status'];
 
     private const VARIABLE_INDEX_CACHE_PREFIX = 'bps-webapi:variables:index:';
 
@@ -301,7 +301,8 @@ class BpsWebApiService
     {
         return $this->isDataQuestion($question)
             || $this->matchFallbackTopic($question) !== null
-            || preg_match('/\b(perikan\w*|ikan|tenaga|angkatan|pendidikan|kesehatan|pengeluaran|pendapatan|konsumsi|wisata\w*|hotel|transportasi|terbaru)\b/i', $question) === 1;
+            || preg_match('/\b(perikan\w*|ikan|tenaga|angkatan|pendidikan|kesehatan|pengeluaran|pendapatan|konsumsi|wisata\w*|hotel|transportasi|terbaru)\b/i', $question) === 1
+            || $this->catalogVariableMatches($question);
     }
 
     public function isRegionalDataQuestion(string $question): bool
@@ -553,14 +554,23 @@ class BpsWebApiService
         $region = $this->regionMentioned($question);
         $populationQuestion = $this->isPopulationTotalQuestion($question);
         $regionalDataQuestion = $this->isRegionalDataQuestion($question);
-        if ($regionalDataQuestion || $populationQuestion) {
+        $catalogVariableQuestion = $this->catalogVariableMatches($question);
+        if ($regionalDataQuestion || $populationQuestion || $catalogVariableQuestion) {
             $label = $region['label'] ?? 'Provinsi Sumatera Selatan';
             if ($apiKey === null) {
                 return $notice."\n\nData BPS untuk {$label} belum dapat diambil karena API key WebAPI BPS belum dikonfigurasi.\n\n".$closing;
             }
 
             try {
-                $details = $this->dynamicFallbackDetails($question, $region, $populationQuestion);
+                $context = $this->contextFor($question);
+                $details = $this->dynamicFallbackDetails($question, $region, $populationQuestion, $context);
+                if ($details === null && $catalogVariableQuestion) {
+                    $details = $this->catalogVariableFallback(
+                        $question,
+                        $region ?? $this->provinceFallbackRegion(),
+                        $apiKey
+                    );
+                }
             } catch (ConnectionException) {
                 $details = null;
             }
@@ -592,6 +602,209 @@ class BpsWebApiService
         $regionLabel = $region['label'] ?? (preg_match('/\b(kabupaten|kab|kota)\b/iu', $question) ? 'kabupaten/kota' : null);
 
         return $this->formatFallbackPressReleases($items, $notice, $intro, $closing, $regionLabel);
+    }
+
+    private function catalogVariableFallback(string $question, array $region, string $apiKey): ?string
+    {
+        $terms = array_values(array_diff($this->keywords($question), self::GENERIC_TERMS));
+        if ($terms === []) {
+            return null;
+        }
+        $maleTerms = ['laki', 'pria', 'lelaki', 'cowok'];
+        $femaleTerms = ['perempuan', 'wanita', 'cewek'];
+        $genderPair = array_intersect($terms, $maleTerms) !== []
+            && array_intersect($terms, $femaleTerms) !== [];
+        $terms = array_values(array_unique(array_map(
+            static function (string $term) use ($maleTerms, $femaleTerms): string {
+                if (in_array($term, $maleTerms, true)) {
+                    return 'laki';
+                }
+                if (in_array($term, $femaleTerms, true)) {
+                    return 'perempuan';
+                }
+
+                return $term;
+            },
+            $terms
+        )));
+        $requestsDetail = $genderPair || preg_match(
+            '/\b(menurut|berdasarkan|jenis\s+kelamin|laki-laki|perempuan|kabupaten|kota)\b/iu',
+            $question
+        ) === 1;
+        $ranked = [];
+        foreach ($this->localCatalogIndex()['variables'] as $variable) {
+            $searchText = implode(' ', [
+                (string) ($variable['title'] ?? ''),
+                implode(' ', $variable['aliases'] ?? []),
+            ]);
+            $score = 0.0;
+            $hasExactMatch = false;
+            foreach ($terms as $term) {
+                $termScore = $this->titleTermScore($searchText, $term);
+                if ($termScore <= 0) {
+                    continue;
+                }
+                $isExact = $this->titleHasExactTerm($searchText, $term);
+                $hasExactMatch = $hasExactMatch || $isExact;
+                $score += min(Str::length($term), 10) * ($isExact ? 2 : $termScore);
+            }
+            if ($score <= 0 || ! $hasExactMatch) {
+                continue;
+            }
+            if (! $requestsDetail && preg_match(
+                '/\b(menurut|berdasarkan|jenis\s+kelamin|laki-laki|perempuan|'
+                .'kabupaten\s*\/\s*kota|per\s+kabupaten|per\s+kota)\b/iu',
+                (string) ($variable['title'] ?? '')
+            ) === 1) {
+                $score -= 20;
+            }
+            $variable['_catalog_score'] = $score;
+            $ranked[] = $variable;
+        }
+        if ($ranked === []) {
+            return null;
+        }
+
+        usort($ranked, fn (array $left, array $right) => ($right['_catalog_score'] <=> $left['_catalog_score'])
+            ?: (($right['latest_year'] ?? 0) <=> ($left['latest_year'] ?? 0)));
+        $best = $ranked[0];
+        $candidates = array_values(array_filter(
+            $ranked,
+            fn (array $candidate) => $candidate['_catalog_score'] === $best['_catalog_score']
+                && ($candidate['latest_year'] ?? null) === ($best['latest_year'] ?? null)
+        ));
+
+        if (count($candidates) > 1) {
+            $genderLabels = array_map(function (array $candidate): ?string {
+                $title = Str::lower((string) ($candidate['title'] ?? ''));
+                if (preg_match('/\b(laki-laki|laki laki)\b/u', $title) === 1) {
+                    return 'Laki-laki';
+                }
+                if (preg_match('/\b(perempuan|wanita)\b/u', $title) === 1) {
+                    return 'Perempuan';
+                }
+
+                return null;
+            }, $candidates);
+            $uniqueGenderLabels = array_values(array_unique($genderLabels));
+            if (count($candidates) !== 2
+                || count($uniqueGenderLabels) !== 2
+                || ! in_array('Laki-laki', $uniqueGenderLabels, true)
+                || ! in_array('Perempuan', $uniqueGenderLabels, true)) {
+                $options = array_map(
+                    fn (array $candidate) => '- '.$candidate['title']
+                        .' (terbaru '.($candidate['latest_year'] ?? 'belum diketahui').')',
+                    array_slice($candidates, 0, 5)
+                );
+
+                return 'Saya menemukan beberapa indikator yang sesuai di katalog BPS. Mohon pilih seri yang dimaksud:'."\n"
+                    .implode("\n", $options);
+            }
+        } else {
+            $candidates = [$best];
+            $genderLabels = [null];
+        }
+
+        $details = [];
+        $genderAnswers = [];
+        foreach ($candidates as $index => $candidate) {
+            $candidate['label'] = (string) $candidate['title'];
+            $lookup = $this->fallbackVariableLookup($candidate, $question, $region, $apiKey);
+            if ($lookup['context'] === null) {
+                continue;
+            }
+            $answer = $this->dynamicFallbackDetails(
+                $question,
+                $region,
+                false,
+                $lookup['context']
+            );
+            if ($answer === null) {
+                continue;
+            }
+            if ($lookup['year_notice'] !== null) {
+                $answer = $lookup['year_notice']."\n".$answer;
+            }
+            if (($genderLabels[$index] ?? null) !== null) {
+                $genderAnswers[$genderLabels[$index]] = [
+                    'title' => $candidate['title'],
+                    'answer' => $answer,
+                ];
+                $answer = $genderLabels[$index].":\n".$answer;
+            }
+            $details[] = $answer;
+        }
+        if ($details !== []) {
+            $genderSummary = $this->formatMaritalStatusGenderSummary(
+                $question,
+                $region,
+                $genderAnswers
+            );
+            if ($genderSummary !== null) {
+                return $genderSummary;
+            }
+
+            return implode("\n\n", $details);
+        }
+
+        return 'Indikator ditemukan di katalog BPS, tetapi nilainya belum berhasil diverifikasi dari WebAPI BPS saat ini.';
+    }
+
+    private function formatMaritalStatusGenderSummary(string $question, array $region, array $genderAnswers): ?string
+    {
+        if (count($genderAnswers) !== 2
+            || ! isset($genderAnswers['Laki-laki'], $genderAnswers['Perempuan'])
+            || preg_match('/\bstatus\s+perkawinan\b/iu', $question) !== 1) {
+            return null;
+        }
+
+        $sentences = [];
+        $latestYears = [];
+        foreach (['Laki-laki', 'Perempuan'] as $gender) {
+            $series = $genderAnswers[$gender];
+            if (preg_match('/\bstatus\s+perkawinan\b/iu', (string) ($series['title'] ?? '')) !== 1
+                || ! preg_match(
+                    '/Data WebAPI BPS untuk .*? tahun (\d+):\s*\R(.*)$/su',
+                    (string) ($series['answer'] ?? ''),
+                    $matches
+                )) {
+                return null;
+            }
+
+            $year = $matches[1];
+            $latestYears[] = $year;
+            $items = [];
+            foreach (preg_split('/\R/u', trim($matches[2])) ?: [] as $line) {
+                if (! preg_match('/^\s*([^:]+):\s*(.*?)\s*$/u', $line, $valueMatch)) {
+                    continue;
+                }
+                $category = trim($valueMatch[1]);
+                if (preg_match('/^jumlah$/iu', $category) === 1) {
+                    continue;
+                }
+                $value = preg_replace('/\s*Persen$/iu', '%', trim($valueMatch[2])) ?? trim($valueMatch[2]);
+                $items[] = Str::lower($category).' '.$value;
+            }
+            if ($items === []) {
+                return null;
+            }
+            $lastItem = array_pop($items);
+            $breakdown = $items === [] ? $lastItem : implode(', ', $items).' dan '.$lastItem;
+            $genderLabel = $gender === 'Laki-laki' ? 'laki-laki' : 'perempuan';
+            $sentences[] = "Pada penduduk {$genderLabel} berumur 10 tahun ke atas tahun {$year}, persentase status perkawinannya meliputi {$breakdown}.";
+        }
+
+        $latestYear = min($latestYears);
+        $requestedYear = preg_match('/\b(20\d{2})\b/', $question, $yearMatch) === 1
+            ? $yearMatch[1]
+            : null;
+        $yearNotice = $requestedYear !== null && in_array($requestedYear, $latestYears, true)
+            ? ''
+            : ($requestedYear !== null
+                ? "Data {$requestedYear} belum tersedia. Data terbaru yang berhasil diverifikasi adalah tahun {$latestYear}. "
+                : '');
+
+        return $yearNotice.'Berikut data status perkawinan di '.$region['label'].': '.implode(' ', $sentences);
     }
 
     private function canonicalIndicatorFallback(
@@ -672,6 +885,17 @@ class BpsWebApiService
         $regionUnavailable = [];
         foreach ($topics as $topic) {
             foreach ($regions as $region) {
+                if ($topic['brs_only'] ?? false) {
+                    $brs = $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
+                    if ($brs !== null) {
+                        $sections[] = $brs;
+                    } else {
+                        $regionUnavailable[] = $region['label'].' untuk '.$topic['label'];
+                    }
+
+                    continue;
+                }
+
                 $sectionTitle = Str::ucfirst($topic['label']).' '.$region['label'];
                 $sections[] = $sectionTitle.':';
                 $regional = ($region['kind'] ?? null) === 'region';
@@ -1654,7 +1878,8 @@ class BpsWebApiService
     private function isPopulationTotalQuestion(string $question): bool
     {
         return preg_match('/\b(total|jumlah|penduduk|warga|masyarakat)\b/i', $question) === 1
-            && preg_match('/\b(miskin\w*|kemiskinan|angkatan\s+kerja|ketenagakerjaan|penganggur\w*|tpt)\b/i', $question) !== 1;
+            && preg_match('/\b(miskin\w*|kemiskinan|angkatan\s+kerja|ketenagakerjaan|penganggur\w*|tpt|'
+                .'pria|lelaki|cowok|laki[- ]laki|wanita|perempuan|cewek|gender|jenis\s+kelamin)\b/i', $question) !== 1;
     }
 
     private function dynamicFallbackDetails(
@@ -1853,6 +2078,7 @@ class BpsWebApiService
         }
 
         $variables = [];
+        $hasApiMatch = false;
         $relevantTerms = array_values(array_filter($terms, fn (string $term) => ! in_array($term, self::GENERIC_TERMS, true)));
         $phrase = implode(' ', $relevantTerms);
         $searchTerms = [];
@@ -1863,6 +2089,7 @@ class BpsWebApiService
         foreach (array_unique($searchTerms) as $searchTerm) {
             foreach ($this->variablesForKeyword($searchTerm, $domain, $apiKey) as $variable) {
                 if (isset($variable['var_id'])) {
+                    $hasApiMatch = $hasApiMatch || ! ($variable['_local_catalog_fallback'] ?? false);
                     $indexedVariables[(string) $variable['var_id']] = $variable;
                 }
             }
@@ -1915,6 +2142,12 @@ class BpsWebApiService
             }
         }
 
+        if ($hasApiMatch) {
+            $variables = array_filter(
+                $variables,
+                fn (array $variable) => ! ($variable['_local_catalog_fallback'] ?? false)
+            );
+        }
         uasort($variables, fn (array $left, array $right) => ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0));
 
         return array_slice(array_values(array_filter($variables, fn (array $variable) => ($variable['_score'] ?? 0) >= 6)), 0, 10);
@@ -2042,26 +2275,44 @@ class BpsWebApiService
     private function variablesForKeyword(string $keyword, string $domain, string $apiKey): array
     {
         $index = Cache::get(self::VARIABLE_INDEX_CACHE_PREFIX.$domain);
-        if (is_array($index) && is_array($index['variables'] ?? null)) {
-            $variables = array_values(array_filter(
-                $index['variables'],
+        $indexedVariables = [];
+        foreach ($index['variables'] ?? [] as $variable) {
+            if (is_array($variable) && isset($variable['var_id'])) {
+                $indexedVariables[(string) $variable['var_id']] = $variable;
+            }
+        }
+        $localVariables = [];
+        foreach ($this->localCatalogIndex()['variables'] as $variable) {
+            $id = (string) $variable['var_id'];
+            $localVariables[$id] = array_merge($variable, $indexedVariables[$id] ?? []);
+        }
+
+        $matching = function (array $variables) use ($keyword): array {
+            $matches = array_values(array_filter(
+                $variables,
                 fn (array $variable) => $this->titleTermScore(
-                    (string) ($variable['title'] ?? ''),
+                    $this->variableSearchText($variable),
                     $keyword
                 ) > 0
             ));
-            usort(
-                $variables,
-                fn (array $left, array $right) => $this->titleTermScore(
-                    (string) ($right['title'] ?? ''),
-                    $keyword
-                ) <=> $this->titleTermScore((string) ($left['title'] ?? ''), $keyword)
-            );
+            usort($matches, fn (array $left, array $right) => $this->titleTermScore(
+                $this->variableSearchText($right),
+                $keyword
+            ) <=> $this->titleTermScore($this->variableSearchText($left), $keyword));
 
-            return $variables;
+            return $matches;
+        };
+        $indexedMatches = $matching(array_values($indexedVariables));
+        if ($indexedMatches !== []) {
+            return $indexedMatches;
         }
 
-        return Cache::remember('bps-webapi:variables:'.$domain.':'.sha1($keyword), now()->addHours(6), function () use ($keyword, $domain, $apiKey) {
+        $localMatches = $matching(array_values($localVariables));
+        if ($indexedVariables !== []) {
+            return array_map(fn (array $variable) => $variable + ['_local_catalog_fallback' => true], $localMatches);
+        }
+
+        $apiMatches = Cache::remember('bps-webapi:variables:'.$domain.':'.sha1($keyword), now()->addHours(6), function () use ($keyword, $domain, $apiKey) {
             $variables = [];
             for ($page = 1; $page <= 8; $page++) {
                 $keywordPath = str_replace('%20', '+', rawurlencode($keyword));
@@ -2079,6 +2330,161 @@ class BpsWebApiService
 
             return $variables;
         });
+
+        return $apiMatches !== []
+            ? $matching($apiMatches)
+            : array_map(fn (array $variable) => $variable + ['_local_catalog_fallback' => true], $localMatches);
+    }
+
+    private function localCatalogIndex(): array
+    {
+        return Cache::remember('bps-webapi:variables:local-catalog:1600', now()->addHours(26), function (): array {
+            $subjects = $this->readCatalogCsv('katalog_subjek_1600.csv', [
+                'subcat_id', 'kategori', 'sub_id', 'subjek', 'jumlah_tabel',
+            ]);
+            $subjectsById = [];
+            foreach ($subjects as $subject) {
+                $subjectsById[(string) $subject['sub_id']] = $subject;
+            }
+
+            $variables = [];
+            foreach ($this->readCatalogCsv('katalog_variabel_1600.csv', [
+                'kategori', 'sub_id', 'subjek', 'var_id', 'judul', 'satuan',
+                'tahun_terbaru', 'jumlah_tahun',
+            ]) as $row) {
+                $variableId = trim((string) $row['var_id']);
+                $title = trim((string) $row['judul']);
+                if (! ctype_digit($variableId) || $title === '') {
+                    continue;
+                }
+                $subject = $subjectsById[(string) $row['sub_id']] ?? [];
+                $latestYear = trim((string) $row['tahun_terbaru']);
+                $yearCount = trim((string) $row['jumlah_tahun']);
+                $variables[] = [
+                    'var_id' => $variableId,
+                    'title' => $title,
+                    'unit' => trim((string) $row['satuan']) ?: null,
+                    'subject_id' => trim((string) $row['sub_id']),
+                    'subject' => trim((string) $row['subjek']) ?: ($subject['subjek'] ?? ''),
+                    'category' => trim((string) $row['kategori']) ?: ($subject['kategori'] ?? ''),
+                    'category_id' => $subject['subcat_id'] ?? null,
+                    'latest_year' => ctype_digit($latestYear) ? (int) $latestYear : null,
+                    'year_count' => ctype_digit($yearCount) ? (int) $yearCount : null,
+                    'aliases' => $this->variableAliases($title),
+                ];
+            }
+
+            return ['subjects' => $subjects, 'variables' => $variables];
+        });
+    }
+
+    private function readCatalogCsv(string $filename, array $requiredColumns): array
+    {
+        $path = base_path($filename);
+        if (! is_file($path)) {
+            return [];
+        }
+        $handle = fopen($path, 'r');
+        if ($handle === false) {
+            throw new RuntimeException("Katalog BPS lokal {$filename} tidak dapat dibuka.");
+        }
+
+        try {
+            $headers = fgetcsv($handle);
+            if (! is_array($headers)) {
+                throw new RuntimeException("Katalog BPS lokal {$filename} tidak memiliki header.");
+            }
+            $headers[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $headers[0]) ?? (string) $headers[0];
+            if (array_diff($requiredColumns, $headers) !== []) {
+                throw new RuntimeException("Header katalog BPS lokal {$filename} tidak sesuai.");
+            }
+
+            $rows = [];
+            while (($values = fgetcsv($handle)) !== false) {
+                if ($values === [null]) {
+                    continue;
+                }
+                if (count($values) !== count($headers)) {
+                    throw new RuntimeException("Baris katalog BPS lokal {$filename} tidak lengkap.");
+                }
+                $row = array_combine($headers, $values);
+                if (is_array($row)) {
+                    $rows[] = $row;
+                }
+            }
+
+            return $rows;
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    private function variableAliases(string $title): array
+    {
+        preg_match_all('/\(([A-Z][A-Z0-9]{1,7})\)/u', $title, $matches);
+        $aliases = $matches[1] ?? [];
+        $words = preg_split('/[^a-z0-9]+/u', Str::lower(Str::ascii($title)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $stopWords = ['dan', 'di', 'dari', 'ke', 'yang', 'menurut', 'per', 'serta'];
+        $acronymWords = [];
+        foreach ($words as $word) {
+            if (in_array($word, $stopWords, true)) {
+                continue;
+            }
+            if ($acronymWords === [] || end($acronymWords) !== $word) {
+                $acronymWords[] = $word;
+            }
+        }
+        if (count($acronymWords) >= 2 && count($acronymWords) <= 8) {
+            $aliases[] = implode('', array_map(fn (string $word) => $word[0], $acronymWords));
+        }
+
+        return array_values(array_unique(array_map(fn (string $alias) => Str::lower($alias), $aliases)));
+    }
+
+    private function variableSearchText(array $variable): string
+    {
+        return implode(' ', array_filter([
+            (string) ($variable['title'] ?? ''),
+            (string) ($variable['subject'] ?? ''),
+            (string) ($variable['category'] ?? ''),
+            implode(' ', $variable['aliases'] ?? []),
+        ]));
+    }
+
+    private function catalogVariableMatches(string $question): bool
+    {
+        $terms = array_values(array_diff($this->keywords($question), self::GENERIC_TERMS));
+        if ($terms === []) {
+            return false;
+        }
+        foreach ($this->localCatalogIndex()['variables'] as $variable) {
+            $titleAndAliases = implode(' ', [
+                (string) ($variable['title'] ?? ''),
+                implode(' ', $variable['aliases'] ?? []),
+            ]);
+            foreach ($terms as $term) {
+                if ($this->titleHasExactTerm($titleAndAliases, $term)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function titleHasExactTerm(string $title, string $term): bool
+    {
+        $normalizedTitle = Str::lower(Str::ascii($title));
+        foreach ($this->keywordVariants($term) as $variant) {
+            if ($variant !== '' && preg_match(
+                '/(?<![a-z0-9])'.preg_quote($variant, '/').'(?![a-z0-9])/i',
+                $normalizedTitle
+            ) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function keywordVariants(string $keyword): array
@@ -2102,6 +2508,14 @@ class BpsWebApiService
             'persentase' => ['presentase'],
         ];
         $variants = [$keyword, ...($synonyms[$keyword] ?? [])];
+        foreach ([
+            ['laki', 'pria', 'lelaki', 'cowok'],
+            ['perempuan', 'wanita', 'cewek'],
+        ] as $group) {
+            if (in_array($keyword, $group, true)) {
+                $variants = array_merge($variants, $group);
+            }
+        }
         foreach (['kan', 'nya', 'an', 'i'] as $suffix) {
             if (Str::endsWith($keyword, $suffix) && Str::length($keyword) - Str::length($suffix) >= 4) {
                 $variants[] = Str::substr(
@@ -2543,8 +2957,25 @@ class BpsWebApiService
 
     private function keywords(string $question): array
     {
-        preg_match_all('/[\pL\pN]{3,}/u', Str::lower($question), $matches);
-        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
+        $normalizedQuestion = Str::lower(Str::ascii($question));
+        $phraseSynonyms = [
+            'rumah sakit umum' => 'fasilitas kesehatan',
+            'rumah sakit' => 'fasilitas kesehatan',
+            'rsud' => 'fasilitas kesehatan',
+            'faskes' => 'fasilitas kesehatan',
+            'gender' => 'jenis kelamin',
+            'sex' => 'jenis kelamin',
+        ];
+        uksort($phraseSynonyms, fn (string $left, string $right) => Str::length($right) <=> Str::length($left));
+        foreach ($phraseSynonyms as $alias => $canonical) {
+            $normalizedQuestion = preg_replace(
+                '/(?<![a-z0-9])'.preg_quote($alias, '/').'(?![a-z0-9])/u',
+                $canonical,
+                $normalizedQuestion
+            ) ?? $normalizedQuestion;
+        }
+        preg_match_all('/[\pL\pN]{3,}/u', $normalizedQuestion, $matches);
+        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
         $region = $this->regionMentioned($question);
         if ($region !== null) {
             $regionWords = ['kabupaten', 'kab', 'kota'];
@@ -2556,6 +2987,7 @@ class BpsWebApiService
         $synonyms = [
             'total' => 'jumlah',
             'masyarakat' => 'penduduk',
+            'rakyat' => 'penduduk',
             'laju' => 'pertumbuhan',
         ];
         $keywords = array_diff($matches[0] ?? [], $stopWords);
@@ -2567,6 +2999,19 @@ class BpsWebApiService
             }
             $normalized = $synonyms[$keyword] ?? $keyword;
             $expanded = array_merge($expanded, $this->keywordVariants($normalized));
+        }
+        $maleTerms = ['laki', 'pria', 'lelaki', 'cowok'];
+        $femaleTerms = ['perempuan', 'wanita', 'cewek'];
+        $genderPair = array_intersect($keywords, $maleTerms) !== []
+            && array_intersect($keywords, $femaleTerms) !== [];
+        if ($genderPair) {
+            $otherTerms = array_values(array_diff($keywords, [...$maleTerms, ...$femaleTerms]));
+            if ($otherTerms === []) {
+                $expanded = array_merge($expanded, ['jumlah', 'penduduk']);
+            } elseif (in_array('penduduk', $otherTerms, true)) {
+                $expanded[] = 'jumlah';
+            }
+            $expanded[] = 'jenis kelamin';
         }
 
         return array_values(array_unique($expanded));

@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -14,6 +16,12 @@ class BpsToolsTests(unittest.TestCase):
             headers=headers,
             content=json.dumps(payload).encode(),
             request=httpx.Request("GET", "https://webapi.bps.go.id/test"),
+        )
+
+    def test_province_prefix_resolves_to_sumsel(self):
+        self.assertEqual(
+            bps_tools._resolve_region("Provinsi Sumatera Selatan"),
+            ("Provinsi Sumatera Selatan", []),
         )
 
     def test_list_not_available_is_a_valid_empty_response(self):
@@ -113,26 +121,136 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(result["status_hasil"], "ditemukan")
         self.assertEqual(result["hasil"][0]["var_id"], 20)
 
-    def test_variable_search_retries_synonym_queries(self):
+    def test_variable_search_scores_related_and_exact_catalog_candidates(self):
+        variables = [
+            {
+                "var_id": "246",
+                "title": "Jumlah Tindak Pidana",
+                "unit": "Kasus",
+                "latest_year": "2025",
+            },
+            {
+                "var_id": "248",
+                "title": "Penyelesaian Tindak Pidana",
+                "unit": "Persen",
+                "latest_year": "2024",
+            },
+            {
+                "var_id": "227",
+                "title": "Jumlah PNS Menurut Pendidikan Tertinggi",
+                "unit": "Orang",
+                "latest_year": "2025",
+            },
+            {
+                "var_id": "229",
+                "title": "Jumlah PNS Menurut Golongan Kepangkatan",
+                "unit": "Orang",
+                "latest_year": "2025",
+            },
+        ]
+        with (
+            patch.object(bps_tools, "_variable_index", return_value={"variables": variables}),
+            patch.object(bps_tools, "_latest_year", return_value=("2025", 8, False)),
+        ):
+            prison_result = bps_tools.cari_variabel(
+                "info total jumlah yang masuk penjara di Sumsel"
+            )
+            pns_result = bps_tools.cari_variabel("jumlah PNS Sumsel")
+            unrelated_result = bps_tools.cari_variabel("zebra cross Sumsel")
+
+        self.assertEqual(prison_result["status_hasil"], "kandidat_mirip")
+        self.assertEqual(prison_result["hasil"][0]["var_id"], 246)
+        self.assertEqual(prison_result["hasil"][0]["jenis_kecocokan"], "related")
+        self.assertEqual(pns_result["status_hasil"], "ditemukan")
+        self.assertEqual(
+            {item["var_id"] for item in pns_result["hasil"]},
+            {227, 229},
+        )
+        self.assertTrue(all(item["skor_kemiripan"] == 100 for item in pns_result["hasil"]))
+        self.assertEqual(unrelated_result["status_hasil"], "kosong")
+        self.assertEqual(unrelated_result["hasil"], [])
+        self.assertTrue(bps_tools.catalog_variable_matches("orang masuk penjara Sumsel"))
+        self.assertFalse(bps_tools.catalog_variable_matches("zebra cross Sumsel"))
+
+    def test_catalog_csv_loads_variable_metadata_subjects_and_rls_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            subject_path = Path(directory) / "subjects.csv"
+            variable_path = Path(directory) / "variables.csv"
+            subject_path.write_text(
+                "\ufeffsubcat_id,kategori,sub_id,subjek,jumlah_tabel\n"
+                "1,Sosial dan Kependudukan,28,Pendidikan,\n",
+                encoding="utf-8",
+            )
+            variable_path.write_text(
+                "\ufeffkategori,sub_id,subjek,var_id,judul,satuan,tahun_terbaru,jumlah_tahun\n"
+                "Sosial dan Kependudukan,28,Pendidikan,308,Rata-Rata Lama Sekolah,Tahun,2024,10\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(bps_tools, "_SUBJECT_CATALOG_PATH", subject_path),
+                patch.object(bps_tools, "_VARIABLE_CATALOG_PATH", variable_path),
+            ):
+                catalog = bps_tools._load_catalog_index()
+
+        variable = catalog["variables"][0]
+        self.assertEqual(variable["var_id"], "308")
+        self.assertEqual(variable["latest_year"], "2024")
+        self.assertEqual(variable["category"], "Sosial dan Kependudukan")
+        self.assertIn("rls", variable["aliases"])
+        self.assertEqual(catalog["subjects"][0]["subject"], "Pendidikan")
+
+    def test_variable_search_finds_catalog_rls_without_live_period_metadata(self):
         variable = {
-            "var_id": "20",
-            "title": "Tingkat Pengangguran Terbuka",
-            "unit": "Persen",
+            "var_id": "308",
+            "title": "Rata-Rata Lama Sekolah",
+            "unit": "Tahun",
+            "subject": "Pendidikan",
+            "category": "Sosial dan Kependudukan",
+            "latest_year": "2024",
+            "year_count": 10,
+            "aliases": ["rls"],
         }
         with (
             patch.object(bps_tools, "_variable_index", return_value={"variables": [variable]}),
-            patch.object(
-                bps_tools,
-                "_rank_local_variables",
-                side_effect=[[], [], [variable]],
-            ) as rank,
-            patch.object(bps_tools, "_latest_year", return_value=("2025", 8, False)),
+            patch.object(bps_tools, "_latest_year", side_effect=bps_tools.BpsError("offline")),
         ):
-            result = bps_tools.cari_variabel("pengangguran")
+            result = bps_tools.cari_variabel("RLS Sumsel")
 
         self.assertEqual(result["status_hasil"], "ditemukan")
-        self.assertEqual(result["hasil"][0]["var_id"], 20)
-        self.assertEqual(rank.call_count, 3)
+        self.assertEqual(result["hasil"][0]["var_id"], 308)
+        self.assertEqual(result["hasil"][0]["tahun_terbaru"], "2024")
+        self.assertEqual(result["hasil"][0]["subjek"], "Pendidikan")
+
+    def test_catalog_indicator_matching_recognizes_unlisted_topics(self):
+        catalog = {
+            "variables": [{
+                "title": "Penduduk Menurut Status Perkawinan",
+                "aliases": [],
+            }],
+        }
+        with patch.object(bps_tools, "_load_catalog_index", return_value=catalog):
+            self.assertTrue(
+                bps_tools.catalog_variable_matches("perkawinan di Sumsel tahun 2026")
+            )
+            self.assertFalse(bps_tools.catalog_variable_matches("topik tidak terkait"))
+
+    def test_subject_search_returns_complete_catalog_fields(self):
+        index = {
+            "subjects": [{
+                "sub_id": "28",
+                "subject": "Pendidikan",
+                "category": "Sosial dan Kependudukan",
+                "category_id": "1",
+                "jumlah_tabel": None,
+            }],
+            "variables": [{"subject_id": "28"}],
+        }
+        with patch.object(bps_tools, "_variable_index", return_value=index):
+            result = bps_tools.cari_subjek("Pendidikan")
+
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(result["hasil"][0]["subcat_id"], "1")
+        self.assertEqual(result["hasil"][0]["jumlah_variabel_katalog"], 1)
 
     def test_keyword_cleanup_removes_regions_years_months_and_fillers(self):
         self.assertEqual(
@@ -150,6 +268,26 @@ class BpsToolsTests(unittest.TestCase):
         self.assertIn("warga", population_variants)
         self.assertIn("gaji", bps_tools._search_keyword_variants("upah"))
         self.assertIn("pengangguran", bps_tools._search_keyword_variants("penganggur"))
+
+    def test_catalog_variable_search_expands_common_gender_and_healthcare_terms(self):
+        catalog = bps_tools._load_catalog_index()
+        with (
+            patch.object(bps_tools, "_variable_index", return_value=catalog),
+            patch.object(bps_tools, "_latest_year", return_value=("2025", 10, False)),
+        ):
+            male = bps_tools.cari_variabel("pria")
+            female = bps_tools.cari_variabel("wanita")
+            both = bps_tools.cari_variabel("pria dan wanita")
+            hospitals = bps_tools.cari_variabel("rumah sakit")
+
+        self.assertEqual(male["status_hasil"], "ditemukan")
+        self.assertTrue(any("laki-laki" in item["judul"].casefold() for item in male["hasil"]))
+        self.assertEqual(female["status_hasil"], "ditemukan")
+        self.assertTrue(any("perempuan" in item["judul"].casefold() for item in female["hasil"]))
+        self.assertTrue(any("jenis kelamin" in item["judul"].casefold() for item in both["hasil"]))
+        self.assertEqual(hospitals["hasil"][0]["judul"], "Jumlah Fasilitas Kesehatan")
+        self.assertTrue(bps_tools.catalog_variable_matches("pria dan wanita"))
+        self.assertTrue(bps_tools.catalog_variable_matches("rumah sakit"))
 
     def test_ambil_data_returns_a_bounded_year_range(self):
         periods = [
@@ -287,7 +425,10 @@ class BpsToolsTests(unittest.TestCase):
                 }
             self.fail(f"Unexpected BPS path: {path}")
 
-        with patch.object(bps_tools, "_get", side_effect=fake_get):
+        with (
+            patch.object(bps_tools, "_get", side_effect=fake_get),
+            patch.object(bps_tools, "_load_catalog_index", return_value={"variables": [], "subjects": []}),
+        ):
             index = bps_tools.refresh_variable_index()
         with bps_tools._cache_lock:
             bps_tools._cache.pop(bps_tools._variable_index_key(), None)

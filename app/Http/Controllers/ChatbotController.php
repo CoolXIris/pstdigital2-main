@@ -19,6 +19,8 @@ use Illuminate\View\View;
 
 class ChatbotController extends Controller
 {
+    private bool $lastAiReplyUnverified = false;
+
     /**
      * Display a listing of the resource.
      */
@@ -145,7 +147,12 @@ class ChatbotController extends Controller
 
         $reply = $safetyResult['reply']
             ?? $aiReply
-            ?? $this->fallbackAnswer($bps, $validated['message'], $context);
+            ?? $this->fallbackAnswer(
+                $bps,
+                $validated['message'],
+                $context,
+                $this->lastAiReplyUnverified
+            );
         $knowledgeUsed = $context !== null
             && ($aiReply !== null || ($safetyResult === null && $this->isConceptQuestion($validated['message'])));
         $title = $conversation?->title ?? Str::limit(trim($validated['message']), 180, '...');
@@ -216,7 +223,12 @@ class ChatbotController extends Controller
         try {
             $context = $this->knowledgeContextFor($knowledge, $message);
             $aiReply = $this->askAi($knowledge, $message, $sessionId, $context);
-            $reply = $aiReply ?? $this->fallbackAnswer($bps, $message, $context);
+            $reply = $aiReply ?? $this->fallbackAnswer(
+                $bps,
+                $message,
+                $context,
+                $this->lastAiReplyUnverified
+            );
 
             return response()->json([
                 'reply' => $reply,
@@ -233,6 +245,7 @@ class ChatbotController extends Controller
 
     private function askAi(ChatbotKnowledgeService $knowledge, string $message, string $sessionId, ?string $context, array $history = []): ?string
     {
+        $this->lastAiReplyUnverified = false;
         $cacheKey = 'chatbot:ai:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context).'|'.sha1(serialize($history)));
         try {
             $cached = Cache::get($cacheKey);
@@ -281,6 +294,7 @@ class ChatbotController extends Controller
             $this->isStatisticalDataQuestion($message)
             && $this->isUnverifiedDataReply($reply)
         ) {
+            $this->lastAiReplyUnverified = true;
             Log::warning('chatbot.ai_unverified_data_reply');
 
             return null;
@@ -308,6 +322,7 @@ class ChatbotController extends Controller
         return preg_match(
             '/\b(pdrb|produk\s+domestik\s+regional\s+bruto|ipm|indeks\s+pembangunan\s+manusia|'
             .'penganggur\w*|tpt|penduduk|warga|populasi|kemiskinan|miskin\w*|inflasi|'
+            .'kasus|penyakit|penderita|status\s+perkawinan|'
             .'rasio\s+gini|gini|upah|gaji|ump|umk|umr|ntp|nilai\s+tukar\s+petani|'
             .'ekspor|impor|produksi|padi|beras|kepadatan|harapan\s+hidup)\b/iu',
             $message
@@ -316,8 +331,22 @@ class ChatbotController extends Controller
 
     private function isUnverifiedDataReply(string $reply): bool
     {
+        $requestedPeriodUnavailable = preg_match(
+            '/\b20\d{2}\b[^.!?\n]{0,80}\b(?:belum\s+(?:dapat\s*)?(?:tersedia|dirilis|ditemukan)|'
+            .'tidak\s+(?:dapat\s+)?(?:tersedia|dirilis|ditemukan))\b/iu',
+            $reply
+        ) === 1;
+        $latestPeriodProvided = preg_match(
+            '/\b(?:terbaru|terakhir|tersedia|berhasil\s+diverifikasi)\b[^.!?\n]{0,80}\b20\d{2}\b/iu',
+            $reply
+        ) === 1;
+
+        if ($requestedPeriodUnavailable && $latestPeriodProvided) {
+            return false;
+        }
+
         return preg_match(
-            '/\b(?:belum\s+(?:dapat\s+)?(?:ditemukan|tersedia|terverifikasi|diverifikasi|dirilis|dipastikan|diperoleh|'
+            '/\b(?:belum\s+(?:dapat\s*)?(?:ditemukan|tersedia|terverifikasi|diverifikasi|dirilis|dipastikan|diperoleh|'
             .'tercantum|dijawab)|tidak\s+(?:dapat\s+)?(?:ditemukan|tersedia|diverifikasi|diakses|dipastikan)|'
             .'tidak\s+ada\s+(?:data|informasi)|belum\s+ada\s+(?:data|informasi))\b/iu',
             $reply
@@ -356,7 +385,12 @@ class ChatbotController extends Controller
         }
     }
 
-    private function fallbackAnswer(BpsWebApiService $bps, string $message, ?string $context = null): string
+    private function fallbackAnswer(
+        BpsWebApiService $bps,
+        string $message,
+        ?string $context = null,
+        bool $aiReplyUnverified = false
+    ): string
     {
         if ($this->isConceptQuestion($message)) {
             if (filled($context)) {
@@ -369,7 +403,16 @@ class ChatbotController extends Controller
         }
 
         try {
-            return $bps->fallbackAnswerFor($message);
+            $answer = $bps->fallbackAnswerFor($message);
+            if ($aiReplyUnverified) {
+                return Str::replaceFirst(
+                    config('chatbot_fallback.notice'),
+                    'Saya periksa kembali menggunakan data resmi BPS:',
+                    $answer
+                );
+            }
+
+            return $answer;
         } catch (\Throwable $exception) {
             report($exception);
 

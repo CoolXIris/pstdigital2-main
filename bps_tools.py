@@ -1,13 +1,16 @@
 """Tools WebAPI BPS untuk Gemini (function calling)."""
 import functools
+import csv
 import html
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
@@ -49,6 +52,9 @@ _REGIONS = (
 )
 _SHORT_REGION_ALIASES = {"oku", "oki", "pali", "muba"}
 _VARIABLE_INDEX_TTL = 24 * 60 * 60
+_CATALOG_DIR = Path(__file__).resolve().parent
+_SUBJECT_CATALOG_PATH = _CATALOG_DIR / "katalog_subjek_1600.csv"
+_VARIABLE_CATALOG_PATH = _CATALOG_DIR / "katalog_variabel_1600.csv"
 _VARIABLE_SYNONYMS = {
     "kemiskinan": "miskin",
     "miskin": "kemiskinan",
@@ -67,12 +73,28 @@ _VARIABLE_SYNONYMS = {
     "pendapatan": "penghasilan",
     "jiwa": "penduduk",
 }
+_GENDER_MALE_SYNONYMS = ("laki", "pria", "lelaki", "cowok")
+_GENDER_FEMALE_SYNONYMS = ("perempuan", "wanita", "cewek")
 _VARIABLE_SYNONYM_GROUPS = (
     ("miskin", "kemiskinan"),
     ("penganggur", "pengangguran", "pengangguran terbuka"),
-    ("penduduk", "warga", "jiwa", "populasi"),
+    ("penduduk", "warga", "jiwa", "populasi", "masyarakat", "rakyat"),
     ("upah", "gaji", "penghasilan", "pendapatan"),
+    _GENDER_MALE_SYNONYMS,
+    _GENDER_FEMALE_SYNONYMS,
 )
+_VARIABLE_SYNONYM_PHRASES = (
+    ("fasilitas kesehatan", ("rumah sakit umum", "rumah sakit", "rsud", "faskes")),
+    ("jenis kelamin", ("gender", "sex")),
+    ("penjara", ("masuk penjara", "dipenjara", "masuk tahanan")),
+)
+_RELATED_VARIABLE_SYNONYMS = {
+    "penjara": ("tindak pidana", "narapidana", "tahanan", "dipenjara"),
+    "narapidana": ("penjara", "tindak pidana", "tahanan"),
+    "tahanan": ("penjara", "tindak pidana", "narapidana"),
+    "kejahatan": ("tindak pidana", "kriminalitas"),
+    "kriminalitas": ("tindak pidana", "kejahatan"),
+}
 _SEARCH_FILLER_WORDS = {
     "apa", "apakah", "adakah", "berapa", "berapakah", "bagaimana", "tolong", "mohon", "bisa",
     "carikan", "cari", "menampilkan", "tampilkan", "menunjukkan", "tunjukkan",
@@ -81,7 +103,8 @@ _SEARCH_FILLER_WORDS = {
     "data", "terbaru", "terkini", "terakhir", "tahun", "pada", "di", "ke", "dari",
     "untuk", "tentang", "mengenai", "yang", "dan", "atau", "dengan", "saya",
     "ingin", "dong", "kah", "angka", "nilai", "jumlah", "adalah", "tersebut",
-    "jelaskan", "sebutkan", "besaran", "menurut", "per", "tiap", "seluruh",
+    "jelaskan", "sebutkan", "besaran", "menurut", "per", "tiap", "seluruh", "orang",
+    "info", "informasi",
     "kab", "kabupaten", "kota", "provinsi", "sumsel", "sumatera", "selatan",
 }
 _MONTH_WORDS = {
@@ -218,7 +241,15 @@ def _remove_region_names(keyword: str) -> str:
 
 
 def _clean_search_keyword(keyword: str) -> str:
-    result = _remove_region_names(keyword or "")
+    result = str(keyword or "").casefold()
+    for canonical, aliases in _VARIABLE_SYNONYM_PHRASES:
+        for alias in sorted(aliases, key=len, reverse=True):
+            result = re.sub(
+                rf"(?<!\w){re.escape(alias)}(?!\w)",
+                canonical,
+                result,
+            )
+    result = _remove_region_names(result)
     result = re.sub(r"\b20\d{2}\b", " ", result)
     words = [
         word for word in re.findall(r"[a-z0-9]+", result.casefold())
@@ -253,6 +284,11 @@ def _search_keyword_variants(keyword: str) -> list[str]:
         return []
 
     candidates = [normalized]
+    if (
+        any(word in _GENDER_MALE_SYNONYMS for word in words)
+        and any(word in _GENDER_FEMALE_SYNONYMS for word in words)
+    ):
+        candidates.insert(0, "jenis kelamin")
     synonym_phrase = " ".join(_VARIABLE_SYNONYMS.get(word, word) for word in words)
     if synonym_phrase != normalized:
         candidates.append(synonym_phrase)
@@ -348,26 +384,154 @@ def _load_variable_index() -> dict:
     )
     return {
         "variables": variables,
+        "subjects": [
+            {
+                "sub_id": subject_id,
+                "subject": subject_name,
+                "category": "",
+                "category_id": "",
+                "jumlah_tabel": None,
+            }
+            for subject_id, subject_name in subjects
+        ],
         "refreshed_at": datetime.now(WIB).isoformat(timespec="seconds"),
     }
 
 
+def _load_catalog_index() -> dict:
+    def read_rows(path: Path) -> list[dict]:
+        if not path.is_file():
+            return []
+        try:
+            with path.open(encoding="utf-8-sig", newline="") as source:
+                return list(csv.DictReader(source))
+        except (OSError, UnicodeError, csv.Error) as exc:
+            raise BpsError(f"Katalog BPS lokal tidak dapat dibaca: {path.name}.") from exc
+
+    subjects = []
+    for row in read_rows(_SUBJECT_CATALOG_PATH):
+        subject_id = (row.get("sub_id") or "").strip()
+        subject_name = (row.get("subjek") or "").strip()
+        if not subject_id or not subject_name:
+            continue
+        table_count = (row.get("jumlah_tabel") or "").strip()
+        subjects.append({
+            "sub_id": subject_id,
+            "subject": subject_name,
+            "category": (row.get("kategori") or "").strip(),
+            "category_id": (row.get("subcat_id") or "").strip(),
+            "jumlah_tabel": int(table_count) if table_count.isdigit() else None,
+        })
+
+    subject_by_id = {subject["sub_id"]: subject for subject in subjects}
+    variables = []
+    for row in read_rows(_VARIABLE_CATALOG_PATH):
+        variable_id = (row.get("var_id") or "").strip()
+        title = (row.get("judul") or "").strip()
+        if not variable_id.isdigit() or not title:
+            continue
+        subject_id = (row.get("sub_id") or "").strip()
+        subject = subject_by_id.get(subject_id, {})
+        latest_year = (row.get("tahun_terbaru") or "").strip()
+        year_count = (row.get("jumlah_tahun") or "").strip()
+        variables.append({
+            "var_id": variable_id,
+            "title": title,
+            "unit": (row.get("satuan") or "").strip() or None,
+            "subject_id": subject_id,
+            "subject": (row.get("subjek") or "").strip() or subject.get("subject", ""),
+            "category": (row.get("kategori") or "").strip() or subject.get("category", ""),
+            "category_id": subject.get("category_id", ""),
+            "latest_year": latest_year if latest_year.isdigit() else None,
+            "year_count": int(year_count) if year_count.isdigit() else None,
+            "aliases": _variable_aliases(title),
+        })
+
+    return {"variables": variables, "subjects": subjects}
+
+
+def _variable_aliases(title: str) -> list[str]:
+    aliases = re.findall(r"\(([A-Z][A-Z0-9]{1,7})\)", title)
+    words = re.findall(r"[a-z0-9]+", title.casefold())
+    stop_words = {"dan", "di", "dari", "ke", "yang", "menurut", "per", "serta"}
+    acronym_words = []
+    for word in words:
+        if word in stop_words:
+            continue
+        if not acronym_words or acronym_words[-1] != word:
+            acronym_words.append(word)
+    if 2 <= len(acronym_words) <= 8:
+        aliases.append("".join(word[0] for word in acronym_words))
+    return list(dict.fromkeys(alias.casefold() for alias in aliases))
+
+
+def _combine_variable_indexes(remote: dict, catalog: dict) -> dict:
+    variables_by_id = {
+        str(variable["var_id"]): dict(variable)
+        for variable in remote.get("variables", [])
+        if isinstance(variable, dict) and variable.get("var_id") is not None
+    }
+    for catalog_variable in catalog.get("variables", []):
+        variable_id = str(catalog_variable["var_id"])
+        variable = variables_by_id.setdefault(variable_id, dict(catalog_variable))
+        for key, value in catalog_variable.items():
+            if value not in (None, "") and variable.get(key) in (None, ""):
+                variable[key] = value
+        variable["aliases"] = list(dict.fromkeys(
+            list(variable.get("aliases") or []) + list(catalog_variable.get("aliases") or [])
+        ))
+
+    subjects_by_id = {
+        str(subject["sub_id"]): dict(subject)
+        for subject in remote.get("subjects", [])
+        if isinstance(subject, dict) and subject.get("sub_id") is not None
+    }
+    for catalog_subject in catalog.get("subjects", []):
+        subject_id = str(catalog_subject["sub_id"])
+        subject = subjects_by_id.setdefault(subject_id, dict(catalog_subject))
+        for key, value in catalog_subject.items():
+            if value not in (None, ""):
+                subject[key] = value
+
+    return {
+        **remote,
+        "variables": sorted(
+            variables_by_id.values(),
+            key=lambda variable: (str(variable.get("title") or "").casefold(), str(variable["var_id"])),
+        ),
+        "subjects": sorted(subjects_by_id.values(), key=lambda subject: str(subject.get("subject") or "").casefold()),
+    }
+
+
+def _load_searchable_variable_index() -> dict:
+    catalog = _load_catalog_index()
+    try:
+        remote = _load_variable_index()
+    except BpsError:
+        if not catalog["variables"]:
+            raise
+        logger.warning("WebAPI BPS tidak tersedia; memakai metadata dari katalog CSV lokal.")
+        remote = {"variables": [], "subjects": []}
+    return _combine_variable_indexes(remote, catalog)
+
+
 def refresh_variable_index() -> dict:
-    index = _load_variable_index()
+    index = _load_searchable_variable_index()
     with _cache_lock:
         _cache[_variable_index_key()] = (time.time(), index)
     return index
 
 
 def _variable_index() -> dict:
-    return _cached(_variable_index_key(), _VARIABLE_INDEX_TTL, _load_variable_index)
+    return _cached(_variable_index_key(), _VARIABLE_INDEX_TTL, _load_searchable_variable_index)
 
 
 def _token_match_score(term: str, title_tokens: set[str]) -> float:
-    variants = {term, _stem_keyword(term), _VARIABLE_SYNONYMS.get(term, term)}
+    variants = {term, _VARIABLE_SYNONYMS.get(term, term)}
     for group in _VARIABLE_SYNONYM_GROUPS:
         if term in group:
             variants.update(group)
+    fuzzy_variants = set(variants)
     for variant in tuple(variants):
         variants.add(_stem_keyword(variant))
         variants.add(_VARIABLE_SYNONYMS.get(variant, variant))
@@ -378,9 +542,10 @@ def _token_match_score(term: str, title_tokens: set[str]) -> float:
     best_score = max(
         (
             SequenceMatcher(None, variant, title_token).ratio()
-            for variant in variants
+            for variant in fuzzy_variants
             for title_token in title_tokens
             if min(len(variant), len(title_token)) >= 4
+            and abs(len(variant) - len(title_token)) <= max(2, len(variant) // 4)
         ),
         default=0.0,
     )
@@ -388,30 +553,96 @@ def _token_match_score(term: str, title_tokens: set[str]) -> float:
 
 
 def _rank_local_variables(keyword: str, variables: list[dict]) -> list[dict]:
-    terms = [
+    terms = list(dict.fromkeys(
         word for word in re.findall(r"[a-z0-9]+", keyword.casefold())
-        if len(word) >= 3
-    ]
-    ranked: list[tuple[int, float, dict]] = []
+        if len(word) >= 3 and word != "total"
+    ))
+    male_terms = set(_GENDER_MALE_SYNONYMS)
+    female_terms = set(_GENDER_FEMALE_SYNONYMS)
+    if set(terms) & male_terms and set(terms) & female_terms:
+        terms = [
+            term for term in terms
+            if term not in male_terms and term not in female_terms
+        ]
+        terms.extend(("jenis", "kelamin"))
+    if not terms:
+        return []
+
+    title_tokens_by_id = []
+    document_frequency: Counter[str] = Counter()
     for variable in variables:
-        title = " ".join(
-            str(variable.get(field) or "")
-            for field in ("title", "subject")
-        ).casefold()
-        title_tokens = set(re.findall(r"[a-z0-9]+", title))
-        scores = [_token_match_score(term, title_tokens) for term in terms]
-        matches = sum(score > 0 for score in scores)
-        if matches:
-            ranked.append((matches, sum(scores), variable))
-    ranked.sort(
-        key=lambda item: (
-            item[0],
-            item[1],
-            str(item[2].get("title") or "").casefold(),
-        ),
-        reverse=True,
-    )
-    return [variable for _, _, variable in ranked]
+        searchable = " ".join([
+            str(variable.get("title") or ""),
+            " ".join(variable.get("aliases") or []),
+        ]).casefold()
+        tokens = set(re.findall(r"[a-z0-9]+", searchable))
+        title_tokens_by_id.append((variable, tokens))
+        document_frequency.update(term for term in terms if _token_match_score(term, tokens) > 0)
+
+    quantity_cue = "total" in re.findall(r"[a-z0-9]+", keyword.casefold())
+    query_phrase = " ".join(terms)
+    ranked: list[tuple[float, int, int, int, str, dict]] = []
+    for variable, title_tokens in title_tokens_by_id:
+        weighted_score = 0.0
+        total_weight = 0.0
+        matched_terms = 0
+        related_match = False
+        fuzzy_match = False
+        for term in terms:
+            weight = 1.0 + math.log(
+                (len(variables) + 1) / (document_frequency[term] + 1)
+            )
+            match_score = _token_match_score(term, title_tokens)
+            if match_score and match_score < 1.0:
+                fuzzy_match = True
+            if not match_score:
+                related_terms = _RELATED_VARIABLE_SYNONYMS.get(term, ())
+                if any(
+                    all(
+                        word in title_tokens or _stem_keyword(word) in title_tokens
+                        for word in re.findall(r"[a-z0-9]+", related)
+                    )
+                    for related in related_terms
+                ):
+                    match_score = 0.55
+                    related_match = True
+            weighted_score += weight * match_score
+            total_weight += weight
+            matched_terms += match_score > 0
+
+        if total_weight == 0 or matched_terms == 0:
+            continue
+
+        score = weighted_score / total_weight
+        title = str(variable.get("title") or "")
+        if quantity_cue and re.search(r"\b(jumlah|total)\b", title, re.IGNORECASE):
+            score = min(1.0, score + 0.08)
+        score_percent = round(score * 100)
+        variable_with_score = dict(variable)
+        variable_with_score["similarity_score"] = score_percent
+        variable_with_score["match_type"] = (
+            "related" if related_match else "fuzzy" if fuzzy_match else "direct"
+        )
+        normalized_title = " ".join(re.findall(r"[a-z0-9]+", title.casefold()))
+        phrase_position = normalized_title.find(query_phrase)
+        if phrase_position < 0:
+            phrase_position = len(normalized_title) + 1
+        ranked.append((
+            score,
+            matched_terms,
+            -phrase_position,
+            -len(title),
+            title.casefold(),
+            variable_with_score,
+        ))
+    ranked.sort(key=lambda item: item[:4], reverse=True)
+    return [item[5] for item in ranked if item[0] >= 0.35]
+
+
+def catalog_variable_matches(question: str) -> bool:
+    keyword = _clean_search_keyword(question or "")
+    catalog = _load_catalog_index()
+    return bool(_rank_local_variables(keyword, catalog["variables"]))
 
 
 def cari_variabel(kata_kunci: str) -> dict:
@@ -419,12 +650,20 @@ def cari_variabel(kata_kunci: str) -> dict:
 
     Gunakan 1-2 kata inti, mis. "jumlah penduduk", "penduduk miskin", "IPM". Jangan
     menyertakan nama wilayah; wilayah diisi pada ambil_data. Hasil berisi var_id, judul,
-    satuan, tahun_terbaru, dan seri_lama. Pilih variabel yang judulnya paling sesuai;
+    satuan, tahun_terbaru, skor_kemiripan (0-100), jenis_kecocokan, dan seri_lama.
+    Skor hanya untuk pemeringkatan internal dan pencatatan log; jangan tampilkan kepada pengguna.
+    Pilih variabel yang judulnya paling sesuai;
     hindari seri_lama=True kecuali tidak ada alternatif, dan sebutkan periode terakhirnya
     jika terpaksa menggunakannya. memuat_tahun_mendatang=True berarti variabel itu proyeksi.
+    jenis_kecocokan='related' berarti indikator hanya berkaitan, bukan sinonim atau ukuran
+    yang setara; jelaskan perbedaannya dan minta konfirmasi sebelum menyajikannya sebagai jawaban.
 
     Args:
         kata_kunci: kata inti indikator yang dicari.
+
+    Pencarian juga menormalkan sinonim umum seperti pria/laki-laki,
+    wanita/perempuan, dan rumah sakit/fasilitas kesehatan. Pastikan judul
+    hasil tetap sesuai karena sebagian sinonim dapat menunjuk kategori yang lebih luas.
     """
     keyword = _clean_search_keyword(kata_kunci or "")
     if not keyword:
@@ -437,31 +676,36 @@ def cari_variabel(kata_kunci: str) -> dict:
 
     try:
         index = _variable_index()
-        variables: list[dict] = []
-        for query in _search_keyword_variants(keyword):
-            variables = _rank_local_variables(query, index["variables"])
-            if variables:
-                break
-
+        variables = _rank_local_variables(keyword, index["variables"])
         candidates = variables[:15]
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            latest = list(pool.map(lambda v: _latest_year(int(v["var_id"])), candidates))
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
     except (KeyError, ValueError, TypeError):
         return {"error": "Format respons BPS tidak dikenali.", "status_hasil": "gagal_teknis"}
 
-    hasil = [
-        {
-            "var_id": int(v["var_id"]),
-            "judul": v.get("title"),
-            "satuan": v.get("unit"),
-            "tahun_terbaru": year,
+    hasil = []
+    for variable in candidates:
+        try:
+            year, count, future = _latest_year(int(variable["var_id"]))
+        except BpsError:
+            year = variable.get("latest_year")
+            count = variable.get("year_count") or 0
+            future = False
+        hasil.append({
+            "var_id": int(variable["var_id"]),
+            "judul": variable.get("title"),
+            "satuan": variable.get("unit"),
+            "tahun_terbaru": year or None,
             "jumlah_tahun": count,
             "memuat_tahun_mendatang": future,
-        }
-        for v, (year, count, future) in zip(candidates, latest)
-    ]
+            "kategori": variable.get("category"),
+            "subjek": variable.get("subject"),
+            "sub_id": variable.get("subject_id"),
+            "category_id": variable.get("category_id"),
+            "alias": variable.get("aliases") or [],
+            "skor_kemiripan": variable.get("similarity_score"),
+            "jenis_kecocokan": variable.get("match_type"),
+        })
     newest = max((int(item["tahun_terbaru"]) for item in hasil if item["tahun_terbaru"]), default=0)
     for item in hasil:
         item["seri_lama"] = bool(item["tahun_terbaru"]) and int(item["tahun_terbaru"]) < newest - 2
@@ -470,11 +714,61 @@ def cari_variabel(kata_kunci: str) -> dict:
     result = {
         "jumlah_ditemukan": len(variables),
         "hasil": hasil,
-        "status_hasil": "ditemukan" if variables else "kosong",
+        "status_hasil": (
+            "ditemukan"
+            if variables and int(variables[0].get("similarity_score") or 0) >= 80
+            else "kandidat_mirip" if variables else "kosong"
+        ),
     }
     if not variables:
         result["petunjuk"] = "Tidak ada hasil. Coba satu kata inti tanpa nama wilayah."
     return result
+
+
+def cari_subjek(kata_kunci: str = "") -> dict:
+    """Mencari subjek dan kategori yang tercantum dalam katalog BPS Sumatera Selatan."""
+    try:
+        index = _variable_index()
+    except BpsError as exc:
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
+
+    keyword = _clean_search_keyword(kata_kunci or "")
+    subjects = index.get("subjects", [])
+    if keyword:
+        terms = keyword.split()
+        subjects = [
+            subject for subject in subjects
+            if all(
+                _token_match_score(term, set(re.findall(
+                    r"[a-z0-9]+",
+                    " ".join(str(subject.get(field) or "") for field in ("subject", "category")).casefold(),
+                ))) > 0
+                for term in terms
+            )
+        ]
+
+    variable_counts: dict[str, int] = {}
+    for variable in index.get("variables", []):
+        subject_id = str(variable.get("subject_id") or "")
+        if subject_id:
+            variable_counts[subject_id] = variable_counts.get(subject_id, 0) + 1
+
+    results = [
+        {
+            "kategori": subject.get("category"),
+            "subcat_id": subject.get("category_id"),
+            "subjek": subject.get("subject"),
+            "sub_id": subject.get("sub_id"),
+            "jumlah_tabel": subject.get("jumlah_tabel"),
+            "jumlah_variabel_katalog": variable_counts.get(str(subject.get("sub_id")), 0),
+        }
+        for subject in subjects
+    ]
+    return {
+        "jumlah_ditemukan": len(results),
+        "hasil": results,
+        "status_hasil": "ditemukan" if results else "kosong",
+    }
 
 
 def warm_cache() -> None:
@@ -526,7 +820,7 @@ def _labels(items: Any) -> dict[str, str]:
 
 def _norm_region(label: str) -> str:
     words = re.sub(r"[^\w\s]", " ", label.lower(), flags=re.UNICODE).split()
-    return " ".join(word for word in words if word not in {"kab", "kabupaten", "kota"})
+    return " ".join(word for word in words if word not in {"kab", "kabupaten", "kota", "provinsi"})
 
 
 def _region_aliases(label: str) -> tuple[str, ...]:
@@ -1196,6 +1490,7 @@ TOOLS = [
     _logged(f)
     for f in (
         cari_variabel,
+        cari_subjek,
         ambil_data,
         indikator_utama,
         berita_resmi_statistik,

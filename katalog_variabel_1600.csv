@@ -1,0 +1,376 @@
+﻿kategori,sub_id,subjek,var_id,judul,satuan,tahun_terbaru,jumlah_tahun
+Sosial dan Kependudukan,108,Agama,637,Jumlah Penduduk Menurut Agama,Jiwa,2022,9
+Sosial dan Kependudukan,108,Agama,639,Jumlah Tempat Peribadatan menurut Kab/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,108,Agama,849,Jumlah Jemaah Haji yang Diberangkatkan  ke Tanah Suci  Mekah Menurut Kabupaten/Kota,Jiwa,2025,9
+Sosial dan Kependudukan,40,Gender,640,Jumlah Anggota DPRD Menurut Jenis Kelamin,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,40,Gender,642,Jumlah Penduduk menurut Jenis Kelamin,Jiwa,2024,10
+Sosial dan Kependudukan,40,Gender,793,Rasio Jenis Kelamin.,Persen,2022,8
+Sosial dan Kependudukan,40,Gender,794, Penduduk Laki-Laki Berumur 10 Tahun Ke Atas Menurut Status Perkawinan,Persen,2025,10
+Sosial dan Kependudukan,40,Gender,796,Penduduk Perempuan Berumur 10 Tahun Ke Atas Menurut Status Perkawinan,Persen,2025,10
+Sosial dan Kependudukan,40,Gender,797,Keadaan Kependudukan,Tidak Ada Satuan,2023,6
+Sosial dan Kependudukan,40,Gender,798,Angka Buta Huruf,Tidak Ada Satuan,2023,6
+Sosial dan Kependudukan,40,Gender,799,Angka Buta Huruf Kabupaten/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,40,Gender,801,Keadaan Kesehatan,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,40,Gender,889,Indeks Pembangunan Gender Menurut Kabupaten/Kota (Menggunakan UHH SP2010),Tidak Ada Satuan,2024,4
+Sosial dan Kependudukan,40,Gender,891,Angka Harapan Lama Sekolah (HLS) menurut Jenis Kelamin,Tahun,2025,10
+Sosial dan Kependudukan,40,Gender,892,Rata-rata Lama Sekolah (RLS) menurut jenis kelamin,Tahun,2025,10
+Sosial dan Kependudukan,40,Gender,893,Pengeluaran per Kapita yang Disesuaikan menurut jenis kelamin,ribu rupiah/orang/tahun,2025,10
+Sosial dan Kependudukan,40,Gender,905,Perempuan sebagai Tenaga Profesional di Provinsi Sumatera Selatan,Persen,2024,10
+Sosial dan Kependudukan,40,Gender,906,Keterlibatan perempuan di parlemen Provinsi Sumatera Selatan,Persen,2024,10
+Sosial dan Kependudukan,40,Gender,907,Indeks Pemberdayaan Gender (IDG) Provinsi Sumatera Selatan,Tidak Ada Satuan,2024,10
+Sosial dan Kependudukan,40,Gender,925,Sumbangan Pendapatan Perempuan di Provinsi Sumatera Selatan,Persen,2024,10
+Sosial dan Kependudukan,40,Gender,952,Proporsi Perempuan Pernah Kawin 15-49 tahun yang Melahirkan Anak Lahir Hidup Yang Pertama Kali Berumur Kurang dari 20 tahun menurut Kabupaten/Kota,Tidak Ada Satuan,2025,8
+Sosial dan Kependudukan,40,Gender,953,Proporsi Perempuan Pernah Kawin 15-49 tahun yang Pernah Melahirkan Anak Lahir Hidup dalam 2 Tahun Terakhir Tidak di Fasilitas Kesehatan Menurut Kabupaten/Kota,Tidak Ada Satuan,2025,8
+Sosial dan Kependudukan,40,Gender,954,Indeks Ketimpangan Gender (IKG) Menurut Kabupaten/Kota,Tidak Ada Satuan,2025,8
+Sosial dan Kependudukan,40,Gender,955,Persentase penduduk usia 25 Tahun keatas dengan pendidikan SMA ke atas menurut jenis kelamin dan kabupaten/kota,Tidak Ada Satuan,2025,8
+Sosial dan Kependudukan,40,Gender,956,Tingkat Partisipasi Angkatan Kerja Menurut Jenis Kelamin dan Kabupaten/Kota,Tidak Ada Satuan,2025,8
+Sosial dan Kependudukan,40,Gender,981,Indeks Pembangunan Gender Menurut Kabupaten/Kota (Menggunakan UHH Hasil Long Form SP2020),Tidak Ada Satuan,2025,6
+Sosial dan Kependudukan,153,Geografi,82,Ketinggian Wilayah ,mdpl,2025,10
+Sosial dan Kependudukan,153,Geografi,201,Luas Daerah Menurut Kabupaten/Kota,Km2,2025,10
+Sosial dan Kependudukan,153,Geografi,737,Jarak Ibukota Berdasarkan Tipe Jarak,km,2025,7
+Sosial dan Kependudukan,153,Geografi,738,Jumlah Pulau Menurut Kabupaten/Kota,Tidak Ada Satuan,2025,7
+Sosial dan Kependudukan,151,Iklim,204,Suhu Udara,Derajat Celcius,2025,10
+Sosial dan Kependudukan,151,Iklim,205,Kelembaban Udara,Persen,2025,10
+Sosial dan Kependudukan,151,Iklim,208,Tekanan Udara,mb,2025,10
+Sosial dan Kependudukan,151,Iklim,210,Kecepatan Angin,Knot,2025,10
+Sosial dan Kependudukan,151,Iklim,214,Penyinaran Matahari,Persen,2025,10
+Sosial dan Kependudukan,151,Iklim,220,Curah Hujan,mm,2025,10
+Sosial dan Kependudukan,151,Iklim,221,Hari Hujan,Hari,2025,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,209,[Metode Baru] Indeks Pembangunan Manusia per kabupaten/kota se Sumatera Selatan,Tidak Ada Satuan,2024,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,251,Umur Harapan hidup per kabupaten/kota se Sumatera Selatan,Tahun,2024,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,253,Angka Harapan Lama Sekolah per kabupaten/kota se Sumatera Selatan,Tahun,2025,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,254,Angka Rata-Rata Lama Sekolah per kabupaten/kota se Sumatera Selatan,Tahun,2025,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,255,Angka Pengeluaran Perkapita per kabupaten/kota se Sumatera Selatan,Rp 000,2025,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,593,[Metode Baru] Indeks Pembangunan Manusia menurut Provinsi ,Tidak Ada Satuan,2024,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,890,Umur Harapan Hidup (UHH) Menurut Kabupaten/Kota dan Jenis Kelamin (Menggunakan UHH Hasil SP2010),Tahun,2024,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,894,Indeks Pembangunan Manusia (IPM) Menurut Jenis Kelamin,Tahun,2022,10
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,959,[Metode Baru] Indeks Pembangunan Manusia (Umur Harapan Hidup Hasil Long Form SP2020) Sumatera Selatan Menurut Kabupaten/Kota,Tidak Ada Satuan,2025,6
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,960,[Metode Baru] Umur Harapan Hidup Saat Lahir (UHH) Hasil Long Form SP2020 (Tahun) Sumatera Selatan Menurut Kabupaten/Kota,Tahun,2025,6
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,961, [Metode Baru] Indeks Pembangunan Manusia (Umur Harapan Hidup Hasil Long Form SP2020) Menurut Provinsi,Tidak Ada Satuan,2025,6
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,979,Umur Harapan Hidup (UHH) Menurut Kabupaten/Kota dan Jenis Kelamin (Menggunakan UHH Hasil Long Form SP2020),Tahun,2025,6
+Sosial dan Kependudukan,26,Indeks Pembangunan Manusia,980,Indeks Pembangunan Manusia Menurut Kabupaten/Kota dan Jenis Kelamin (Menggunakan UHH Hasil Long Form SP2020),Tahun,2025,6
+Sosial dan Kependudukan,23,Kemiskinan,157,Jumlah Penduduk Miskin Maret,Ribu Jiwa,2026,10
+Sosial dan Kependudukan,23,Kemiskinan,164,Indeks Kedalaman Kemiskinan Maret,Tidak Ada Satuan,2026,10
+Sosial dan Kependudukan,23,Kemiskinan,166,Indeks Keparahan Kemiskinan  Maret,Tidak Ada Satuan,2026,10
+Sosial dan Kependudukan,23,Kemiskinan,173,Garis Kemiskinan Maret,Rp/Kapita/Bulan,2026,10
+Sosial dan Kependudukan,23,Kemiskinan,588,Jumlah Penduduk Miskin menurut Provinsi,Ribu Jiwa,2024,10
+Sosial dan Kependudukan,23,Kemiskinan,604,Persentase Penduduk Miskin menurut Kabupaten/Kota,Persen,2025,10
+Sosial dan Kependudukan,23,Kemiskinan,605,Persentase Penduduk Miskin September,Persen,2025,9
+Sosial dan Kependudukan,23,Kemiskinan,608,Persentase Penduduk Miskin Maret,Persen,2026,10
+Sosial dan Kependudukan,23,Kemiskinan,619,Rasio Gini September,Tidak Ada Satuan,2024,10
+Sosial dan Kependudukan,23,Kemiskinan,623,Rasio Gini Menurut Kabupaten/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,23,Kemiskinan,679,Garis Kemiskinan Maret Menurut Kab/Kota,Rp/Kapita/Bulan,2025,10
+Sosial dan Kependudukan,23,Kemiskinan,683,Jumlah Penduduk Miskin Maret Menurut Kab/Kota,Ribu Jiwa,2025,10
+Sosial dan Kependudukan,23,Kemiskinan,802,Penduduk Menurut Status Kemiskinan dan Kab/Kota,Jiwa,2021,4
+Sosial dan Kependudukan,23,Kemiskinan,810,Rasio Gini Maret,Persen,2025,10
+Sosial dan Kependudukan,23,Kemiskinan,811,Indeks Kedalaman Kemiskinan Maret Menurut Kab/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,23,Kemiskinan,812,Indeks Keparahan Kemiskinan Maret Menurut Kab/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,12,Kependudukan,50,Rasio Jenis Kelamin,Persen,2024,10
+Sosial dan Kependudukan,12,Kependudukan,51,Proyeksi Jumlah Penduduk,Jiwa,2035,10
+Sosial dan Kependudukan,12,Kependudukan,262,Jumlah Penduduk Menurut Kabupaten/Kota,Jiwa,2026,10
+Sosial dan Kependudukan,12,Kependudukan,266,Laju Pertumbuhan Penduduk,Persen,2024,9
+Sosial dan Kependudukan,12,Kependudukan,268,Kepadatan Penduduk.,Jiwa/km2,2024,10
+Sosial dan Kependudukan,12,Kependudukan,278,Jumlah Penduduk Menurut Kelompok Umur,Jiwa,2035,10
+Sosial dan Kependudukan,12,Kependudukan,573,Jumlah Penduduk menurut Provinsi,Ribu Jiwa,2024,10
+Sosial dan Kependudukan,12,Kependudukan,813,Jumlah Penduduk Menurut Jenis Kelamin dan Kabupaten/Kota (Hasil SP2020),Jiwa,2026,7
+Sosial dan Kependudukan,12,Kependudukan,886,Persentase penduduk menurut kelompok umur dan daerah tempat tinggal,Persen,2024,3
+Sosial dan Kependudukan,12,Kependudukan,909,"Rasio angka beban ketergantungan menurut Kabupaten/Kota, daerah tempat tinggal di provinsi Sumatera Selatan",Tidak Ada Satuan,2024,7
+Sosial dan Kependudukan,30,Kesehatan,231,Jumlah Fasilitas Kesehatan,Unit,2017,3
+Sosial dan Kependudukan,30,Kesehatan,234,Jumlah Tenaga Kesehatan,Orang,2025,6
+Sosial dan Kependudukan,30,Kesehatan,237,"Jumlah Dokter Spesialis, Dokter Umum, dan Dokter  Gigi Menurut Sarana Pelayanan Kesehatan",Orang,2025,10
+Sosial dan Kependudukan,30,Kesehatan,238,Persentase Perempuan Pernah Kawin Berumur 15-49 Tahun Yang Melahirkan Anak Lahir Hidup (ALH),Persen,2025,10
+Sosial dan Kependudukan,30,Kesehatan,366,Balita yang Mendapat Imunisasi,Persen,2019,5
+Sosial dan Kependudukan,30,Kesehatan,368,Jumlah Kasus Penyakit Menurut Jenis Penyakit,Kasus,2024,10
+Sosial dan Kependudukan,30,Kesehatan,371,"Jumlah Bayi Lahir, Berat Bayi Lahir Rendah, dan Bergizi Buruk",Jiwa,2025,10
+Sosial dan Kependudukan,30,Kesehatan,372,"Jumlah Ibu Hamil, Melakukan Kunjungan K1, Melakukan Kunjungan K4, Kurang Energi Kronis (KEK), dan Mendapat Tablet Zat Besi (Fe)",Orang,2025,10
+Sosial dan Kependudukan,30,Kesehatan,375,Jumlah Kasus Penderita Penyakit,Kasus,2025,10
+Sosial dan Kependudukan,30,Kesehatan,376,Jumlah Klinik Keluarga Berencana,Unit,2025,10
+Sosial dan Kependudukan,30,Kesehatan,379,Jumlah Pasangan Usia Subur ,Jiwa,2025,10
+Sosial dan Kependudukan,30,Kesehatan,381,Jumlah Peserta KB Aktif,Orang,2025,10
+Sosial dan Kependudukan,30,Kesehatan,779,Jumlah Fasilitas Kesehatan.,Unit,2025,8
+Sosial dan Kependudukan,30,Kesehatan,781,Jumlah Kasus Penyakit,Kasus,2020,3
+Sosial dan Kependudukan,30,Kesehatan,845,Persentase Penduduk yang Mempunyai Keluhan Kesehatan Selama Sebulan Terakhir,Persen,2025,10
+Sosial dan Kependudukan,30,Kesehatan,846,Persentase Penduduk yang Mempunyai Keluhan Kesehatan dan Berobat Jalan Selama Sebulan Terakhir,Persen,2025,10
+Sosial dan Kependudukan,30,Kesehatan,847,Jumlah Tenaga Kesehatan Menurut Kabupaten/Kota,Orang,2023,6
+Sosial dan Kependudukan,30,Kesehatan,848,Kasus Penyakit Menurut Kabupaten/Kota dan Jenis Penyakit,Tidak Ada Satuan,2025,7
+Sosial dan Kependudukan,30,Kesehatan,878,Persentase Balita yang Mendapat Imunisasi,Persen,2025,10
+Sosial dan Kependudukan,30,Kesehatan,908,"Persentase penduduk yang sakit tetapi tidak berobat jalan menurut Kabupaten/Kota, dan alasan tidak rawat jalan di Provinsi Sumatera Selatan",Persen,2025,8
+Sosial dan Kependudukan,30,Kesehatan,910,Persentase penduduk yang berobat jalan menurut Kabupaten/Kota dan tempat rawat jalan provinsi Sumatera Selatan,Persen,2025,10
+Sosial dan Kependudukan,30,Kesehatan,911,Rata-rata lama rawat inap menurut Kabupaten/Kota dan jenis kelamin Provinsi Sumatera Selatan (hari),Hari,2025,5
+Sosial dan Kependudukan,30,Kesehatan,1000,"Persentase Pasangan Usia Subur (PUS) Umur 15–49 Tahun yang Sedang Menggunakan Alat Keluarga Berencana (KB) atau Cara Tradisional untuk Menunda atau Mencegah Kehamilan Menurut Kabupaten/Kota, 2024",Persen,2025,2
+Sosial dan Kependudukan,30,Kesehatan,1002,"Jumlah Remaja Usia 15–24 Tahun yang Mendapat Penyuluhan Tentang Kesehatan Reproduksi (Kespro), HIV/AIDS, dan Keluarga Berencana (KB) Menurut Kabupaten/Kota (kali) di Provinsi Sumatera Selatan, 2024",kali,2025,2
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,126,Rata-rata Pengeluaran per Kapita Sebulan Menurut Kelompok Komoditas Makanan,Rupiah,2025,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,129,Rata-rata Pengeluaran per Kapita Sebulan Menurut Kelompok Komoditas Bukan Makananan,Rupiah,2025,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,257,Distribusi Pembagian Pengeluaran per Kapita dan Rasio Gini,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,327,Konsumsi Energi dan Protein Per Kapita Per Hari menurut Kabupaten/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,676,Persentase Penduduk menurut Golongan Pengeluaran,Persen,2024,9
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,699,Rata-Rata Pengeluaran per Kapita Menurut Kabupaten/Kota,Rupiah,2025,9
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,875,Distribusi Pembagian Pengeluaran per Kapita dan Rasio Gini Menurut Kabupaten/Kota,Tidak Ada Satuan,2023,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,900,Rata-rata Pengeluaran per Kapita Sebulan menurut Kelompok Komoditas dan Kuintil Pengeluaran,Persen,2025,5
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,901,Rata-rata Konsumsi Kalori per Kapita Sehari menurut Kelompok Komoditas Makanan dan Daerah Tempat Tinggal (Kkal),Kkal,2025,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,902,Rata-rata Konsumsi Protein per Kapita Sehari menurut Kelompok Komoditas Makanan dan Daerah Tempat Tinggal,Kkal,2025,10
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,903,Rata-rata Konsumsi Kalori per Kapita Sehari menurut Kelompok Komoditas Makanan dan Kuintil Pengeluaran,Kkal,2025,4
+Sosial dan Kependudukan,5,Konsumsi dan Pengeluaran,904,Rata-rata Konsumsi Protein per Kapita Sehari menurut Kelompok Komoditas Makanan dan Kuintil Pengeluaran,Kkal,2025,4
+Sosial dan Kependudukan,101,Pemerintahan,224,Jumlah Anggota DPRD Menurut Parpol,Orang,2025,10
+Sosial dan Kependudukan,101,Pemerintahan,227,Jumlah PNS Menurut Pendidikan Tertinggi,Orang,2025,10
+Sosial dan Kependudukan,101,Pemerintahan,229,Jumlah PNS Menurut Golongan Kepangkatan,Orang,2025,10
+Sosial dan Kependudukan,101,Pemerintahan,641,Jumlah Anggota DPRD Menurut Jenis Kelamin Per Kabupaten/Kota,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,101,Pemerintahan,739,Jumlah Kecamatan dan Desa/Kelurahan,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,101,Pemerintahan,963,Jumlah Pegawai Negeri Sipil Menurut Kabupaten/Kota,Jiwa,2023,3
+Sosial dan Kependudukan,101,Pemerintahan,964,Jumlah Pegawai Negeri Sipil Menurut Dinas/Instansi Pemerintah dan Jenis Kelamin,Jiwa,2025,5
+Sosial dan Kependudukan,28,Pendidikan,306,Angka Melek Huruf ,Persen,2025,10
+Sosial dan Kependudukan,28,Pendidikan,308,Rata-Rata Lama Sekolah,Tidak Ada Satuan,2024,10
+Sosial dan Kependudukan,28,Pendidikan,311,Persentase Penduduk 15+ KeAtas BerdasarkanTingkat Pendidikan,Persen,2025,10
+Sosial dan Kependudukan,28,Pendidikan,312,Angka Partisipasi Sekolah,Persen,2025,10
+Sosial dan Kependudukan,28,Pendidikan,315,Angka Partisipasi Murni,Persen,2025,10
+Sosial dan Kependudukan,28,Pendidikan,321,Angka Partisipasi Kasar,Persen,2025,10
+Sosial dan Kependudukan,28,Pendidikan,348,Persentase Penduduk Laki-Laki Menurut Kelompok Umur Sekolah,Persen,2024,10
+Sosial dan Kependudukan,28,Pendidikan,352,Persentase Penduduk Perempuan Menurut Kelompok Umur Sekolah,Persen,2023,9
+Sosial dan Kependudukan,28,Pendidikan,356,Persentase Penduduk Menurut Kelompok Umur Sekolah,Persen,2024,10
+Sosial dan Kependudukan,28,Pendidikan,357,Jumlah Sekolah,Unit,2025,10
+Sosial dan Kependudukan,28,Pendidikan,359,Jumlah Murid,Jiwa,2024,10
+Sosial dan Kependudukan,28,Pendidikan,362,Jumlah Guru,Jiwa,2025,10
+Sosial dan Kependudukan,28,Pendidikan,364,Rasio Murid Terhadap Guru,Tidak Ada Satuan,2021,7
+Sosial dan Kependudukan,28,Pendidikan,972,"Jumlah Sekolah Taman Kanak-Kanak (TK) di Bawah Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Menurut Kabupaten/Kota",Tidak Ada Satuan,2025,3
+Sosial dan Kependudukan,28,Pendidikan,974,"Jumlah Guru Taman Kanak-Kanak (TK) di Bawah Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Menurut Kabupaten/Kota",Jiwa,2025,3
+Sosial dan Kependudukan,28,Pendidikan,975,"Jumlah Murid Taman Kanak-Kanak (TK) di Bawah Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi Menurut Kabupaten/Kota",Jiwa,2025,3
+Sosial dan Kependudukan,28,Pendidikan,999,"Persentase Penduduk Berumur 15 Tahun Ke Atas yang Melek Huruf Menurut Golongan Umur dan Daerah Tempat Tinggal di Provinsi Sumatera Selatan, 2024",Persen,2025,2
+Sosial dan Kependudukan,29,Perumahan,269,Persentase Rumah Tangga menurut Indikator Kualitas Perumahan,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,280,Persentase Rumah Tangga menurut Fasilitas Perumahan,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,282,Persentase Rumah Tangga menurut Kabupaten/Kota dan Kualitas Perumahan,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,285,Persentase Rumah Tangga menurut Kabupaten/Kota dan Fasilitas Perumahan,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,913,Persentase rumah tangga menggunakan sumber air minum bersih menurut Kabupaten/Kota Sumatera Selatan,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,914,Persentase rumah tangga yang memiliki akses terhadap air minum layak menurut Kabupaten/Kota Sumatera Selatan,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,917,Persentase rumah tangga menurut Kabupaten/Kota dan sumber penerangan Provinsi Sumatera Selatan,Persen,2025,8
+Sosial dan Kependudukan,29,Perumahan,920,Persentase rumah tangga menurut Kabupaten/Kota dan Bahan Bakar Utama untuk Memasak di Provinsi Sumatera Selatan,Persen,2023,9
+Sosial dan Kependudukan,29,Perumahan,941,Persentase Rumah Tangga  menurut  Kabupaten/Kota dan Status Kepemilikan Bangunan Tempat Tinggal yang Ditempati,Persen,2024,10
+Sosial dan Kependudukan,29,Perumahan,943,Persentase Rumah Tangga menurut Kabupaten/Kota dan Bahan Bangunan Utama Atap Rumah Terluas,Persen,2023,10
+Sosial dan Kependudukan,29,Perumahan,944,Persentase Rumah Tangga menurut Kabupaten/Kota dan Bahan Bangunan Utama Dinding Rumah Terluas,Persen,2023,10
+Sosial dan Kependudukan,29,Perumahan,946,Persentase Rumah Tangga menurut Kabupaten/Kota dan Bahan Bangunan Utama Lantai Rumah Terluas,Persen,2023,10
+Sosial dan Kependudukan,29,Perumahan,948,Persentase Rumah Tangga menurut Kabupaten/Kota dan  Jenis Kloset yang Digunakan Rumah Tangga,Persen,2024,10
+Sosial dan Kependudukan,29,Perumahan,950,Persentase Rumah Tangga menurut Kabupaten/Kota dan Tempat Pembuangan Akhir Tinja,Persen,2025,10
+Sosial dan Kependudukan,29,Perumahan,1003,Persentase rumah tangga dengan akses air minum aman,Persen,2024,3
+Sosial dan Kependudukan,34,Politik dan Keamanan,246,Jumlah Tindak Pidana,Kasus,2025,10
+Sosial dan Kependudukan,34,Politik dan Keamanan,248,Penyelesaian Tindak Pidana ,Persen,2024,10
+Sosial dan Kependudukan,34,Politik dan Keamanan,644,Indeks Demokrasi Indonesia (IDI) Sumatera Selatan dan Aspeknya,Tidak Ada Satuan,2020,10
+Sosial dan Kependudukan,34,Politik dan Keamanan,854,Indeks Demokrasi Indonesia (IDI) Sumatera Selatan Menurut Indikator,Tidak Ada Satuan,2020,10
+Sosial dan Kependudukan,34,Politik dan Keamanan,855,Indeks Demokrasi Indonesia (IDI) Sumatera Selatan Menurut Variabel,Tidak Ada Satuan,2020,10
+Sosial dan Kependudukan,34,Politik dan Keamanan,880,(Metode Baru) Aspek Indeks Demokrasi Indonesia (IDI) Sumatera Selatan,Tidak Ada Satuan,2025,5
+Sosial dan Kependudukan,34,Politik dan Keamanan,881,(Metode Baru) Indikator Indeks Demokrasi Indonesia (IDI) Sumatera Selatan,Tidak Ada Satuan,2025,5
+Sosial dan Kependudukan,34,Politik dan Keamanan,926,Persentase Korban Kekerasan Dalam 12 Bulan Terakhir Yang Melaporkan Kepada Polisi Menurut Jenis Kelamin,Persen,2023,10
+Sosial dan Kependudukan,34,Politik dan Keamanan,993,Jumlah Kasus Kekerasan Menurut Kabupaten Kota dan Jenis Kelamin di Provinsi Sumatera Selatan,Tidak Ada Satuan,2025,4
+Sosial dan Kependudukan,34,Politik dan Keamanan,996,Jumlah Korban Kekerasan Anak Menurut Kabupaten/Kota dan Jenis Kelamin di Provinsi Sumatera Selatan,Jiwa,2025,4
+Sosial dan Kependudukan,34,Politik dan Keamanan,998,Jumlah Korban Kekerasan Dewasa Menurut Kabupaten/Kota dan Jenis Kelamin di Provinsi Sumatera Selatan,Jiwa,2025,4
+Sosial dan Kependudukan,27,Sosial Budaya,241,Jumlah Penganut Agama,Orang,2022,1
+Sosial dan Kependudukan,27,Sosial Budaya,384,Jumlah Keluarga Sejahtera,Tidak Ada Satuan,2022,9
+Sosial dan Kependudukan,27,Sosial Budaya,927,Persentase Rumah Tangga yang Menerima Kredit dalam Setahun Terakhir menurut Kabupaten/Kota,Persen,2024,10
+Sosial dan Kependudukan,27,Sosial Budaya,928,Persentase Rumah Tangga Penerima Program Bantuan Pangan (Bantuan Pangan Non Tunai (BPNT)/Program Sembako) menurut Kabupaten/Kota,Persen,2024,5
+Sosial dan Kependudukan,27,Sosial Budaya,929,Persentase Rumah Tangga Penerima Program Keluarga Harapan (PKH) menurut Kabupaten/Kota,Persen,2024,5
+Sosial dan Kependudukan,27,Sosial Budaya,930,Persentase Rumah Tangga yang Menerima KPS/KKS menurut Kabupaten/Kota,Persen,2024,10
+Sosial dan Kependudukan,27,Sosial Budaya,931,Persentase Rumah Tangga yang Memiliki atau Menerima Jaminan Sosial dalam Setahun Terakhir menurut Kabupaten/Kota dan Jenis Jaminan Sosial,Persen,2024,10
+Sosial dan Kependudukan,27,Sosial Budaya,933,Persentase Rumah Tangga dengan Kepemilikan Aset menurut Kabupaten/Kota dan Jenis Aset yang Dimiliki,Persen,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,260,Keadaan Tenaga Kerja,Tidak Ada Satuan,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,317,Jumlah Penduduk 15 Tahun Keatas Termasuk Angkatan Kerja,Jiwa,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,320,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Jenis Ketenagakerjaan,Jiwa,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,322,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Kegiatan Utama,Jiwa,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,333,Tingkat Partisipasi Angkatan Kerja,Persen,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,334,Tingkat Pengangguran,Persen,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,336,Jumlah Penduduk 15 Tahun Keatas Angkatan Kerja Menurut Pendidikan Tertinggi yang Ditamatkan,Jiwa,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,337,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Pedidikan Tertinggi dan Jenis Tenaga Kerja,Jiwa,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,343,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Jumlah Jam Kerja Seluruhnya,Jiwa,2024,10
+Sosial dan Kependudukan,6,Tenaga Kerja,346,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Status Pekerjaan Utama,Jiwa,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,347,Jumlah Pencari Kerja Terdaftar menurut pendidikan tertinggi dan jenis kelamin,Orang,2025,10
+Sosial dan Kependudukan,6,Tenaga Kerja,677,Jumlah Penduduk Berumur 15 Tahun Keatas yang Bekerja Selama Seminggu yang Lalu Menurut Kelompok Umur dan Jenis Kelamin,Jiwa,2024,9
+Sosial dan Kependudukan,6,Tenaga Kerja,755,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Jumlah Jam Kerja Pada Pekerjaan Utama.,Jiwa,2023,6
+Sosial dan Kependudukan,6,Tenaga Kerja,757,Jumlah Penduduk Berumur 15 Tahun Keatas Menurut Lapangan Pekerjaan Utama.,Jiwa,2025,8
+Sosial dan Kependudukan,6,Tenaga Kerja,760,Jumlah Tenaga Kerja Menurut Kategori Industri.,Jiwa,2021,4
+Sosial dan Kependudukan,6,Tenaga Kerja,970,Lowongan Kerja Terdaftar Menurut Kabupaten/Kota dan Jenis Kelamin,Jiwa,2025,8
+Ekonomi dan Perdagangan,8,Ekspor-Impor,179,Volume Ekspor menurut Negara Tujuan,kg,2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,180,Nilai Ekspor menurut Negara Tujuan,US ($),2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,185,Volume Ekspor menurut Pelabuhan Muat,kg,2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,186,Nilai Ekspor menurut Pelabuhan Muat,US ($),2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,190,Nilai Ekspor menurut Jenis Komoditi,US ($),2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,196,Nilai Impor menurut negara asal,US ($),2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,303,Neraca Perdagangan Bulanan,Juta US$,2026,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,622,Neraca Perdagangan Luar Negeri,000 US $,2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,694,Nilai Impor menurut Pelabuhan,US ($),2024,8
+Ekonomi dan Perdagangan,8,Ekspor-Impor,696,Volume Impor menurut Negara Asal,kg,2024,10
+Ekonomi dan Perdagangan,8,Ekspor-Impor,697,Volume Impor menurut Pelabuhan Bongkar,kg,2024,8
+Ekonomi dan Perdagangan,8,Ekspor-Impor,765,Volume Ekspor menurut provinsi asal barang,kg,2023,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,767,Nilai Ekspor menurut provinsi asal barang,US ($),2024,8
+Ekonomi dan Perdagangan,8,Ekspor-Impor,871,Nilai Impor Menurut Sektor,US ($),2024,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,873,Nilai Ekspor Menurut Sektor,US ($),2024,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,895,Volume Ekspor Bulanan Provinsi Sumatera Selatan,kg,2025,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,896,Nilai Ekspor Bulanan Provinsi Sumatera Selatan,US ($),2025,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,897,Volume Impor Bulanan Provinsi Sumatera Selatan,kg,2025,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,898,Nilai Impor Bulanan Provinsi Sumatera Selatan,US ($),2025,7
+Ekonomi dan Perdagangan,8,Ekspor-Impor,982,Volume Ekspor dirinci Menurut Jenis Komoditi di Provinsi Asal Sumatera Selatan,kg,2024,10
+Ekonomi dan Perdagangan,9,Industri,686,Jumlah Perusahaan IBS,Unit,2022,8
+Ekonomi dan Perdagangan,9,Industri,687,Jumlah Tenaga Kerja IBS menurut kabupaten kota,Jiwa,2021,7
+Ekonomi dan Perdagangan,9,Industri,689,Jumlah Tenaga Kerja Menurut Skala Usaha,Tidak Ada Satuan,2016,1
+Ekonomi dan Perdagangan,9,Industri,709,IMB Aneka Unit,Tidak Ada Satuan,2025,8
+Ekonomi dan Perdagangan,9,Industri,711,IMB Aneka Tenaga Kerja,Tidak Ada Satuan,2025,8
+Ekonomi dan Perdagangan,9,Industri,712,IMB Aneka Investasi,Juta Rupiah,2025,8
+Ekonomi dan Perdagangan,9,Industri,714,IMB Dasar Unit,Tidak Ada Satuan,2025,8
+Ekonomi dan Perdagangan,9,Industri,718,IMB Dasar Tenaga Kerja,Tidak Ada Satuan,2025,8
+Ekonomi dan Perdagangan,9,Industri,721,IMB Dasar Investasi,Juta Rupiah,2024,7
+Ekonomi dan Perdagangan,9,Industri,724,Jumlah Perusahaan IMK,Tidak Ada Satuan,2022,7
+Ekonomi dan Perdagangan,9,Industri,725,Jumlah Tenaga Kerja IMK,Jiwa,2022,7
+Ekonomi dan Perdagangan,9,Industri,726,IMK,Tidak Ada Satuan,2020,5
+Ekonomi dan Perdagangan,9,Industri,753,Jumlah Usaha IBS,Tidak Ada Satuan,2022,7
+Ekonomi dan Perdagangan,9,Industri,754,Jumlah Tenaga Kerja IBS menurut Klasifikasi Industri,Jiwa,2019,4
+Ekonomi dan Perdagangan,3,Inflasi,1,Inflasi,Tidak Ada Satuan,2026,5
+Ekonomi dan Perdagangan,3,Inflasi,107,IHK Kota Palembang Menurut Kelompok Pengeluaran,Tidak Ada Satuan,2019,6
+Ekonomi dan Perdagangan,3,Inflasi,109,Inflasi Kota Palembang Menurut Kelompok Pengeluaran,Tidak Ada Satuan,2019,6
+Ekonomi dan Perdagangan,3,Inflasi,244,Inflasi Sumatera Selatan (month-to-month),Tidak Ada Satuan,2023,9
+Ekonomi dan Perdagangan,3,Inflasi,249,IHK Kota Lubuk Linggau menurut Kelompok Pengeluaran,Tidak Ada Satuan,2019,3
+Ekonomi dan Perdagangan,3,Inflasi,250,Inflasi Kota Lubuk Linggau menurut Kelompok Pengeluaran,Tidak Ada Satuan,2019,3
+Ekonomi dan Perdagangan,3,Inflasi,582,IHK 90 Kota di Indonesia,Tidak Ada Satuan,2023,10
+Ekonomi dan Perdagangan,3,Inflasi,833,IHK Menurut Kelompok Pengeluaran di Kota Palembang (2018=100),Tidak Ada Satuan,2023,4
+Ekonomi dan Perdagangan,3,Inflasi,834,IHK Menurut Kelompok Pengeluaran di Kota Lubuklinggau (2018=100),Tidak Ada Satuan,2023,4
+Ekonomi dan Perdagangan,3,Inflasi,836,Laju Inflasi Menurut Kelompok Pengeluaran di Kota Lubuklinggau (2018=100),Tidak Ada Satuan,2023,4
+Ekonomi dan Perdagangan,3,Inflasi,837,Laju Inflasi Menurut Kelompok Pengeluaran di Kota Palembang (2018=100),Tidak Ada Satuan,2023,4
+Ekonomi dan Perdagangan,3,Inflasi,838,Laju Inflasi 90 Kota di Indonesia,Tidak Ada Satuan,2023,8
+Ekonomi dan Perdagangan,3,Inflasi,962,Inflasi Sumatera Selatan (year-on-year),Tidak Ada Satuan,2023,1
+Ekonomi dan Perdagangan,3,Inflasi,976,Inflasi di Provinsi Sumatera Selatan (Year-to-Year) (2022=100),Tidak Ada Satuan,2026,3
+Ekonomi dan Perdagangan,3,Inflasi,978,Inflasi di Provinsi Sumatera Selatan (month-to-month) (2022=100),Tidak Ada Satuan,2026,3
+Ekonomi dan Perdagangan,13,Keuangan,555,Realisasi Pendapatan Pemerintah,Ribu Rupiah,2025,10
+Ekonomi dan Perdagangan,13,Keuangan,557,Realisasi Belanja Pemerintah,Ribu Rupiah,2025,10
+Ekonomi dan Perdagangan,13,Keuangan,559,Pendapatan Pemerintah Menurut Kab/Kota,Ribu Rupiah,2021,8
+Ekonomi dan Perdagangan,13,Keuangan,562,Belanja Pemerintah Menurut Kab/Kota,Ribu Rupiah,2023,10
+Ekonomi dan Perdagangan,13,Keuangan,841,Posisi Simpanan Masyarakat Rupiah dan Valuta Asing Bank Umum dan BPR,Juta Rupiah,2034,10
+Ekonomi dan Perdagangan,13,Keuangan,842,Posisi Giro Rupiah dan Valuta Asing Bank Umum dan BPR,Juta Rupiah,2025,10
+Ekonomi dan Perdagangan,13,Keuangan,843,Posisi Simpanan Berjangka Rupiah dan Valuta Asing Bank Umum dan BPR,Juta Rupiah,2025,10
+Ekonomi dan Perdagangan,13,Keuangan,844,Posisi Tabungan Rupiah dan Valuta Asing Bank Umum dan BPR,Juta Rupiah,2025,10
+Ekonomi dan Perdagangan,161,Komunikasi,922,Persentase penduduk berumur 5 tahun ke atas yang memiliki/menguasai telepon seluler menurut Kabupaten/Kota dan jenis kelamin Provinsi Sumatera Selatan,Persen,2024,10
+Ekonomi dan Perdagangan,161,Komunikasi,923,"Persentase penduduk berumur 5 tahun ke atas yang  Menggunakan Komputer (PC/Desktop, Laptop/Notebook, Tablet) menurut Kabupaten/Kota dan jenis kelamin di Provinsi Sumatera Selatan",Persen,2024,10
+Ekonomi dan Perdagangan,161,Komunikasi,924,Persentase Penduduk Usia 5 tahun ke atas yang Pernah Mengakses Internet dalam 3 Bulan Terakhir Menurut Kabupaten/Kota dan Jenis Kelamin provinsi Sumatera Selatan,Persen,2024,10
+Ekonomi dan Perdagangan,161,Komunikasi,935,Persentase Rumah Tangga yang Memiliki Telepon Rumah/ PSTN menurut Kabupaten/Kota,Persen,2025,10
+Ekonomi dan Perdagangan,161,Komunikasi,936,Persentase Rumah Tangga yang Memiliki Komputer/Laptop/Tablet menurut Kabupaten/Kota,Persen,2025,10
+Ekonomi dan Perdagangan,161,Komunikasi,938,Persentase Rumah Tangga yang Memiliki Telepon Rumah/ PSTN menurut Daerah Tempat Tinggal,Persen,2024,10
+Ekonomi dan Perdagangan,161,Komunikasi,939,Persentase Rumah Tangga yang MemilikiKomputer/Laptop/Tablet menurut Daerah Tempat Tinggal,Persen,2024,10
+Ekonomi dan Perdagangan,4,Konstruksi,803,Indeks Kemalahan Konstruksi,Tidak Ada Satuan,2024,10
+Ekonomi dan Perdagangan,22,Nilai Tukar Petani,121,Perkembangan Nilai Tukar Petani menurut Sektor,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,22,Nilai Tukar Petani,298,Indeks Harga yang Dibayar oleh Petani,Tidak Ada Satuan,2024,10
+Ekonomi dan Perdagangan,22,Nilai Tukar Petani,302,Indeks Harga yang Diterima oleh Petani,Tidak Ada Satuan,2024,10
+Ekonomi dan Perdagangan,22,Nilai Tukar Petani,430,IHK Pedesaan Menurut Kelompok Pengeluaran,Tidak Ada Satuan,2019,6
+Ekonomi dan Perdagangan,22,Nilai Tukar Petani,645,Perkembangan Nilai Tukar Petani,Persen,2026,9
+Ekonomi dan Perdagangan,22,Nilai Tukar Petani,839,IHK Pedesaan Menurut Kelompok Pengeluaran (2018=100),Tidak Ada Satuan,2024,5
+Ekonomi dan Perdagangan,16,Pariwisata,291,Rata-Rata Lama Menginap Hotel Berbintang dan Non Bintang,Hari,2026,10
+Ekonomi dan Perdagangan,16,Pariwisata,295,Jumlah Rumah Makan/Restoran Menurut Kabupaten/Kota,Tidak Ada Satuan,2025,10
+Ekonomi dan Perdagangan,16,Pariwisata,565,Tingkat Penghunian Kamar Hotel (TPK),Persen,2026,10
+Ekonomi dan Perdagangan,16,Pariwisata,702,"Jumlah Akomodasi, Kamar, dan Tempat Tidur yang Tersedia pada Hotel Bintang",Tidak Ada Satuan,2025,9
+Ekonomi dan Perdagangan,16,Pariwisata,704,"Jumlah Akomodasi, Kamar, dan Tempat Tidur yang Tersedia pada Hotel Nonbintang dan Akomodasi Lainnya",Tidak Ada Satuan,2025,8
+Ekonomi dan Perdagangan,16,Pariwisata,707,Rata-rata Lama Menginap Tamu Asing dan Tamu Domestik di Hotel Berbintang,Hari,2026,10
+Ekonomi dan Perdagangan,16,Pariwisata,876,Jumlah Kunjungan Wisatawan Mancanegara Negara Utama yang Datang Melalui Bandara Sultan Mahmud Baddarudin II Palembang,Kunjungan,2026,10
+Ekonomi dan Perdagangan,16,Pariwisata,984,Jumlah Perjalanan Wisatawan Nusantara Menurut Kabupaten/Kota Asal di Sumatera Selatan,Perjalanan,2026,8
+Ekonomi dan Perdagangan,16,Pariwisata,986,Jumlah Perjalanan Wisatawan Nusantara Menurut Kabupaten/Kota Tujuan di Sumatera Selatan,Perjalanan,2026,8
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),856,Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan menurut Provinsi Atas Dasar Harga Konstan 2010,Persen,2023,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),857,Produk Domestik Regional Bruto Atas Dasar Harga Berlaku Menurut Kabupaten/Kota,Miliar Rupiah,2024,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),859,Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010,Miliar Rupiah,2025,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),860,Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Berlaku,Miliar Rupiah,2025,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),861,Produk Domestik Regional Bruto (PDRB) Tahunan per Kapita Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010,Ribu Rupiah,2024,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),862,Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010,Persen,2025,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),863,Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan per Kapita Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010,Persen,2024,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),864,Distribusi Produk Domestik Regional Bruto (PDRB) Tahunan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Berlaku ,Persen,2025,10
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),987,Distribusi Produk Domestik Regional Bruto (PDRB) Triwulanan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Berlaku,Persen,2025,4
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),988,Produk Domestik Regional Bruto (PDRB) Triwulanan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Berlaku 2010,Miliar Rupiah,2025,4
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),989,Produk Domestik Regional Bruto (PDRB) Triwulanan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 ,Miliar Rupiah,2025,4
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),990,Laju Pertumbuhan (q-to-q) Produk Domestik Regional Bruto (PDRB) Triwulanan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010,Persen,2025,3
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),991,Laju Pertumbuhan (y-on-y) Produk Domestik Regional Bruto (PDRB) Triwulanan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 ,Persen,2025,3
+Ekonomi dan Perdagangan,104,Produk Domestik Regional Bruto (Kab/Kota dan Antar Provinsi),992,Laju Pertumbuhan (c-to-c) Produk Domestik Regional Bruto (PDRB) Triwulanan Kabupaten/Kota Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010,Persen,2025,3
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),741,Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Lapangan Usaha,Miliar Rupiah,2025,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),742,PDRB Atas Dasar Harga Konstan 2010 per Sub Kategori,Miliar Rupiah,2023,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),743,Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha,Persen,2025,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),744,Distribusi Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Lapangan Usaha,Persen,2025,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),746,Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Lapangan Usaha,Miliar Rupiah,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),747,Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha,Miliar Rupiah,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),748,Distribusi Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Lapangan Usaha,Persen,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),749,Laju Pertumbuhan (q-to-q) Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha,Persen,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),750,Laju Indeks Implisit Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha ,Persen,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),751,Laju Pertumbuhan (y-on-y) Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha ,Persen,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),752,Laju Pertumbuhan Kumulatif (c-to-c) Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha,Persen,2026,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),768,Laju Indeks Implisit Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Menurut Lapangan Usaha,Persen,2025,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),814,Indeks Implisit Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Menurut Lapangan Usaha,Tidak Ada Satuan,2025,10
+Ekonomi dan Perdagangan,100,Produk Domestik Regional Bruto (Lapangan Usaha),957,Indeks Implisit Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Lapangan Usaha,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),618,Laju Indeks Implisit Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Menurut Pengeluaran ,Persen,2025,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),634,Indeks Implisit Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Menurut Pengeluaran,Tidak Ada Satuan,2025,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),818,Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Pengeluaran,Miliar Rupiah,2025,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),819,Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Pengeluaran ,Miliar Rupiah,2024,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),820,Distribusi Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Pengeluaran,Persen,2025,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),821,Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Pengeluaran,Persen,2025,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),865,Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Pengeluaran ,Miliar Rupiah,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),866,Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Pengeluaran ,Miliar Rupiah,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),867,Distribusi Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Berlaku Menurut Pengeluaran ,Persen,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),868,Laju Pertumbuhan (y-on-y) Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Pengeluaran ,Persen,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),869,Laju Indeks Implisit Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Menurut Pengeluaran ,Persen,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),870,Indeks Implisit Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Menurut Pengeluaran,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),899,Laju Pertumbuhan Kumulatif (c-to-c) Produk Domestik Regional Bruto (PDRB) Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Pengeluaran,Persen,2026,10
+Ekonomi dan Perdagangan,52,Produk Domestik Regional Bruto (Pengeluaran),958,Laju  Pertumbuhan (q-to-q) Produk Domestik Regional Bruto (PDRB)  Triwulanan Provinsi Sumatera Selatan Atas Dasar Harga Konstan 2010 Menurut Pengeluaran,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,33,Sensus Ekonomi,594,Jumlah usaha SE2006,ribu,2016,2
+Ekonomi dan Perdagangan,33,Sensus Ekonomi,596,Pertumbuhan,Persen,2016,1
+Ekonomi dan Perdagangan,33,Sensus Ekonomi,603,Jumlah usaha SE2016,ribu,2016,1
+Ekonomi dan Perdagangan,17,Transportasi,539,Jumlah Kendaraan Bermotor Menurut Jenis Kendaraan,Tidak Ada Satuan,2025,10
+Ekonomi dan Perdagangan,17,Transportasi,547,Panjang Jalan Menurut Kondisi Jalan,km,2025,10
+Ekonomi dan Perdagangan,17,Transportasi,553,Jumlah Kantor Pos Pembantu,Tidak Ada Satuan,2025,10
+Ekonomi dan Perdagangan,17,Transportasi,654,Panjang Jalan Menurut Jenis Permukaan Jalan.,km,2025,9
+Ekonomi dan Perdagangan,17,Transportasi,672,Penumpang Angkutan Laut Yang Datang dan Berangkat,Orang,2026,10
+Ekonomi dan Perdagangan,17,Transportasi,761,Panjang Jalan Tingkat Kewenangan Pemerintahan,km,2025,9
+Ekonomi dan Perdagangan,17,Transportasi,823,Penerbangan Domestik dan Internasional yang Datang dan Berangkat ,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,17,Transportasi,824,Penumpang Angkutan Udara yang Datang dan Berangkat,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,17,Transportasi,826,Barang Angkutan Udara Domestik dan International,Ton,2026,10
+Ekonomi dan Perdagangan,17,Transportasi,828,Jumlah Kunjungan Kapal Dalam Negeri dan Luar Negeri,Tidak Ada Satuan,2026,10
+Ekonomi dan Perdagangan,17,Transportasi,829,Jumlah Barang Bongkar dan Muat Pada Kunjungan Kapal Laut,Ton,2026,10
+Ekonomi dan Perdagangan,17,Transportasi,830,Perkembangan Jumlah Penumpang Kereta Api  Divisi Regional III Palembang,Orang,2026,8
+Pertanian dan Pertambangan,159,Energi,174,Jumlah Pelanggan Listrik,Tidak Ada Satuan,2024,10
+Pertanian dan Pertambangan,159,Energi,175,Jumlah Pelanggan Air,Tidak Ada Satuan,2024,10
+Pertanian dan Pertambangan,159,Energi,508,Daya Terpasang,kW,2025,10
+Pertanian dan Pertambangan,159,Energi,512,Distribusi Listrik,KWh,2025,10
+Pertanian dan Pertambangan,159,Energi,516,Jumlah Air Disalurkan,M3,2024,10
+Pertanian dan Pertambangan,159,Energi,521,Nilai Air Disalurkan,Rupiah,2024,10
+Pertanian dan Pertambangan,55,Hortikultura,404,Luas Panen Sayuran,Hektar,2025,10
+Pertanian dan Pertambangan,55,Hortikultura,406,Produksi Sayuran,Kuintal,2024,10
+Pertanian dan Pertambangan,55,Hortikultura,412,Produksi Buah-Buahan,Kuintal,2022,8
+Pertanian dan Pertambangan,55,Hortikultura,787,Produksi Tanaman Biofarmaka,kg,2024,7
+Pertanian dan Pertambangan,55,Hortikultura,788,Luas Panen Tanaman Biofarmaka,M2,2024,7
+Pertanian dan Pertambangan,55,Hortikultura,790,Luas Panen Tanaman Hias,M2,2024,7
+Pertanian dan Pertambangan,55,Hortikultura,791,Produksi Tanaman Hias ,Tangkai,2024,7
+Pertanian dan Pertambangan,60,Kehutanan,494,Luas Kawasan Hutan,Hektar,2025,10
+Pertanian dan Pertambangan,60,Kehutanan,498,Luas Kawasan Hutan Produksi,Hektar,2025,10
+Pertanian dan Pertambangan,60,Kehutanan,506,Produksi Kayu Hutan,M3,2024,10
+Pertanian dan Pertambangan,60,Kehutanan,792,Luas Kegiatan Reboisasi,Hektar,2025,10
+Pertanian dan Pertambangan,56,Perikanan,433,Jumlah Rumah Tangga Perikanan Tangkap,Tidak Ada Satuan,2025,10
+Pertanian dan Pertambangan,56,Perikanan,437,Produksi Perikanan Tangkap,Ton,2024,10
+Pertanian dan Pertambangan,56,Perikanan,442,Jumlah Rumah Tangga Perikanan Budidaya,Tidak Ada Satuan,2025,10
+Pertanian dan Pertambangan,56,Perikanan,446,Produksi Perikanan Budidaya ,Ton,2018,3
+Pertanian dan Pertambangan,56,Perikanan,450,Jumlah Perahu/Kapal,Tidak Ada Satuan,2025,10
+Pertanian dan Pertambangan,56,Perikanan,684,Total Rumah Tangga Perikanan Budidaya,Tidak Ada Satuan,2025,10
+Pertanian dan Pertambangan,56,Perikanan,685,Total Produksi Perikanan Budidaya ,Ton,2024,10
+Pertanian dan Pertambangan,56,Perikanan,850,Produksi Perikanan Budidaya Menurut Kabupaten/Kota dan Jenis Budidaya,Ton,2024,8
+Pertanian dan Pertambangan,54,Perkebunan,414,Luas Tanaman Perkebunan,Hektar,2025,10
+Pertanian dan Pertambangan,54,Perkebunan,416,Produksi Tanaman Perkebunan,Ton,2025,10
+Pertanian dan Pertambangan,24,Peternakan,418,Populasi Ternak,Ekor,2025,10
+Pertanian dan Pertambangan,24,Peternakan,421,Populasi Unggas,Ekor,2025,10
+Pertanian dan Pertambangan,24,Peternakan,427,Produksi Daging Ternak,kg,2025,10
+Pertanian dan Pertambangan,24,Peternakan,429,Produksi Daging Unggas,kg,2025,10
+Pertanian dan Pertambangan,24,Peternakan,853,Produksi Telur Unggas Menurut Kabupaten/Kota dan Jenis Unggas,kg,2024,8
+Pertanian dan Pertambangan,53,Tanaman Pangan,388,Luas Lahan Sawah,Hektar,2016,2
+Pertanian dan Pertambangan,53,Tanaman Pangan,391,Luas Lahan ,Hektar,2020,5
+Pertanian dan Pertambangan,53,Tanaman Pangan,392,Luas Panen Padi,Hektar,2017,3
+Pertanian dan Pertambangan,53,Tanaman Pangan,394,Produksi Padi,Ton,2015,1
+Pertanian dan Pertambangan,53,Tanaman Pangan,396,Produktivitas Padi,Kuintal/Hektar,2015,1
+Pertanian dan Pertambangan,53,Tanaman Pangan,398,Luas Panen Palawija,Hektar,2023,9
+Pertanian dan Pertambangan,53,Tanaman Pangan,400,Produksi Palawija,Ton,2023,9
+Pertanian dan Pertambangan,53,Tanaman Pangan,402,Produktivitas Palawija,Kuintal/Hektar,2023,9
+Pertanian dan Pertambangan,53,Tanaman Pangan,782,Produktivitas Padi.,Kuintal/Hektar,2024,7
+Pertanian dan Pertambangan,53,Tanaman Pangan,783,Produksi Padi.,Ton,2024,7
+Pertanian dan Pertambangan,53,Tanaman Pangan,784,Luas Panen Padi.,Hektar,2024,7
+Pertanian dan Pertambangan,53,Tanaman Pangan,785,Produksi Padi Setara Beras,Ton,2024,7
+(tanpa subjek),25,,602,Indeks Tendensi Konsumen,Tidak Ada Satuan,2019,6
+(tanpa subjek),158,,91,Harga Pembelian Gabah dan Beras,Rp/Kg,2014,10
+(tanpa subjek),158,,92,Realisasi Pengadaan Beras Dalam Negeri menurut Saluran Pembelian Beras,Ton,2014,10
+(tanpa subjek),158,,95,Realisasi Persediaan / Penyaluran Beras menurut Produksi/Penyaluran,Ton,2014,5
+(tanpa subjek),158,,97,Neraca Perdagangan,000 US $,2013,10
+(tanpa subjek),158,,111,Harga Eceran Bahan Makanan di Pasar Pedesaan ,Rupiah,2013,1
+(tanpa subjek),158,,599,MPP Sumatera Selatan,Tidak Ada Satuan,2015,1
+(tanpa subjek),158,,600,MPP Indonesia,Tidak Ada Satuan,2015,1

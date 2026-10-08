@@ -25,6 +25,8 @@ class ChatRoutingTests(unittest.TestCase):
             ("PDRB terbaru", "nilai"),
             ("BRS PDRB terbaru", "brs"),
             ("Berapa tingkat pengangguran Sumatera Selatan terbaru?", "nilai"),
+            ("RLS Sumatera Selatan", "nilai"),
+            ("perkawinan di Sumsel 2026?", "nilai"),
             ("Jelaskan IPM tahun 2025", "nilai"),
             ("Apa itu IPM di Palembang?", "nilai"),
             ("cara membaca inflasi", "definisi"),
@@ -64,6 +66,415 @@ class ChatRoutingTests(unittest.TestCase):
             main._reply_numbers_are_verified(
                 "Jumlah penduduk sekitar 9 juta jiwa.",
                 [{"result": {"data": [{"nilai": 9_017_142}]}}],
+            )
+        )
+
+    def test_catalog_abbreviation_ranks_the_matching_variable(self):
+        result = {
+            "hasil": [
+                {
+                    "var_id": 892,
+                    "judul": "Rata-rata Lama Sekolah (RLS) menurut jenis kelamin",
+                    "alias": ["rls"],
+                    "tahun_terbaru": "2025",
+                },
+                {
+                    "var_id": 308,
+                    "judul": "Rata-Rata Lama Sekolah",
+                    "alias": ["rls"],
+                    "tahun_terbaru": "2024",
+                },
+            ]
+        }
+
+        selected = main._rank_variable_candidates(result, "rls", "Provinsi Sumatera Selatan")
+        selected_by_gender = main._rank_variable_candidates(
+            result,
+            "rls jenis kelamin",
+            "Provinsi Sumatera Selatan",
+        )
+
+        self.assertEqual(selected["var_id"], 308)
+        self.assertEqual(selected_by_gender["var_id"], 892)
+
+    def test_unlisted_catalog_topic_routes_to_dynamic_api_lookup(self):
+        question = "perkawinan di Sumsel 2026?"
+        with patch.object(main.bps_tools, "catalog_variable_matches", return_value=True):
+            self.assertEqual(main._classify_question_intent(question), "nilai")
+            self.assertEqual(
+                main._dynamic_variable_intent(question),
+                ("perkawinan", "2026", "Provinsi Sumatera Selatan"),
+            )
+
+    def test_prison_term_alone_routes_to_the_related_catalog_candidate(self):
+        question = "orang masuk penjara Sumsel"
+        self.assertEqual(main._classify_question_intent(question), "nilai")
+        self.assertEqual(
+            main._dynamic_variable_intent(question),
+            ("penjara", "", "Provinsi Sumatera Selatan"),
+        )
+
+    def test_related_prison_query_shows_verified_crime_data_with_caveat(self):
+        request = main.ChatRequest(
+            question="info total jumlah yang masuk penjara di Sumsel"
+        )
+        search_result = {
+            "status_hasil": "kandidat_mirip",
+            "hasil": [{
+                "var_id": 246,
+                "judul": "Jumlah Tindak Pidana",
+                "satuan": "Kasus",
+                "tahun_terbaru": "2025",
+                "skor_kemiripan": 63,
+                "jenis_kecocokan": "related",
+            }],
+        }
+        data_result = {
+            "judul": "Jumlah Tindak Pidana",
+            "satuan": "Kasus",
+            "tahun": "2025",
+            "data": [{
+                "wilayah": "Provinsi Sumatera Selatan",
+                "nilai": 15383,
+            }],
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result),
+            patch.object(main.bps_tools, "ambil_data", return_value=data_result),
+            patch.object(main, "get_client") as gemini,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+            self.assertLogs(main.logger, level="INFO") as captured,
+        ):
+            result = main.chat_endpoint(request)
+
+        gemini.assert_not_called()
+        self.assertIn("Jumlah Tindak Pidana", result["reply"])
+        self.assertIn('untuk "jumlah yang masuk penjara"', result["reply"])
+        self.assertNotIn("63/100", result["reply"])
+        self.assertNotIn("skor kemiripan", result["reply"].casefold())
+        self.assertIn('"skor_kemiripan": 63', "\n".join(captured.output))
+        self.assertIn("15.383 kasus", result["reply"].casefold())
+        self.assertIn("bukan jumlah orang yang dipenjara", result["reply"])
+        self.assertIn("Apakah data ini yang Anda cari?", result["reply"])
+
+    def test_religion_query_shows_requested_category_without_similarity_score(self):
+        request = main.ChatRequest(question="total agama islam di sumsel")
+        search_result = {
+            "status_hasil": "kandidat_mirip",
+            "hasil": [
+                {
+                    "var_id": 241,
+                    "judul": "Jumlah Penganut Agama",
+                    "satuan": "Orang",
+                    "tahun_terbaru": "2022",
+                    "skor_kemiripan": 54,
+                    "jenis_kecocokan": "direct",
+                },
+                {
+                    "var_id": 637,
+                    "judul": "Jumlah Penduduk Menurut Agama",
+                    "satuan": "Jiwa",
+                    "tahun_terbaru": "2022",
+                    "skor_kemiripan": 54,
+                    "jenis_kecocokan": "direct",
+                },
+            ],
+        }
+        data_result = {
+            "judul": "Jumlah Penganut Agama",
+            "satuan": "Orang",
+            "tahun": "2022",
+            "data": [
+                {"wilayah": "Sumatera Selatan", "kategori": "Islam", "nilai": 8286975},
+                {"wilayah": "Sumatera Selatan", "kategori": "Protestan", "nilai": 174145},
+                {"wilayah": "Sumatera Selatan", "kategori": "Katolik", "nilai": 99830},
+                {"wilayah": "Sumatera Selatan", "kategori": "Hindu", "nilai": 73148},
+                {"wilayah": "Sumatera Selatan", "kategori": "Budha", "nilai": 159573},
+            ],
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result),
+            patch.object(main.bps_tools, "ambil_data", return_value=data_result) as fetch,
+            patch.object(main, "get_client") as gemini,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(request)
+
+        gemini.assert_not_called()
+        fetch.assert_called_once()
+        self.assertEqual(fetch.call_args.args[0], 241)
+        self.assertIn('maaf, saya belum menemukan indikator khusus untuk "total agama islam"', result["reply"].casefold())
+        self.assertIn('ada data "Jumlah Penganut Agama" tahun 2022', result["reply"])
+        self.assertIn("Khusus penganut Islam di Sumatera Selatan", result["reply"])
+        self.assertIn("8.286.975 orang", result["reply"])
+        self.assertNotIn("174.145", result["reply"])
+        self.assertNotIn("kemiripan", result["reply"].casefold())
+        self.assertIn("juga mencakup penganut agama lain", result["reply"])
+        self.assertIn("Apakah data ini yang Anda cari?", result["reply"])
+
+    def test_pns_ambiguity_fetches_and_shows_both_sumsel_breakdowns(self):
+        request = main.ChatRequest(question="jumlah PNS Sumsel 2026")
+        search_result = {
+            "status_hasil": "ditemukan",
+            "hasil": [
+                {
+                    "var_id": 227,
+                    "judul": "Jumlah PNS Menurut Pendidikan Tertinggi",
+                    "satuan": "Orang",
+                    "tahun_terbaru": "2025",
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                },
+                {
+                    "var_id": 229,
+                    "judul": "Jumlah PNS Menurut Golongan Kepangkatan",
+                    "satuan": "Orang",
+                    "tahun_terbaru": "2025",
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                },
+            ],
+        }
+
+        def fetch(variable_id, tahun=None, wilayah=None):
+            if wilayah:
+                return {
+                    "judul": (
+                        "Jumlah PNS Menurut Pendidikan Tertinggi"
+                        if variable_id == 227
+                        else "Jumlah PNS Menurut Golongan Kepangkatan"
+                    ),
+                    "error": "Data untuk Provinsi Sumatera Selatan tidak tersedia pada variabel ini.",
+                    "wilayah_tersedia": (
+                        ["Sampai Dengan SD", "SLTP/Sederajat"]
+                        if variable_id == 227
+                        else ["Golongan I", "Golongan II"]
+                    ),
+                    "tahun_tersedia": ["2025"],
+                    "status_hasil": "kosong",
+                }
+            return {
+                "judul": (
+                    "Jumlah PNS Menurut Pendidikan Tertinggi"
+                    if variable_id == 227
+                    else "Jumlah PNS Menurut Golongan Kepangkatan"
+                ),
+                "satuan": "Orang",
+                "tahun": "2025",
+                "data": [{
+                    "wilayah": (
+                        "Sampai Dengan SD" if variable_id == 227 else "Golongan II"
+                    ),
+                    "kategori": "Laki-Laki + Perempuan",
+                    "nilai": 146 if variable_id == 227 else 12268,
+                }],
+            }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result),
+            patch.object(main.bps_tools, "ambil_data", side_effect=fetch),
+            patch.object(main, "get_client") as gemini,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(request)
+
+        gemini.assert_not_called()
+        self.assertIn("Jumlah PNS Menurut Pendidikan Tertinggi", result["reply"])
+        self.assertIn("Jumlah PNS Menurut Golongan Kepangkatan", result["reply"])
+        self.assertIn("146 orang", result["reply"])
+        self.assertIn("12.268 orang", result["reply"])
+        self.assertIn("Data 2026 belum tersedia", result["reply"])
+        self.assertNotIn("kemiripan", result["reply"].casefold())
+        self.assertIn("pendidikan tertinggi", result["reply"])
+        self.assertIn("golongan kepangkatan", result["reply"])
+
+    def test_gender_synonyms_select_population_by_sex_variable(self):
+        question = "jumlah penduduk pria dan wanita di Sumsel terbaru"
+        catalog = main.bps_tools._load_catalog_index()
+        self.assertIsNone(main._canonical_indicator_intent(question))
+        with (
+            patch.object(main.bps_tools, "_variable_index", return_value=catalog),
+            patch.object(
+                main.bps_tools,
+                "_latest_year",
+                side_effect=main.bps_tools.BpsError("Use catalog year metadata."),
+            ),
+        ):
+            intent = main._dynamic_variable_intent(question)
+            self.assertIsNotNone(intent)
+            if intent is None:
+                self.fail("Gender synonyms should create a dynamic variable intent.")
+            search_result = main.bps_tools.cari_variabel(intent[0])
+            options = main._rank_variable_candidate_options(
+                search_result,
+                intent[0],
+                intent[2],
+                prefer_latest=True,
+            )
+
+        self.assertEqual([item["var_id"] for item in options], [813])
+
+    def test_exact_marital_status_candidates_outrank_related_kawin_indicators(self):
+        result = {
+            "hasil": [
+                {
+                    "var_id": 238,
+                    "judul": "Persentase Perempuan Pernah Kawin Berumur 15-49 Tahun",
+                    "tahun_terbaru": "2025",
+                },
+                {
+                    "var_id": 796,
+                    "judul": "Penduduk Perempuan Berumur 10 Tahun Ke Atas Menurut Status Perkawinan",
+                    "tahun_terbaru": "2025",
+                },
+                {
+                    "var_id": 794,
+                    "judul": "Penduduk Laki-Laki Berumur 10 Tahun Ke Atas Menurut Status Perkawinan",
+                    "tahun_terbaru": "2025",
+                },
+            ]
+        }
+
+        options = main._rank_variable_candidate_options(result, "perkawinan", "Provinsi Sumatera Selatan")
+
+        self.assertEqual({item["var_id"] for item in options}, {794, 796})
+
+    def test_unqualified_variable_search_prefers_the_unique_most_recent_candidate(self):
+        result = {
+            "hasil": [
+                {
+                    "var_id": 375,
+                    "judul": "Jumlah Kasus Penderita Penyakit",
+                    "tahun_terbaru": "2025",
+                },
+                {
+                    "var_id": 781,
+                    "judul": "Jumlah Kasus Penyakit",
+                    "tahun_terbaru": "2020",
+                },
+            ]
+        }
+
+        options = main._rank_variable_candidate_options(
+            result,
+            "kasus penyakit",
+            "Provinsi Sumatera Selatan",
+            prefer_latest=True,
+        )
+
+        self.assertEqual([item["var_id"] for item in options], [375])
+
+    def test_unqualified_disease_question_sends_latest_verified_candidate_to_ai(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="Pada 2025 tercatat 42 kasus penderita penyakit.")],
+                    )
+                )
+            ]
+        )
+        fake_models = type(
+            "FakeModels",
+            (),
+            {"generate_content": lambda *_args, **_kwargs: response},
+        )()
+        fake_client = type("FakeClient", (), {"models": fake_models})()
+        search_result = {
+            "status_hasil": "ditemukan",
+            "hasil": [
+                {
+                    "var_id": 375,
+                    "judul": "Jumlah Kasus Penderita Penyakit",
+                    "tahun_terbaru": "2025",
+                },
+                {
+                    "var_id": 781,
+                    "judul": "Jumlah Kasus Penyakit",
+                    "tahun_terbaru": "2020",
+                },
+            ],
+        }
+        verified_data = {
+            "judul": "Jumlah Kasus Penderita Penyakit",
+            "var_id": 375,
+            "tahun": "2025",
+            "satuan": "Kasus",
+            "data": [{"wilayah": "Sumatera Selatan", "nilai": 42}],
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(
+                main,
+                "_dynamic_variable_intent",
+                return_value=("kasus penyakit", "", "Provinsi Sumatera Selatan"),
+            ),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result),
+            patch.object(main.bps_tools, "ambil_data", return_value=verified_data) as fetch_data,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="jumlah kasus penyakit di Sumsel")
+            )
+
+        fetch_data.assert_called_once_with(
+            375,
+            tahun=None,
+            wilayah="Provinsi Sumatera Selatan",
+        )
+        self.assertEqual(result["reply"], "Pada 2025 tercatat 42 kasus penderita penyakit.")
+        self.assertEqual(result["tools_used"], True)
+
+    def test_ambiguous_gender_series_return_latest_values_with_requested_year_notice(self):
+        candidates = [
+            {
+                "var_id": 794,
+                "judul": "Penduduk Laki-Laki Menurut Status Perkawinan",
+            },
+            {
+                "var_id": 796,
+                "judul": "Penduduk Perempuan Menurut Status Perkawinan",
+            },
+        ]
+
+        def fake_data(var_id, tahun=None, wilayah=None, **kwargs):
+            if tahun == "2026":
+                return {"tahun_tersedia": ["2025"], "status_hasil": "kosong"}
+            gender = "Laki-laki" if var_id == 794 else "Perempuan"
+            return {
+                "judul": candidates[0 if var_id == 794 else 1]["judul"],
+                "tahun": "2025",
+                "satuan": "Orang",
+                "data": [{"wilayah": "Sumatera Selatan", "kategori": "Belum Kawin", "nilai": var_id}],
+            }
+
+        with patch.object(main.bps_tools, "ambil_data", side_effect=fake_data):
+            combined = main._combine_gender_series(
+                candidates,
+                "2026",
+                "Provinsi Sumatera Selatan",
+                None,
+            )
+
+        self.assertEqual(combined["tahun_diminta_tidak_tersedia"], "2026")
+        self.assertEqual(len(combined["data_per_tahun"][0]["data"]), 2)
+        self.assertIn(
+            "Data tahun 2026 belum tersedia",
+            main._format_indicator_fallback(combined, "Provinsi Sumatera Selatan", "2026"),
+        )
+        self.assertTrue(
+            main._reply_numbers_are_verified(
+                "Nilai Laki-laki 794 dan Perempuan 796.",
+                [{"result": combined}],
             )
         )
 
@@ -876,6 +1287,13 @@ class ChatRoutingTests(unittest.TestCase):
 
     def test_tool_results_distinguish_empty_and_technical_failure(self):
         self.assertEqual(main._label_tool_result({"hasil": []})["status_hasil"], "kosong")
+        self.assertEqual(
+            main._label_tool_result({
+                "hasil": [{"skor_kemiripan": 55, "jenis_kecocokan": "related"}],
+                "status_hasil": "kandidat_mirip",
+            })["status_hasil"],
+            "kandidat_mirip",
+        )
         self.assertEqual(
             main._label_tool_result({"error": "Data untuk Kabupaten PALI tidak tersedia."})["status_hasil"],
             "kosong",
