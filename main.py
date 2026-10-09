@@ -97,6 +97,12 @@ _NUMBER_TOKEN = re.compile(
     r"(?:\s*%)?(?!\w)",
     re.IGNORECASE,
 )
+_NUMERIC_RANGE_LABEL = re.compile(r"^\s*(\d+)\s*[-–—]\s*(\d+)\s*$")
+_NUMERIC_RANGE_IN_REPLY = re.compile(
+    r"(?<![\w.])(?P<start>\d+)\s*(?:[-–—]|sampai(?:\s+dengan)?|hingga)\s*"
+    r"(?P<end>\d+)(?!\w)",
+    re.IGNORECASE,
+)
 _NUMERIC_RESULT_FIELDS = {
     "nilai", "tahun", "tahun_mulai", "tahun_akhir", "tahun_tersedia",
     "tahun_tidak_tersedia", "tahun_terbaru", "tahun_diminta_tidak_tersedia",
@@ -369,7 +375,42 @@ def _tool_numbers(records: list[dict]) -> list[Decimal]:
     return numbers
 
 
+def _verified_numeric_ranges(records: list[dict]) -> set[tuple[int, int]]:
+    ranges: set[tuple[int, int]] = set()
+
+    def collect(value: object) -> None:
+        if isinstance(value, dict):
+            wilayah = value.get("wilayah")
+            if isinstance(wilayah, str):
+                match = _NUMERIC_RANGE_LABEL.fullmatch(wilayah)
+                if match:
+                    ranges.add((int(match.group(1)), int(match.group(2))))
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    for record in records:
+        collect(record.get("result"))
+    return ranges
+
+
 def _reply_numbers_are_verified(reply: str, records: list[dict]) -> bool:
+    verified_ranges = _verified_numeric_ranges(records)
+    if verified_ranges:
+        reply = _NUMERIC_RANGE_IN_REPLY.sub(
+            lambda match: (
+                " "
+                if (
+                    int(match.group("start")),
+                    int(match.group("end")),
+                ) in verified_ranges
+                else match.group(0)
+            ),
+            reply,
+        )
+
     reply_numbers = _numbers_in_text(reply)
     if not reply_numbers:
         return True
@@ -1071,6 +1112,22 @@ def _format_brs_fallback(
     return "\n".join(formatted)
 
 
+def _age_group_order_key(row: dict) -> tuple[int, int] | None:
+    label = str(row.get("wilayah") or row.get("kategori") or "").strip()
+    if re.fullmatch(r"(?:jumlah|total)", label, re.IGNORECASE):
+        return (10**9, 0)
+
+    age_range = _NUMERIC_RANGE_LABEL.fullmatch(label)
+    if age_range:
+        return (int(age_range.group(1)), 0)
+
+    open_ended_age = re.fullmatch(r"(\d+)\s*\+", label)
+    if open_ended_age:
+        return (int(open_ended_age.group(1)), 1)
+
+    return None
+
+
 def _format_indicator_fallback(
     data: dict,
     wilayah: Optional[str],
@@ -1080,6 +1137,12 @@ def _format_indicator_fallback(
         return "Maaf, data belum dapat diverifikasi saat ini."
     if data.get("input_tidak_valid") and data.get("error"):
         return str(data["error"])
+    subregional_notice = (
+        "Maaf, data agregat Provinsi Sumatera Selatan tidak tersedia untuk indikator ini. "
+        "Namun, data per kabupaten/kota berikut tersedia:\n"
+        if data.get("wilayah_diminta_tidak_tersedia")
+        else ""
+    )
     yearly_results = data.get("data_per_tahun")
     if isinstance(yearly_results, list):
         lines = []
@@ -1104,6 +1167,8 @@ def _format_indicator_fallback(
                     or wilayah
                     or "Sumatera Selatan"
                 )
+                if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
+                    scope = f"{scope} ({row['kategori']})"
                 unit = str(yearly_result.get("satuan") or data.get("satuan") or "").strip()
                 lines.append(
                     f"{yearly_result.get('tahun')}, {scope}: "
@@ -1133,7 +1198,7 @@ def _format_indicator_fallback(
             else " Angka ini merupakan proyeksi." if nature == "proyeksi"
             else ""
         )
-        return year_notice + f"{title}:\n" + "\n".join(lines) + missing_note + nature_note
+        return subregional_notice + year_notice + f"{title}:\n" + "\n".join(lines) + missing_note + nature_note
     if data.get("error"):
         years = data.get("tahun_tersedia")
         if requested_year and isinstance(years, list) and years:
@@ -1162,7 +1227,8 @@ def _format_indicator_fallback(
         if isinstance(row, dict)
         and row.get("nilai") is not None
         and (
-            not row.get("kategori")
+            data.get("wilayah_diminta_tidak_tersedia")
+            or not row.get("kategori")
             or re.fullmatch(
                 r"(?:jumlah|total|laki-laki\s*\+\s*perempuan)",
                 str(row.get("kategori")).strip(),
@@ -1170,6 +1236,16 @@ def _format_indicator_fallback(
             )
         )
     ]
+    if re.search(r"\bkelompok\s+umur\b", str(data.get("judul") or ""), re.IGNORECASE):
+        age_keys = [_age_group_order_key(row) for row in usable]
+        if all(key is not None for key in age_keys):
+            usable = [
+                row
+                for _, row in sorted(
+                    zip(age_keys, usable),
+                    key=lambda item: item[0],
+                )
+            ]
     nature = str(data.get("sifat_data") or "").lower()
     title_text = str(data.get("judul") or "")
     if nature == "estimasi":
@@ -1179,7 +1255,9 @@ def _format_indicator_fallback(
     else:
         nature_note = ""
 
-    if len(usable) > 1 and wilayah is None:
+    if len(usable) > 1 and (
+        wilayah is None or data.get("wilayah_diminta_tidak_tersedia")
+    ):
         lines = []
         for row in usable:
             value = row["nilai"]
@@ -1187,7 +1265,10 @@ def _format_indicator_fallback(
                 value_text = f"{value:,.6f}".rstrip("0").rstrip(".").replace(",", "_").replace(".", ",").replace("_", ".")
             else:
                 value_text = str(value)
-            lines.append(f"{row.get('wilayah', 'Wilayah')}: {value_text}")
+            label = str(row.get("wilayah") or "Wilayah")
+            if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
+                label += f" ({row['kategori']})"
+            lines.append(f"{label}: {value_text}")
         unit = str(data.get("satuan") or "").strip()
         year_note = (
             f"Data {requested_year} belum tersedia; "
@@ -1195,8 +1276,9 @@ def _format_indicator_fallback(
             else ""
         )
         return (
-            f"{year_note}{data.get('judul', 'Indikator BPS')} tahun {data.get('tahun', '')} "
-            f"({' ' + unit if unit else 'nilai per wilayah'}):\n"
+            subregional_notice
+            + f"{year_note}{data.get('judul', 'Indikator BPS')} tahun {data.get('tahun', '')} "
+            f"({unit if unit else 'nilai per wilayah'}):\n"
             + "\n".join(lines)
             + nature_note
         )
@@ -1217,10 +1299,18 @@ def _format_indicator_fallback(
         title = data.get("judul", "Indikator BPS")
         actual_year = str(data.get("tahun") or requested_year or "terbaru")
         unit = str(data.get("satuan") or "").strip()
-        lines = [
-            f"{row.get('kategori') or row.get('wilayah') or 'Nilai'}: {row['nilai']}"
-            for row in usable
-        ]
+        lines = []
+        for row in usable:
+            value = row["nilai"]
+            if isinstance(value, (int, float)):
+                value_text = (
+                    f"{value:,.6f}".rstrip("0").rstrip(".")
+                    .replace(",", "_").replace(".", ",").replace("_", ".")
+                )
+            else:
+                value_text = str(value)
+            label = str(row.get("wilayah") or row.get("kategori") or "Nilai")
+            lines.append(f"{label}: {value_text}")
         return (
             f"Beberapa baris {title} tersedia untuk {wilayah or 'Provinsi Sumatera Selatan'} "
             f"tahun {actual_year}{' (' + unit + ')' if unit else ''}:\n"
@@ -1241,9 +1331,17 @@ def _format_indicator_fallback(
         if requested_year and requested_year != actual_year
         else ""
     )
-    scope = data.get("wilayah_cakupan") or row.get("wilayah") or wilayah or "Sumatera Selatan"
+    scope = (
+        data.get("wilayah_cakupan")
+        or row.get("wilayah")
+        or wilayah
+        or "Sumatera Selatan"
+    )
+    if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
+        scope = f"{scope} ({row['kategori']})"
     return (
-        f"{year_note}{data.get('judul', 'Indikator BPS')} di {scope} tahun {actual_year}: "
+        subregional_notice
+        + f"{year_note}{data.get('judul', 'Indikator BPS')} di {scope} tahun {actual_year}: "
         f"{value_text}{' ' + unit if unit else ''}.{nature_note}"
     )
 
@@ -1259,6 +1357,46 @@ def _uses_non_geographic_province_dimension(data: dict, region: Optional[str]) -
             bps_tools.resolve_region_from_text(str(label))[0]
             for label in labels
         )
+    )
+
+
+def _has_subregional_values_for_province(data: dict, region: Optional[str]) -> bool:
+    labels = data.get("wilayah_tersedia")
+    if (
+        region != "Provinsi Sumatera Selatan"
+        or not data.get("error")
+        or not isinstance(labels, list)
+        or not labels
+    ):
+        return False
+
+    resolved_regions = [
+        bps_tools.resolve_region_from_text(str(label))[0]
+        for label in labels
+    ]
+    return all(
+        resolved is not None and resolved != "Provinsi Sumatera Selatan"
+        for resolved in resolved_regions
+    )
+
+
+def _has_indicator_values(data: dict) -> bool:
+    rows = data.get("data")
+    if isinstance(rows, list) and any(
+        isinstance(row, dict) and row.get("nilai") is not None
+        for row in rows
+    ):
+        return True
+
+    yearly_results = data.get("data_per_tahun")
+    return isinstance(yearly_results, list) and any(
+        isinstance(yearly_result, dict)
+        and isinstance(yearly_result.get("data"), list)
+        and any(
+            isinstance(row, dict) and row.get("nilai") is not None
+            for row in yearly_result["data"]
+        )
+        for yearly_result in yearly_results
     )
 
 
@@ -1290,10 +1428,15 @@ def _fetch_candidate_data(
         and data.get("error")
     ):
         latest = bps_tools.ambil_data(variable_id, wilayah=region)
-        if _uses_non_geographic_province_dimension(latest, region):
+        if _has_subregional_values_for_province(latest, region):
+            latest = bps_tools.ambil_data(variable_id)
+            if _has_indicator_values(latest):
+                latest["tahun_diminta_tidak_tersedia"] = requested_year
+                latest["wilayah_diminta_tidak_tersedia"] = region
+        elif _uses_non_geographic_province_dimension(latest, region):
             latest = bps_tools.ambil_data(variable_id)
         if "error" not in latest:
-            latest["tahun_diminta_tidak_tersedia"] = requested_year
+            latest.setdefault("tahun_diminta_tidak_tersedia", requested_year)
             data = latest
     elif (
         year_range
@@ -1302,11 +1445,52 @@ def _fetch_candidate_data(
         and data.get("tahun_tersedia")
     ):
         latest = bps_tools.ambil_data(variable_id, wilayah=region)
-        if _uses_non_geographic_province_dimension(latest, region):
+        if _has_subregional_values_for_province(latest, region):
+            subregional = bps_tools.ambil_data(
+                variable_id,
+                tahun_mulai=str(year_range[0]),
+                tahun_akhir=str(year_range[1]),
+            )
+            if not _has_indicator_values(subregional):
+                subregional = bps_tools.ambil_data(variable_id)
+                if _has_indicator_values(subregional):
+                    subregional["tahun_diminta_tidak_tersedia"] = (
+                        f"{year_range[0]}-{year_range[1]}"
+                    )
+            if _has_indicator_values(subregional):
+                subregional["wilayah_diminta_tidak_tersedia"] = region
+                latest = subregional
+        elif _uses_non_geographic_province_dimension(latest, region):
             latest = bps_tools.ambil_data(variable_id)
         if "error" not in latest:
-            latest["tahun_diminta_tidak_tersedia"] = f"{year_range[0]}-{year_range[1]}"
+            latest.setdefault(
+                "tahun_diminta_tidak_tersedia",
+                f"{year_range[0]}-{year_range[1]}",
+            )
             data = latest
+
+    if (
+        year_range
+        and region == "Provinsi Sumatera Selatan"
+        and not _has_indicator_values(data)
+        and not _has_subregional_values_for_province(data, region)
+    ):
+        latest_for_region = bps_tools.ambil_data(variable_id, wilayah=region)
+        if _has_subregional_values_for_province(latest_for_region, region):
+            subregional_data = bps_tools.ambil_data(
+                variable_id,
+                tahun_mulai=str(year_range[0]),
+                tahun_akhir=str(year_range[1]),
+            )
+            if not _has_indicator_values(subregional_data):
+                subregional_data = bps_tools.ambil_data(variable_id)
+                if _has_indicator_values(subregional_data):
+                    subregional_data["tahun_diminta_tidak_tersedia"] = (
+                        f"{year_range[0]}-{year_range[1]}"
+                    )
+            if _has_indicator_values(subregional_data):
+                subregional_data["wilayah_diminta_tidak_tersedia"] = region
+                data = subregional_data
 
     if _uses_non_geographic_province_dimension(data, region):
         province_data = (
@@ -1321,6 +1505,27 @@ def _fetch_candidate_data(
         if province_data.get("data") or province_data.get("data_per_tahun"):
             province_data.setdefault("wilayah_cakupan", region)
             data = province_data
+
+    if _has_subregional_values_for_province(data, region):
+        subregional_data = (
+            bps_tools.ambil_data(
+                variable_id,
+                tahun_mulai=str(year_range[0]),
+                tahun_akhir=str(year_range[1]),
+            )
+            if year_range
+            else bps_tools.ambil_data(
+                variable_id,
+                tahun=requested_year or None,
+            )
+        )
+        if not _has_indicator_values(subregional_data) and requested_year:
+            subregional_data = bps_tools.ambil_data(variable_id)
+            if _has_indicator_values(subregional_data):
+                subregional_data["tahun_diminta_tidak_tersedia"] = requested_year
+        if _has_indicator_values(subregional_data):
+            subregional_data["wilayah_diminta_tidak_tersedia"] = region
+            data = subregional_data
 
     data["judul"] = data.get("judul") or candidate.get("judul")
     data["var_id"] = variable_id
@@ -1387,12 +1592,13 @@ def _format_candidate_values(
     data: dict,
     keyword: str,
     focused_values: list[str],
-    limit: int = 10,
+    limit: int | None = 10,
 ) -> list[str]:
     rows_by_year, _ = _candidate_value_rows(data, keyword)
     years = {year for year, _ in rows_by_year if year}
     lines = []
-    for year, row in rows_by_year[:limit]:
+    visible_rows = rows_by_year if limit is None else rows_by_year[:limit]
+    for year, row in visible_rows:
         value = row["nilai"]
         if isinstance(value, (int, float)):
             value_text = (
@@ -1418,7 +1624,7 @@ def _format_candidate_values(
         year_label = f"{year}: " if len(years) > 1 and year else ""
         lines.append(f"- {year_label}{label}: {value_text}{' ' + unit if unit else ''}")
 
-    if len(rows_by_year) > limit:
+    if limit is not None and len(rows_by_year) > limit:
         lines.append(f"- Menampilkan {limit} dari {len(rows_by_year)} baris nilai.")
     return lines
 
@@ -1453,6 +1659,7 @@ def _format_candidate_suggestions(
         title = str(candidate.get("judul") or "Indikator BPS")
         _, focused_values = _candidate_value_rows(data, keyword)
         focus_values_by_candidate.append(focused_values)
+        subregional_fallback = bool(data.get("wilayah_diminta_tidak_tersedia"))
         scope = (
             data.get("wilayah_cakupan")
             or data.get("wilayah_ditafsirkan")
@@ -1462,9 +1669,24 @@ def _format_candidate_suggestions(
         scope = str(scope)
         if scope.startswith("Provinsi "):
             scope = scope[len("Provinsi "):]
-        value_lines = _format_candidate_values(data, keyword, focused_values)
+        value_lines = _format_candidate_values(
+            data,
+            keyword,
+            focused_values,
+            limit=None if subregional_fallback else 10,
+        )
 
-        if len(candidates) == 1:
+        if subregional_fallback:
+            if not any(
+                line.startswith("Maaf, data agregat Provinsi Sumatera Selatan")
+                for line in lines
+            ):
+                lines.append(
+                    "Maaf, data agregat Provinsi Sumatera Selatan tidak tersedia untuk indikator ini. "
+                    "Namun, data per kabupaten/kota berikut tersedia:"
+                )
+            lines.append(f"\n{title} tahun {year} per kabupaten/kota:")
+        elif len(candidates) == 1:
             if approximate:
                 lines.append(
                     f'Maaf, saya belum menemukan indikator khusus untuk "{display_query}". '
@@ -1800,6 +2022,56 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     if "error" not in latest:
                         canonical_data = latest
                         canonical_data["tahun_diminta_tidak_tersedia"] = requested_year
+            if (
+                requested_year
+                and canonical_data.get("error")
+                and region == "Provinsi Sumatera Selatan"
+                and not canonical_data.get("wilayah_tersedia")
+            ):
+                latest_for_region = bps_tools.indikator_utama(
+                    indicator_name,
+                    wilayah=region,
+                )
+                if _has_subregional_values_for_province(latest_for_region, region):
+                    canonical_data = latest_for_region
+            if (
+                year_range
+                and not _has_indicator_values(canonical_data)
+                and region == "Provinsi Sumatera Selatan"
+                and not _has_subregional_values_for_province(canonical_data, region)
+            ):
+                latest_for_region = bps_tools.indikator_utama(
+                    indicator_name,
+                    wilayah=region,
+                )
+                if _has_subregional_values_for_province(latest_for_region, region):
+                    canonical_data = latest_for_region
+            if _has_subregional_values_for_province(canonical_data, region):
+                subregional_data = (
+                    bps_tools.indikator_utama(
+                        indicator_name,
+                        wilayah=None,
+                        tahun_mulai=str(year_range[0]),
+                        tahun_akhir=str(year_range[1]),
+                    )
+                    if year_range
+                    else bps_tools.indikator_utama(
+                        indicator_name,
+                        tahun=requested_year or None,
+                        wilayah=None,
+                    )
+                )
+                if not _has_indicator_values(subregional_data) and requested_year:
+                    subregional_data = bps_tools.indikator_utama(
+                        indicator_name,
+                        wilayah=None,
+                    )
+                    if _has_indicator_values(subregional_data):
+                        subregional_data["tahun_diminta_tidak_tersedia"] = requested_year
+                if _has_indicator_values(subregional_data):
+                    subregional_data["wilayah_diminta_tidak_tersedia"] = region
+                    canonical_data = subregional_data
+                    canonical_tool_call += " -> indikator_utama(wilayah=semua kabupaten/kota)"
             canonical_fallback = _format_indicator_fallback(
                 canonical_data,
                 region,
@@ -2015,6 +2287,20 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             if monthly_intent is not None
             else "Jika baris data tidak menjawab pertanyaan, nyatakan bahwa data yang cocok belum ditemukan."
         )
+        subregional_fallback = bool(
+            canonical_data.get("wilayah_diminta_tidak_tersedia")
+        ) or any(
+            isinstance(candidate, dict)
+            and isinstance(candidate.get("data"), dict)
+            and candidate["data"].get("wilayah_diminta_tidak_tersedia")
+            for candidate in canonical_data.get("hasil") or []
+        )
+        if subregional_fallback:
+            fallback_instruction += (
+                " Agregat Provinsi Sumatera Selatan tidak tersedia untuk indikator ini. Sampaikan hal itu "
+                "dengan ramah, lalu tampilkan nilai yang tersedia untuk setiap kabupaten/kota; jangan "
+                "menjumlahkan nilai kabupaten/kota atau menyebutnya sebagai nilai provinsi."
+            )
         user_text = (
             f"PERTANYAAN:\n{user_text}\n\n"
             "DATA TERVERIFIKASI YANG DIAMBIL KODE (sumber angka; jangan memanggil tool atau "
@@ -2109,6 +2395,13 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         )
     if requires_tool and not _reply_numbers_are_verified(reply, tool_records):
         logger.warning("Jawaban mengandung angka yang tidak ada pada hasil tool")
+        if canonical_fallback:
+            logger.warning("Menggunakan jawaban deterministik dari data terverifikasi.")
+            return {
+                "reply": canonical_fallback,
+                "data": canonical_fallback,
+                "tools_used": canonical_data is not None or bool(tool_records),
+            }
         _record_unresolved_question(
             question,
             "unverified_numeric_output",

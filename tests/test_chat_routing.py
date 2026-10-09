@@ -69,6 +69,159 @@ class ChatRoutingTests(unittest.TestCase):
             )
         )
 
+    def test_verified_numeric_age_ranges_do_not_fail_numeric_reply_validation(self):
+        records = [{
+            "result": {
+                "status_hasil": "ditemukan",
+                "judul": "Jumlah Penduduk Menurut Kelompok Umur",
+                "tahun": "2026",
+                "data": [{
+                    "wilayah": "45 - 49",
+                    "kategori": "Laki-Laki + Perempuan",
+                    "nilai": 612_721,
+                }],
+            }
+        }]
+
+        self.assertTrue(
+            main._reply_numbers_are_verified(
+                "Jumlah penduduk usia 45–49 tahun pada 2026 sebanyak 612.721 jiwa.",
+                records,
+            )
+        )
+        self.assertTrue(
+            main._reply_numbers_are_verified(
+                "Jumlah penduduk usia 45 sampai dengan 49 tahun sebanyak 612.721 jiwa.",
+                records,
+            )
+        )
+        self.assertFalse(
+            main._reply_numbers_are_verified(
+                "Jumlah penduduk usia 45–49 tahun sebanyak 610.000 jiwa.",
+                records,
+            )
+        )
+        self.assertFalse(
+            main._reply_numbers_are_verified(
+                "Ada 45 orang.",
+                records,
+            )
+        )
+
+    def test_age_group_query_accepts_verified_age_ranges_in_ai_answer(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[
+                            main.types.Part(
+                                text=(
+                                    "Pada kelompok umur 45-49 tahun, jumlah penduduk "
+                                    "Sumatera Selatan pada 2026 sebanyak 999.999 jiwa."
+                                )
+                            )
+                        ],
+                    )
+                )
+            ]
+        )
+        fake_models = type(
+            "FakeModels",
+            (),
+            {"generate_content": lambda *_args, **_kwargs: response},
+        )()
+        fake_client = type("FakeClient", (), {"models": fake_models})()
+        search_result = {
+            "status_hasil": "ditemukan",
+            "hasil": [{
+                "var_id": 278,
+                "judul": "Jumlah Penduduk Menurut Kelompok Umur",
+                "satuan": "Jiwa",
+                "tahun_terbaru": "2026",
+                "skor_kemiripan": 95,
+                "jenis_kecocokan": "direct",
+            }],
+        }
+        verified_data = {
+            "judul": "Jumlah Penduduk Menurut Kelompok Umur",
+            "var_id": 278,
+            "tahun": "2026",
+            "satuan": "Jiwa",
+            "data": [
+                {"wilayah": "45 - 49", "kategori": "Laki-Laki", "nilai": 311_682},
+                {"wilayah": "45 - 49", "kategori": "Perempuan", "nilai": 301_039},
+                {
+                    "wilayah": "45 - 49",
+                    "kategori": "Laki-Laki + Perempuan",
+                    "nilai": 612_721,
+                },
+                {"wilayah": "50 - 54", "kategori": "Laki-Laki", "nilai": 275_609},
+                {"wilayah": "50 - 54", "kategori": "Perempuan", "nilai": 268_370},
+                {
+                    "wilayah": "50 - 54",
+                    "kategori": "Laki-Laki + Perempuan",
+                    "nilai": 543_979,
+                },
+            ],
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(
+                main,
+                "_dynamic_variable_intent",
+                return_value=("total penduduk umur", "", "Provinsi Sumatera Selatan"),
+            ),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result),
+            patch.object(main.bps_tools, "ambil_data", return_value=verified_data),
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="total warga sumsel per umur")
+            )
+
+        self.assertIn("45 - 49: 612.721", result["reply"])
+        self.assertIn("50 - 54: 543.979", result["reply"])
+        self.assertNotIn("311.682", result["reply"])
+        self.assertNotIn("999.999", result["reply"])
+        self.assertTrue(result["tools_used"])
+
+    def test_age_group_fallback_sorts_ages_and_places_total_last(self):
+        data = {
+            "judul": "Jumlah Penduduk Menurut Kelompok Umur",
+            "tahun": "2026",
+            "satuan": "Jiwa",
+            "data": [
+                {"wilayah": "50 - 54", "kategori": "Laki-Laki + Perempuan", "nilai": 5},
+                {"wilayah": "Jumlah", "kategori": "Laki-Laki + Perempuan", "nilai": 6},
+                {"wilayah": "65+", "kategori": "Laki-Laki + Perempuan", "nilai": 4},
+                {"wilayah": "0 - 4", "kategori": "Laki-Laki + Perempuan", "nilai": 1},
+                {"wilayah": "45 - 49", "kategori": "Laki-Laki + Perempuan", "nilai": 3},
+                {"wilayah": "5 - 9", "kategori": "Laki-Laki + Perempuan", "nilai": 2},
+            ],
+        }
+
+        reply = main._format_indicator_fallback(
+            data,
+            "Provinsi Sumatera Selatan",
+            "",
+        )
+        ordered_labels = [
+            "0 - 4:",
+            "5 - 9:",
+            "45 - 49:",
+            "50 - 54:",
+            "65+:",
+            "Jumlah:",
+        ]
+
+        self.assertEqual(
+            [reply.index(label) for label in ordered_labels],
+            sorted(reply.index(label) for label in ordered_labels),
+        )
+
     def test_catalog_abbreviation_ranks_the_matching_variable(self):
         result = {
             "hasil": [
@@ -707,7 +860,7 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(generate.call_count, 2)
         self.assertTrue(generate.call_args_list[1].kwargs["force_tool"])
 
-    def test_data_answer_with_unsupported_number_returns_502(self):
+    def test_data_answer_with_unsupported_number_uses_verified_fallback(self):
         response = main.types.GenerateContentResponse(
             candidates=[
                 main.types.Candidate(
@@ -742,10 +895,11 @@ class ChatRoutingTests(unittest.TestCase):
             ),
             patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
         ):
-            with self.assertRaises(main.HTTPException) as raised:
-                main.chat_endpoint(main.ChatRequest(question="IPM Prabumulih"))
+            result = main.chat_endpoint(main.ChatRequest(question="IPM Prabumulih"))
 
-        self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("83,27", result["reply"])
+        self.assertNotIn("81,22", result["reply"])
+        self.assertTrue(result["tools_used"])
 
     def test_canonical_indicator_uses_region_and_requested_level(self):
         self.assertEqual(
@@ -782,6 +936,211 @@ class ChatRoutingTests(unittest.TestCase):
             ),
             ("tingkat_pengangguran", "", "Provinsi Sumatera Selatan"),
         )
+
+    def test_province_without_aggregate_is_distinguished_from_subregional_data(self):
+        province = "Provinsi Sumatera Selatan"
+        self.assertTrue(
+            main._has_subregional_values_for_province(
+                {
+                    "error": "Data provinsi tidak tersedia.",
+                    "wilayah_tersedia": ["Ogan Ilir", "Palembang"],
+                },
+                province,
+            )
+        )
+        self.assertFalse(
+            main._has_subregional_values_for_province(
+                {
+                    "error": "Data provinsi tidak tersedia.",
+                    "wilayah_tersedia": ["Laki-Laki", "Perempuan"],
+                },
+                province,
+            )
+        )
+
+    def test_candidate_fallback_fetches_and_displays_every_subregion(self):
+        province = "Provinsi Sumatera Selatan"
+        province_error = {
+            "judul": "Jumlah Indikator Menurut Kabupaten/Kota",
+            "error": f"Data untuk {province} tidak tersedia.",
+            "wilayah_tersedia": ["Ogan Ilir", "Palembang"],
+            "status_hasil": "kosong",
+        }
+        subregional_data = {
+            "judul": "Jumlah Indikator Menurut Kabupaten/Kota",
+            "tahun": "2025",
+            "satuan": "Orang",
+            "data": [
+                {"wilayah": "Ogan Ilir", "nilai": 123},
+                {"wilayah": "Palembang", "nilai": 456},
+            ],
+        }
+        candidate = {
+            "var_id": 999,
+            "judul": "Jumlah Indikator Menurut Kabupaten/Kota",
+            "skor_kemiripan": 100,
+            "jenis_kecocokan": "direct",
+        }
+
+        with patch.object(
+            main.bps_tools,
+            "ambil_data",
+            side_effect=[province_error, subregional_data],
+        ) as fetch:
+            result = main._fetch_candidate_data(candidate, "", province, None)
+
+        self.assertEqual(fetch.call_count, 2)
+        self.assertIsNone(fetch.call_args_list[1].kwargs.get("wilayah"))
+        self.assertEqual(result["wilayah_diminta_tidak_tersedia"], province)
+        reply = main._format_candidate_suggestions(
+            "indikator Sumsel",
+            [candidate],
+            [result],
+            province,
+            "",
+        )
+        self.assertIn("data agregat Provinsi Sumatera Selatan tidak tersedia", reply)
+        self.assertIn("Ogan Ilir: 123 orang", reply)
+        self.assertIn("Palembang: 456 orang", reply)
+
+    def test_candidate_subregional_fallback_keeps_available_year_range(self):
+        province = "Provinsi Sumatera Selatan"
+        empty_range = {
+            "judul": "Indikator Menurut Kabupaten/Kota",
+            "data_per_tahun": [],
+            "status_hasil": "kosong",
+        }
+        province_error = {
+            "judul": "Indikator Menurut Kabupaten/Kota",
+            "error": f"Data untuk {province} tidak tersedia.",
+            "wilayah_tersedia": ["Ogan Ilir", "Palembang"],
+        }
+        range_data = {
+            "judul": "Indikator Menurut Kabupaten/Kota",
+            "data_per_tahun": [{
+                "tahun": "2025",
+                "satuan": "Orang",
+                "data": [
+                    {"wilayah": "Ogan Ilir", "nilai": 123},
+                    {"wilayah": "Palembang", "nilai": 456},
+                ],
+            }],
+        }
+        with patch.object(
+            main.bps_tools,
+            "ambil_data",
+            side_effect=[empty_range, province_error, range_data],
+        ) as fetch:
+            result = main._fetch_candidate_data(
+                {"var_id": 999, "judul": "Indikator Menurut Kabupaten/Kota"},
+                "",
+                province,
+                (2024, 2025),
+            )
+
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(result["wilayah_diminta_tidak_tersedia"], province)
+        self.assertIn("2025, Ogan Ilir: 123 Orang", main._format_indicator_fallback(
+            result,
+            province,
+            "2024-2025",
+        ))
+
+    def test_subregional_fallback_preserves_every_available_category(self):
+        reply = main._format_indicator_fallback(
+            {
+                "judul": "Jumlah Penduduk Menurut Kabupaten/Kota dan Jenis Kelamin",
+                "tahun": "2025",
+                "satuan": "Jiwa",
+                "wilayah_diminta_tidak_tersedia": "Provinsi Sumatera Selatan",
+                "data": [
+                    {"wilayah": "Ogan Ilir", "kategori": "Laki-Laki", "nilai": 10},
+                    {"wilayah": "Ogan Ilir", "kategori": "Perempuan", "nilai": 11},
+                    {"wilayah": "Palembang", "kategori": "Laki-Laki", "nilai": 20},
+                    {"wilayah": "Palembang", "kategori": "Perempuan", "nilai": 21},
+                ],
+            },
+            "Provinsi Sumatera Selatan",
+            "",
+        )
+
+        self.assertIn("Ogan Ilir (Laki-Laki): 10", reply)
+        self.assertIn("Ogan Ilir (Perempuan): 11", reply)
+        self.assertIn("Palembang (Laki-Laki): 20", reply)
+        self.assertIn("Palembang (Perempuan): 21", reply)
+
+    def test_canonical_province_fallback_retries_with_all_subregions(self):
+        province = "Provinsi Sumatera Selatan"
+        province_error = {
+            "judul": "Laju Pertumbuhan PDRB Kabupaten/Kota",
+            "error": f"Data untuk {province} tidak tersedia.",
+            "wilayah_ditafsirkan": province,
+            "wilayah_tersedia": ["Ogan Ilir", "Palembang"],
+            "status_hasil": "kosong",
+        }
+        subregional_data = {
+            "judul": "Laju Pertumbuhan PDRB Kabupaten/Kota",
+            "tahun": "2025",
+            "satuan": "Persen",
+            "data": [
+                {"wilayah": "Ogan Ilir", "nilai": 4.97},
+                {"wilayah": "Palembang", "nilai": 5.6},
+            ],
+        }
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[
+                            main.types.Part(
+                                text=(
+                                    "Maaf, data agregat Provinsi Sumatera Selatan tidak tersedia. "
+                                    "Namun, pertumbuhan PDRB tahun 2025 tercatat 4,97 persen di Ogan Ilir "
+                                    "dan 5,6 persen di Palembang."
+                                )
+                            )
+                        ],
+                    )
+                )
+            ]
+        )
+        class FakeModels:
+            calls = []
+
+            def generate_content(self, **kwargs):
+                self.calls.append(kwargs)
+                return response
+
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": FakeModels()},
+        )()
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(
+                main.bps_tools,
+                "indikator_utama",
+                side_effect=[province_error, subregional_data],
+            ) as indicator,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="Pertumbuhan PDRB Sumsel terbaru")
+            )
+
+        self.assertEqual(indicator.call_count, 2)
+        self.assertEqual(indicator.call_args_list[0].kwargs["wilayah"], province)
+        self.assertIsNone(indicator.call_args_list[1].kwargs["wilayah"])
+        prompt = fake_client.models.calls[0]["contents"][-1].parts[0].text
+        self.assertIn("wilayah_diminta_tidak_tersedia", prompt)
+        self.assertIn("jangan menjumlahkan nilai kabupaten/kota", prompt)
+        self.assertIn("Ogan Ilir", result["reply"])
+        self.assertIn("Palembang", result["reply"])
 
     def test_previous_year_followup_keeps_the_prior_canonical_series(self):
         history = [

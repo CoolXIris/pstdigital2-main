@@ -717,6 +717,136 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/796/th/126/'));
     }
 
+    public function test_catalog_fallback_shows_all_subregions_when_province_aggregate_is_missing(): void
+    {
+        $apiKey = 'bps-test-secret';
+        app(BpsWebApiService::class)->saveApiKey($apiKey);
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/999/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/999/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [[
+                        'val' => 999,
+                        'label' => 'Jumlah Indikator Menurut Kabupaten/Kota',
+                        'unit' => 'Orang',
+                    ]],
+                    'vervar' => [
+                        ['val' => 1601, 'label' => 'Ogan Ilir'],
+                        ['val' => 1614, 'label' => 'Palembang'],
+                    ],
+                    'turvar' => [],
+                    'datacontent' => [
+                        '160199901250' => 123,
+                        '161499901250' => 456,
+                    ],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $service = app(BpsWebApiService::class);
+        $region = [
+            'label' => 'Provinsi Sumatera Selatan',
+            'kind' => 'province',
+        ];
+        $variable = [
+            'var_id' => 999,
+            'label' => 'Jumlah Indikator Menurut Kabupaten/Kota',
+        ];
+        $lookupMethod = new \ReflectionMethod(BpsWebApiService::class, 'fallbackVariableLookup');
+        $lookup = $lookupMethod->invoke(
+            $service,
+            $variable,
+            'jumlah indikator Sumsel',
+            $region,
+            $apiKey
+        );
+        $this->assertNotNull($lookup['context']);
+        $detailsMethod = new \ReflectionMethod(BpsWebApiService::class, 'dynamicFallbackDetails');
+        $details = $detailsMethod->invoke(
+            $service,
+            'jumlah indikator Sumsel',
+            $region,
+            false,
+            $lookup['context']
+        );
+
+        $this->assertStringContainsString('agregat Provinsi Sumatera Selatan tidak tersedia', $details);
+        $this->assertStringContainsString('Ogan Ilir: 123 Orang', $details);
+        $this->assertStringContainsString('Palembang: 456 Orang', $details);
+    }
+
+    public function test_provincial_series_with_an_explicit_aggregate_row_is_not_treated_as_missing(): void
+    {
+        $apiKey = 'bps-test-secret';
+        app(BpsWebApiService::class)->saveApiKey($apiKey);
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/821/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/821/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [[
+                        'val' => 821,
+                        'label' => 'Laju Pertumbuhan PDRB Tahunan Provinsi Sumatera Selatan',
+                        'unit' => 'Persen',
+                    ]],
+                    'vervar' => [
+                        ['val' => 1, 'label' => 'C. Produk Domestik Regional Bruto'],
+                        ['val' => 2, 'label' => 'D. Produk Domestik Regional Bruto Tanpa Migas'],
+                    ],
+                    'turvar' => [],
+                    'datacontent' => [
+                        '1821001250' => 5.35,
+                        '2821001250' => 6.07,
+                    ],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $service = app(BpsWebApiService::class);
+        $region = [
+            'label' => 'Provinsi Sumatera Selatan',
+            'kind' => 'province',
+        ];
+        $lookupMethod = new \ReflectionMethod(BpsWebApiService::class, 'fallbackVariableLookup');
+        $lookup = $lookupMethod->invoke(
+            $service,
+            ['var_id' => 821, 'label' => 'Laju Pertumbuhan PDRB Tahunan'],
+            'Laju Pertumbuhan PDRB Tahunan Sumsel terbaru',
+            $region,
+            $apiKey
+        );
+        $detailsMethod = new \ReflectionMethod(BpsWebApiService::class, 'dynamicFallbackDetails');
+        $details = $detailsMethod->invoke(
+            $service,
+            'Laju Pertumbuhan PDRB Tahunan Sumsel terbaru',
+            $region,
+            false,
+            $lookup['context']
+        );
+
+        $this->assertStringContainsString('Total: 5,35 Persen', $details);
+        $this->assertStringNotContainsString('baris Provinsi Sumatera Selatan tidak tersedia', $details);
+    }
+
     public function test_fallback_uses_a_configured_topic_for_a_requested_city(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');

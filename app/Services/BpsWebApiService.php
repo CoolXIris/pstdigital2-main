@@ -1104,10 +1104,35 @@ class BpsWebApiService
             : (($region['kind'] ?? null) === 'province'
                 ? $this->provinceVervarRow($response->json('vervar'))
                 : $this->regionVervarRow($region, $response->json('vervar')));
-        if ($regionRow === null) {
+        $subregionalRows = [];
+        if ($regionRow === null
+            && ($region['kind'] ?? null) === 'province'
+            && ! filled($variable['vervar_label'] ?? null)) {
+            foreach (config('sumsel_regions', []) as $subregion) {
+                $subregionalRow = $this->regionVervarRow($subregion, $response->json('vervar'));
+                if ($subregionalRow !== null) {
+                    $subregionalRows[] = $subregionalRow;
+                }
+            }
+        }
+        $subregionalFallback = $subregionalRows !== [];
+        if ($regionRow === null
+            && ! $subregionalFallback
+            && ($region['kind'] ?? null) === 'province'
+            && ! filled($variable['vervar_label'] ?? null)) {
+            $aggregateRow = $this->provinceAggregateVervarRow($response->json('vervar'));
+            if ($aggregateRow !== null) {
+                $regionRow = $aggregateRow;
+                $variable['vervar_label'] = (string) $aggregateRow['label'];
+                $variable['wilayah_cakupan'] = 'Provinsi Sumatera Selatan';
+            }
+        }
+        if ($regionRow === null && ! $subregionalFallback) {
             return ['context' => null, 'reason' => 'baris '.$region['label'].' tidak tersedia pada indikator '.$variable['label'].'.', 'year_notice' => $yearNotice];
         }
-        $values = $this->valuesForRegion($response->json('datacontent'), $regionRow);
+        $values = $subregionalFallback
+            ? $response->json('datacontent')
+            : $this->valuesForRegion($response->json('datacontent'), $regionRow);
         if ($values === []) {
             return ['context' => null, 'reason' => 'nilai untuk '.$region['label'].' pada indikator '.$variable['label'].' tidak ditemukan.', 'year_notice' => $yearNotice];
         }
@@ -1115,7 +1140,9 @@ class BpsWebApiService
         $metadata = [
             'var_id' => $variableId,
             'title' => $variable['label'],
-            'level' => ($region['kind'] ?? null) === 'province' ? 'province' : 'kab_kota',
+            'level' => $subregionalFallback
+                ? 'kab_kota'
+                : ((($region['kind'] ?? null) === 'province') ? 'province' : 'kab_kota'),
             'sifat_data' => $variable['sifat_data'] ?? null,
             'catatan_sumber' => $variable['catatan_sumber'] ?? null,
             'vervar_label' => $variable['vervar_label'] ?? null,
@@ -1125,9 +1152,19 @@ class BpsWebApiService
         ];
 
         return [
-            'context' => $this->formatDynamicContext($metadata, $response, $year, null, $regionRow, $values),
+            'context' => $this->formatDynamicContext(
+                $metadata,
+                $response,
+                $year,
+                null,
+                $subregionalFallback ? null : $regionRow,
+                $values,
+                $subregionalFallback
+            ),
             'reason' => null,
-            'year_notice' => $yearNotice,
+            'year_notice' => $subregionalFallback && $yearNotice !== null
+                ? "Data {$requestedYear} belum dirilis. Data terbaru yang tersedia pada seri kabupaten/kota ({$year}):"
+                : $yearNotice,
         ];
     }
 
@@ -1892,6 +1929,10 @@ class BpsWebApiService
         if ($context === null || $this->isUnavailableDataContext($context)) {
             return null;
         }
+        $subregionalFallback = str_starts_with($context, '[WebAPI BPS][CAKUPAN_KAB_KOTA] ');
+        if ($subregionalFallback) {
+            $context = substr($context, strlen('[WebAPI BPS][CAKUPAN_KAB_KOTA] '));
+        }
         $provinceFallback = str_starts_with($context, '[WebAPI BPS][CAKUPAN_PROVINSI] ');
         if ($provinceFallback) {
             $context = substr($context, strlen('[WebAPI BPS][CAKUPAN_PROVINSI] '));
@@ -1910,7 +1951,20 @@ class BpsWebApiService
         }
 
         $vervar = $payload['wilayah'] ?? null;
-        if (filled($payload['vervar_label'] ?? null)) {
+        if ($subregionalFallback) {
+            $regionRows = [];
+            foreach (config('sumsel_regions', []) as $subregion) {
+                $subregionalRow = $this->regionVervarRow($subregion, $vervar);
+                if ($subregionalRow !== null) {
+                    $regionRows[] = $subregionalRow;
+                }
+            }
+            if ($regionRows === []) {
+                return null;
+            }
+            $regionRow = null;
+            $regionLabel = 'kabupaten/kota di Sumatera Selatan';
+        } elseif (filled($payload['vervar_label'] ?? null)) {
             $regionRow = $this->vervarRowByLabel($vervar, (string) $payload['vervar_label']);
             $regionLabel = (string) ($payload['wilayah_cakupan'] ?? $region['label'] ?? 'Provinsi Sumatera Selatan');
         } elseif ($region !== null && ! $provinceFallback) {
@@ -1920,12 +1974,13 @@ class BpsWebApiService
             $regionRow = $this->provinceVervarRow($vervar);
             $regionLabel = 'Provinsi Sumatera Selatan';
         }
-        if ($regionRow === null || ! is_scalar($regionRow['val'] ?? null)) {
+        if (! $subregionalFallback
+            && ($regionRow === null || ! is_scalar($regionRow['val'] ?? null))) {
             return null;
         }
 
         $categories = is_array($payload['kategori'] ?? null) ? $payload['kategori'] : [];
-        if ($populationQuestion) {
+        if ($populationQuestion && ! $subregionalFallback) {
             $categories = array_values(array_filter($categories, fn ($category) => is_array($category)
                 && preg_match('/^(jumlah|total|tidak ada|laki-laki\s*\+\s*perempuan)$/iu', trim((string) ($category['label'] ?? ''))) === 1));
             if ($categories === []) {
@@ -1936,31 +1991,44 @@ class BpsWebApiService
         }
 
         $details = [];
-        foreach ($categories as $category) {
-            $prefix = (string) $regionRow['val'].(string) $payload['var_id'];
-            if (is_scalar($category['val'] ?? null)) {
-                $prefix .= (string) $category['val'];
-            }
-            $matchesForCategory = array_filter(
-                $payload['nilai'],
-                fn ($value, $key) => is_numeric($value) && str_starts_with((string) $key, $prefix),
-                ARRAY_FILTER_USE_BOTH
-            );
-            if (count($matchesForCategory) !== 1) {
-                continue;
-            }
+        $regionRowsToFormat = $subregionalFallback ? $regionRows : [$regionRow];
+        foreach ($regionRowsToFormat as $currentRegionRow) {
+            foreach ($categories as $category) {
+                $prefix = (string) $currentRegionRow['val'].(string) $payload['var_id'];
+                if (is_scalar($category['val'] ?? null)) {
+                    $prefix .= (string) $category['val'];
+                }
+                $matchesForCategory = array_filter(
+                    $payload['nilai'],
+                    fn ($value, $key) => is_numeric($value) && str_starts_with((string) $key, $prefix),
+                    ARRAY_FILTER_USE_BOTH
+                );
+                if (count($matchesForCategory) !== 1) {
+                    continue;
+                }
 
-            $categoryLabel = preg_match('/^laki-laki\s*\+\s*perempuan$/iu', (string) ($category['label'] ?? ''))
-                ? 'Total'
-                : (preg_match('/^tidak ada$/iu', (string) ($category['label'] ?? ''))
+                $categoryLabel = preg_match('/^laki-laki\s*\+\s*perempuan$/iu', (string) ($category['label'] ?? ''))
                     ? 'Total'
-                    : ($category['label'] ?? 'Nilai'));
-            $rawValue = (string) reset($matchesForCategory);
-            $decimalPart = explode('.', $rawValue, 2)[1] ?? '';
-            $decimalPlaces = min(strlen(rtrim($decimalPart, '0')), 6);
-            $value = number_format((float) $rawValue, $decimalPlaces, ',', '.');
-            $unit = filled($payload['satuan'] ?? null) ? ' '.trim((string) $payload['satuan']) : '';
-            $details[] = $categoryLabel.': '.$value.$unit;
+                    : (preg_match('/^tidak ada$/iu', (string) ($category['label'] ?? ''))
+                        ? 'Total'
+                        : ($this->provinceAggregateVervarRow([[
+                            'label' => $payload['vervar_label'] ?? '',
+                        ]]) !== null
+                            ? 'Total'
+                            : ($category['label'] ?? 'Nilai')));
+                $rawValue = (string) reset($matchesForCategory);
+                $decimalPart = explode('.', $rawValue, 2)[1] ?? '';
+                $decimalPlaces = min(strlen(rtrim($decimalPart, '0')), 6);
+                $value = number_format((float) $rawValue, $decimalPlaces, ',', '.');
+                $unit = filled($payload['satuan'] ?? null) ? ' '.trim((string) $payload['satuan']) : '';
+                $label = $subregionalFallback ? ($currentRegionRow['label'].': ') : '';
+                if ($subregionalFallback && $categoryLabel !== 'Nilai') {
+                    $label .= $categoryLabel.': ';
+                } elseif (! $subregionalFallback) {
+                    $label .= $categoryLabel.': ';
+                }
+                $details[] = $label.$value.$unit;
+            }
         }
         if ($details === []) {
             return null;
@@ -1970,7 +2038,11 @@ class BpsWebApiService
             ? ' '.$payload['periode']
             : '';
 
-        $answer = 'Data WebAPI BPS untuk '.$payload['indikator'].' di '.$regionLabel.' tahun '.$payload['tahun'].$period.":\n".implode("\n", $details);
+        $answer = ($subregionalFallback
+            ? 'Maaf, data agregat Provinsi Sumatera Selatan tidak tersedia untuk indikator ini. '
+                .'Namun, data per kabupaten/kota berikut tersedia:'."\n"
+            : '')
+            .'Data WebAPI BPS untuk '.$payload['indikator'].' di '.$regionLabel.' tahun '.$payload['tahun'].$period.":\n".implode("\n", $details);
         if ($provinceFallback && $region !== null) {
             return 'Data khusus '.$region['label'].' tidak ditemukan; berikut data tingkat Provinsi Sumatera Selatan.'."\n".$answer;
         }
@@ -2042,6 +2114,31 @@ class BpsWebApiService
             $label = Str::lower(trim((string) ($row['label'] ?? '')));
             $label = trim(preg_replace('/^provinsi\s+/u', '', $label) ?? $label);
             if (in_array($label, ['sumatera selatan', 'sumsel'], true)) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function provinceAggregateVervarRow(mixed $vervar): ?array
+    {
+        if (! is_array($vervar)) {
+            return null;
+        }
+
+        foreach ($vervar as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $label = Str::lower(trim((string) ($row['label'] ?? '')));
+            $label = trim(preg_replace('/^(?:[a-z]\s*[\.\-\)]\s*|\d+\s*[\.\-\)]?\s*)/u', '', $label) ?? $label);
+            if (in_array($label, [
+                'jumlah',
+                'total',
+                'produk domestik regional bruto',
+                'perkotaan+pedesaan',
+            ], true)) {
                 return $row;
             }
         }
@@ -2762,7 +2859,8 @@ class BpsWebApiService
         string $year,
         ?string $quarter,
         ?array $regionRow,
-        array $values
+        array $values,
+        bool $subregionalFallback = false
     ): string {
         $payload = [
             'indikator' => $response->json('var.0.label', $variable['title']),
@@ -2783,8 +2881,12 @@ class BpsWebApiService
             'nilai' => $values,
         ];
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $context = '[Sumber: WebAPI BPS Sumatera Selatan, '.$variable['title'].'] '
+            .Str::limit($json ?: '', $subregionalFallback ? 50000 : 7000, '...');
 
-        return '[Sumber: WebAPI BPS Sumatera Selatan, '.$variable['title'].'] '.Str::limit($json ?: '', 7000, '...');
+        return $subregionalFallback
+            ? '[WebAPI BPS][CAKUPAN_KAB_KOTA] '.$context
+            : $context;
     }
 
     private function requestedQuarter(string $question): ?int
