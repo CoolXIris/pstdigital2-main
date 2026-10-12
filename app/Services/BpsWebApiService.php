@@ -539,6 +539,23 @@ class BpsWebApiService
         }
 
         $topics = array_slice($this->matchFallbackTopics($question), 0, 3);
+        if ($this->hasSeparatePopulationTotalRequest($question)
+            && collect($topics)->contains(fn (array $topic) => ($topic['key'] ?? null) === 'kemiskinan')) {
+            $topics[] = [
+                'key' => 'jumlah_penduduk',
+                'label' => 'Jumlah penduduk',
+                'keywords' => ['penduduk', 'warga'],
+                'variables' => [
+                    ['var_id' => 262, 'label' => 'Jumlah Penduduk Menurut Kabupaten/Kota'],
+                ],
+                'province_variables' => [
+                    ['var_id' => 262, 'label' => 'Jumlah Penduduk Menurut Kabupaten/Kota'],
+                ],
+                'province_only' => false,
+                'population_total' => true,
+                'suppress_brs' => true,
+            ];
+        }
         $regions = array_slice($this->regionsMentioned($question), 0, 3);
         if ($regions === []) {
             $regions = [$this->provinceFallbackRegion()];
@@ -897,7 +914,7 @@ class BpsWebApiService
                     continue;
                 }
 
-                $sectionTitle = Str::ucfirst($topic['label']).' '.$region['label'];
+                $sectionTitle = Str::ucfirst($topic['section_label'] ?? $topic['label']).' '.$region['label'];
                 $sections[] = $sectionTitle.':';
                 $regional = ($region['kind'] ?? null) === 'region';
                 $regionalVariables = $regional ? ($topic['variables'] ?? []) : [];
@@ -906,25 +923,48 @@ class BpsWebApiService
                 $variables = $useProvinceVariables
                     ? ($topic['province_variables'] ?? [])
                     : $regionalVariables;
-                $selected = $this->selectFallbackVariable($variables, $question);
+                $selectedVariables = $this->selectFallbackVariables(
+                    $variables,
+                    $question,
+                    ($topic['key'] ?? null) === 'kemiskinan'
+                );
                 $details = null;
 
-                if ($selected !== null) {
-                    $dataRegion = $useProvinceVariables ? $this->provinceFallbackRegion() : $region;
-                    $lookup = $this->fallbackVariableLookup($selected, $question, $dataRegion, $apiKey);
-                    if ($lookup['context'] !== null) {
-                        $details = $this->dynamicFallbackDetails($question, $dataRegion, false, $lookup['context']);
-                        if ($details !== null && $lookup['year_notice'] !== null) {
-                            $details = $lookup['year_notice']."\n".$details;
-                        }
-                        if ($details !== null && $regional && $provinceOnly) {
-                            $details = 'Indikator ini hanya tersedia pada tingkat Provinsi Sumatera Selatan; bukan data khusus '.$region['label'].".\n".$details;
-                        } elseif ($details !== null && $regional && $dataRegion !== $region) {
-                            $details = 'Data tingkat kabupaten/kota untuk indikator ini tidak tersedia; berikut data tingkat Provinsi Sumatera Selatan.'."\n".$details;
-                        }
-                    } elseif ($lookup['reason'] !== null) {
-                        if ($regional && ! $provinceOnly && ! $useProvinceVariables) {
-                            $provinceVariable = $this->selectFallbackVariable($topic['province_variables'] ?? [], $question);
+                if ($selectedVariables !== []) {
+                    $detailLines = [];
+                    $provinceVariables = $this->selectFallbackVariables(
+                        $topic['province_variables'] ?? [],
+                        $question,
+                        ($topic['key'] ?? null) === 'kemiskinan'
+                    );
+                    foreach ($selectedVariables as $selected) {
+                        $dataRegion = $useProvinceVariables ? $this->provinceFallbackRegion() : $region;
+                        $lookup = $this->fallbackVariableLookup($selected, $question, $dataRegion, $apiKey);
+                        $variableDetails = null;
+                        if ($lookup['context'] !== null) {
+                            $variableDetails = $this->dynamicFallbackDetails(
+                                $question,
+                                $dataRegion,
+                                (bool) ($topic['population_total'] ?? false),
+                                $lookup['context']
+                            );
+                            if ($variableDetails !== null && $lookup['year_notice'] !== null) {
+                                $variableDetails = $lookup['year_notice']."\n".$variableDetails;
+                            }
+                            if ($variableDetails !== null && $regional && $provinceOnly) {
+                                $variableDetails = 'Indikator ini hanya tersedia pada tingkat Provinsi Sumatera Selatan; bukan data khusus '.$region['label'].".\n".$variableDetails;
+                            } elseif ($variableDetails !== null && $regional && $dataRegion !== $region) {
+                                $variableDetails = 'Data tingkat kabupaten/kota untuk indikator ini tidak tersedia; berikut data tingkat Provinsi Sumatera Selatan.'."\n".$variableDetails;
+                            }
+                        } elseif ($lookup['reason'] !== null
+                            && $regional
+                            && ! $provinceOnly
+                            && ! $useProvinceVariables) {
+                            $provinceVariable = $this->selectFallbackVariableForMissingRegion(
+                                $provinceVariables,
+                                $selected,
+                                $question
+                            );
                             if ($provinceVariable !== null) {
                                 $provinceLookup = $this->fallbackVariableLookup(
                                     $provinceVariable,
@@ -933,25 +973,28 @@ class BpsWebApiService
                                     $apiKey
                                 );
                                 if ($provinceLookup['context'] !== null) {
-                                    $details = $this->dynamicFallbackDetails(
+                                    $variableDetails = $this->dynamicFallbackDetails(
                                         $question,
                                         $this->provinceFallbackRegion(),
-                                        false,
+                                        (bool) ($topic['population_total'] ?? false),
                                         $provinceLookup['context']
                                     );
-                                    if ($details !== null) {
-                                        $details = 'Data kabupaten/kota untuk indikator ini belum tersedia; berikut data tingkat Provinsi Sumatera Selatan.'."\n".$details;
+                                    if ($variableDetails !== null) {
+                                        $variableDetails = 'Data kabupaten/kota untuk indikator ini belum tersedia; berikut data tingkat Provinsi Sumatera Selatan.'."\n".$variableDetails;
                                         if ($provinceLookup['year_notice'] !== null) {
-                                            $details = $provinceLookup['year_notice']."\n".$details;
+                                            $variableDetails = $provinceLookup['year_notice']."\n".$variableDetails;
                                         }
                                     }
                                 }
                             }
                         }
-                        if ($details === null) {
-                            $sections[] = 'Data variabel belum ditemukan: '.$lookup['reason'];
+                        if ($variableDetails !== null) {
+                            $detailLines[] = $variableDetails;
+                        } elseif ($lookup['reason'] !== null) {
+                            $detailLines[] = 'Data '.$selected['label'].' belum ditemukan: '.$lookup['reason'];
                         }
                     }
+                    $details = $detailLines === [] ? null : implode("\n\n", array_unique($detailLines));
                 } elseif ($variables !== []) {
                     $legacyQuery = null;
                     if ($regional && ! $provinceOnly) {
@@ -972,9 +1015,7 @@ class BpsWebApiService
                         && ! str_starts_with($legacyContext, '[WebAPI BPS][INDIKATOR_AMBIGU]')) {
                         $details = $this->dynamicFallbackDetails($legacyQuery, $region, false, $legacyContext);
                     }
-                    if ($details !== null) {
-                        $sections[] = $details;
-                    } else {
+                    if ($details === null) {
                         $sections[] = 'Belum dapat dipastikan indikator yang dimaksud. Kandidat: '.implode(', ', array_column($variables, 'label')).'.';
                     }
                 } else {
@@ -991,9 +1032,11 @@ class BpsWebApiService
                     $regionUnavailable[] = $region['label'].' untuk '.$topic['label'];
                 }
 
-                $brs = $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
-                if ($brs !== null) {
-                    $releaseEntries[] = $brs;
+                if (! ($topic['suppress_brs'] ?? false)) {
+                    $brs = $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
+                    if ($brs !== null) {
+                        $releaseEntries[] = $brs;
+                    }
                 }
             }
         }
@@ -1018,13 +1061,17 @@ class BpsWebApiService
         return implode("\n", $lines);
     }
 
-    private function selectFallbackVariable(array $variables, string $question): ?array
+    private function selectFallbackVariables(
+        array $variables,
+        string $question,
+        bool $returnAllWithoutSpecificMatch = false
+    ): array
     {
         if ($variables === []) {
-            return null;
+            return [];
         }
         if (count($variables) === 1) {
-            return $variables[0];
+            return [$variables[0]];
         }
 
         $scores = [];
@@ -1035,11 +1082,52 @@ class BpsWebApiService
             ];
         }
         usort($scores, fn (array $left, array $right) => $right['score'] <=> $left['score']);
-        if (($scores[0]['score'] ?? 0) === 0 || ($scores[0]['score'] ?? 0) === ($scores[1]['score'] ?? 0)) {
-            return null;
+        $bestScore = $scores[0]['score'] ?? 0;
+        if ($bestScore === 0) {
+            return $returnAllWithoutSpecificMatch ? $variables : [];
         }
 
-        return $scores[0]['variable'];
+        return array_values(array_map(
+            fn (array $score) => $score['variable'],
+            array_filter($scores, fn (array $score) => $score['score'] === $bestScore)
+        ));
+    }
+
+    private function selectFallbackVariable(array $variables, string $question): ?array
+    {
+        $matches = $this->selectFallbackVariables($variables, $question);
+
+        return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    private function selectFallbackVariableForMissingRegion(
+        array $provinceVariables,
+        array $regionalVariable,
+        string $question
+    ): ?array {
+        foreach ($provinceVariables as $provinceVariable) {
+            if ((int) ($provinceVariable['var_id'] ?? 0) === (int) ($regionalVariable['var_id'] ?? -1)) {
+                return $provinceVariable;
+            }
+        }
+
+        $matches = $this->selectFallbackVariables($provinceVariables, $question);
+
+        return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    private function hasSeparatePopulationTotalRequest(string $question): bool
+    {
+        $questionWithoutPoorPopulation = preg_replace(
+            '/\b(?:jumlah|total)?\s*(?:penduduk|warga)\s+miskin\w*\b/iu',
+            ' ',
+            $question
+        ) ?? $question;
+
+        return preg_match(
+            '/\b(?:jumlah|total)\s+(?:total\s+)?(?:penduduk|warga)\b/iu',
+            $questionWithoutPoorPopulation
+        ) === 1;
     }
 
     private function isProvinceOnlyFallbackTopic(array $topic, string $question): bool

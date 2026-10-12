@@ -948,6 +948,119 @@ class AdminManagementPagesTest extends BaseTestCase
         Carbon::setTestNow();
     }
 
+    public function test_fallback_returns_ambiguous_poverty_indicators_for_each_compared_city(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (preg_match('~/model/th/domain/1600/var/(\d+)/~', $url, $match)) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (preg_match('~/model/data/domain/1600/var/(\d+)/~', $url, $match)) {
+                $variableId = (int) $match[1];
+                $metadata = [
+                    604 => ['Persentase Penduduk Miskin menurut Kabupaten/Kota', 'Persen'],
+                    679 => ['Garis Kemiskinan menurut Kabupaten/Kota', 'Rupiah'],
+                    683 => ['Jumlah Penduduk Miskin Maret Menurut Kab/Kota', 'Ribu Jiwa'],
+                ][$variableId];
+
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => $variableId, 'label' => $metadata[0], 'unit' => $metadata[1]]],
+                    'vervar' => [
+                        ['val' => 1672, 'label' => 'Prabumulih'],
+                        ['val' => 1671, 'label' => 'Palembang'],
+                    ],
+                    'turvar' => [],
+                    'datacontent' => [
+                        '1672'.$variableId.'125' => $variableId === 604 ? 11.2 : ($variableId === 679 ? 543210 : 19.23),
+                        '1671'.$variableId.'125' => $variableId === 604 ? 8.4 : ($variableId === 679 ? 612345 : 31.45),
+                    ],
+                ]);
+            }
+            if (str_contains($url, '/model/pressrelease/')) {
+                return Http::response(['status' => 'OK', 'data' => [['total' => 0, 'pages' => 1], []]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $reply = app(BpsWebApiService::class)->fallbackAnswerFor(
+            'Kemiskinan di prabumulih dibandingkan dengan palembang'
+        );
+
+        $this->assertStringContainsString('Kemiskinan dan ketimpangan Kota Prabumulih', $reply);
+        $this->assertStringContainsString('Kemiskinan dan ketimpangan Kota Palembang', $reply);
+        $this->assertStringContainsString('11,2 Persen', $reply);
+        $this->assertStringContainsString('8,4 Persen', $reply);
+        $this->assertStringContainsString('19,23 Ribu Jiwa', $reply);
+        $this->assertStringContainsString('31,45 Ribu Jiwa', $reply);
+        $this->assertStringContainsString('543.210 Rupiah', $reply);
+        $this->assertStringContainsString('612.345 Rupiah', $reply);
+    }
+
+    public function test_fallback_returns_each_requested_indicator_for_each_compared_city(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (preg_match('~/model/th/domain/1600/var/(\d+)/~', $url, $match)) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[], [['th' => '2025', 'th_id' => 125]]],
+                ]);
+            }
+            if (preg_match('~/model/data/domain/1600/var/(\d+)/~', $url, $match)) {
+                $variableId = (int) $match[1];
+                $regions = [
+                    ['val' => 1672, 'label' => 'Prabumulih'],
+                    ['val' => 1603, 'label' => 'Muara Enim'],
+                ];
+                $population = $variableId === 262;
+                $values = $population
+                    ? ['16722620125' => 230000, '16032620125' => 650000]
+                    : ['1672683125' => 18.87, '1603683125' => 39.58];
+
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [[
+                        'val' => $variableId,
+                        'label' => $population
+                            ? 'Jumlah Penduduk Menurut Kabupaten/Kota'
+                            : 'Jumlah Penduduk Miskin Maret Menurut Kab/Kota',
+                        'unit' => $population ? 'Jiwa' : 'Ribu Jiwa',
+                    ]],
+                    'vervar' => $regions,
+                    'turvar' => $population ? [['val' => 0, 'label' => 'Tidak ada']] : [],
+                    'datacontent' => $values,
+                ]);
+            }
+            if (str_contains($url, '/model/pressrelease/')) {
+                return Http::response(['status' => 'OK', 'data' => [['total' => 0, 'pages' => 1], []]]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $reply = app(BpsWebApiService::class)->fallbackAnswerFor(
+            'bandingkan jumlah penduduk miskin dan jumlah total penduduk di kota prabumulih dan di kabupaten muara enim'
+        );
+
+        $this->assertStringContainsString('Kemiskinan dan ketimpangan Kota Prabumulih', $reply);
+        $this->assertStringContainsString('Kemiskinan dan ketimpangan Kabupaten Muara Enim', $reply);
+        $this->assertStringContainsString('Jumlah penduduk Kota Prabumulih', $reply);
+        $this->assertStringContainsString('Jumlah penduduk Kabupaten Muara Enim', $reply);
+        $this->assertStringContainsString('18,87 Ribu Jiwa', $reply);
+        $this->assertStringContainsString('39,58 Ribu Jiwa', $reply);
+        $this->assertStringContainsString('230.000 Jiwa', $reply);
+        $this->assertStringContainsString('650.000 Jiwa', $reply);
+    }
+
     public function test_fallback_diagnostic_command_reports_topics_variables_years_and_vervar(): void
     {
         app(BpsWebApiService::class)->saveApiKey('bps-test-secret');

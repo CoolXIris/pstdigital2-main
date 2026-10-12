@@ -86,6 +86,7 @@ _VARIABLE_SYNONYM_GROUPS = (
 _VARIABLE_SYNONYM_PHRASES = (
     ("fasilitas kesehatan", ("rumah sakit umum", "rumah sakit", "rsud", "faskes")),
     ("jenis kelamin", ("gender", "sex")),
+    ("nilai tukar petani", ("ntp",)),
     ("penjara", ("masuk penjara", "dipenjara", "masuk tahanan")),
 )
 _RELATED_VARIABLE_SYNONYMS = {
@@ -661,9 +662,10 @@ def cari_variabel(kata_kunci: str) -> dict:
     Args:
         kata_kunci: kata inti indikator yang dicari.
 
-    Pencarian juga menormalkan sinonim umum seperti pria/laki-laki,
-    wanita/perempuan, dan rumah sakit/fasilitas kesehatan. Pastikan judul
-    hasil tetap sesuai karena sebagian sinonim dapat menunjuk kategori yang lebih luas.
+    Pencarian juga menormalkan sinonim umum seperti NTP/nilai tukar petani,
+    pria/laki-laki, wanita/perempuan, dan rumah sakit/fasilitas kesehatan.
+    Pastikan judul hasil tetap sesuai karena sebagian sinonim dapat menunjuk
+    kategori yang lebih luas.
     """
     keyword = _clean_search_keyword(kata_kunci or "")
     if not keyword:

@@ -269,6 +269,23 @@ class BpsToolsTests(unittest.TestCase):
         self.assertIn("gaji", bps_tools._search_keyword_variants("upah"))
         self.assertIn("pengangguran", bps_tools._search_keyword_variants("penganggur"))
 
+    def test_ntp_abbreviation_finds_the_nilai_tukar_petani_variable(self):
+        catalog = bps_tools._load_catalog_index()
+        with (
+            patch.object(bps_tools, "_variable_index", return_value=catalog),
+            patch.object(
+                bps_tools,
+                "_latest_year",
+                side_effect=bps_tools.BpsError("Use catalog year metadata."),
+            ),
+        ):
+            result = bps_tools.cari_variabel("ntp")
+
+        self.assertEqual(bps_tools._clean_search_keyword("ntp"), "tukar petani")
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(result["hasil"][0]["var_id"], 645)
+        self.assertEqual(result["hasil"][0]["tahun_terbaru"], "2026")
+
     def test_catalog_variable_search_expands_common_gender_and_healthcare_terms(self):
         catalog = bps_tools._load_catalog_index()
         with (

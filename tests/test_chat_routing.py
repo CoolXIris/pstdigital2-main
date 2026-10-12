@@ -587,6 +587,70 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(result["reply"], "Pada 2025 tercatat 42 kasus penderita penyakit.")
         self.assertEqual(result["tools_used"], True)
 
+    def test_ntp_sumsel_latest_uses_the_current_variable_instead_of_static_tables(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[
+                            main.types.Part(
+                                text="NTP Sumatera Selatan pada Agustus 2026 sebesar 150,53 persen."
+                            )
+                        ],
+                    )
+                )
+            ]
+        )
+        fake_models = type(
+            "FakeModels",
+            (),
+            {"generate_content": lambda *_args, **_kwargs: response},
+        )()
+        fake_client = type("FakeClient", (), {"models": fake_models})()
+        search_result = {
+            "status_hasil": "ditemukan",
+            "hasil": [{
+                "var_id": 645,
+                "judul": "Perkembangan Nilai Tukar Petani",
+                "satuan": "Persen",
+                "tahun_terbaru": "2026",
+                "skor_kemiripan": 100,
+                "jenis_kecocokan": "direct",
+            }],
+        }
+        data_result = {
+            "judul": "Perkembangan Nilai Tukar Petani",
+            "satuan": "Persen",
+            "tahun": "2026",
+            "data": [
+                {"wilayah": "NTP", "periode": "Agustus", "nilai": 150.53},
+                {"wilayah": "NTUP", "periode": "Agustus", "nilai": 149.92},
+            ],
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result) as search,
+            patch.object(main.bps_tools, "ambil_data", return_value=data_result) as fetch,
+            patch.object(main.bps_tools, "tabel_statis") as static_table,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="ntp sumsel terbaru")
+            )
+
+        search.assert_called_once_with("tukar petani")
+        fetch.assert_called_once_with(
+            645,
+            tahun=None,
+            wilayah="Provinsi Sumatera Selatan",
+        )
+        static_table.assert_not_called()
+        self.assertIn("150,53 persen", result["reply"])
+        self.assertTrue(result["tools_used"])
+
     def test_ambiguous_gender_series_return_latest_values_with_requested_year_notice(self):
         candidates = [
             {

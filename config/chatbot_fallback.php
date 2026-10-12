@@ -88,6 +88,7 @@ return [
         ],
         'kemiskinan' => [
             'label' => 'kemiskinan',
+            'section_label' => 'Kemiskinan dan ketimpangan',
             'keywords' => ['miskin', 'kemiskinan'],
             'title_keywords' => ['kemiskinan', 'penduduk miskin'],
             'province_only' => false,
