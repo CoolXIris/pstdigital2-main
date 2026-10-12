@@ -881,14 +881,15 @@ class BpsWebApiService
         string $closing
     ): string {
         $sections = [];
-        $releaseLines = [];
+        $releaseEntries = [];
+        $brsOnlyEntries = [];
         $regionUnavailable = [];
         foreach ($topics as $topic) {
             foreach ($regions as $region) {
                 if ($topic['brs_only'] ?? false) {
                     $brs = $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
                     if ($brs !== null) {
-                        $sections[] = $brs;
+                        $brsOnlyEntries[] = $brs;
                     } else {
                         $regionUnavailable[] = $region['label'].' untuk '.$topic['label'];
                     }
@@ -991,12 +992,14 @@ class BpsWebApiService
                 }
 
                 $brs = $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
-                if ($brs !== null && count($releaseLines) < 5) {
-                    $releaseLines[] = $brs;
+                if ($brs !== null) {
+                    $releaseEntries[] = $brs;
                 }
             }
         }
 
+        $sections = array_merge($sections, $this->formatGroupedPressReleases($brsOnlyEntries, 5));
+        $releaseLines = $this->formatGroupedPressReleases($releaseEntries, 5);
         $lines = [$notice, '', implode("\n\n", $sections)];
         if ($releaseLines !== []) {
             $lines[] = '';
@@ -1168,10 +1171,11 @@ class BpsWebApiService
         ];
     }
 
-    private function fallbackPressReleaseForPair(string $apiKey, array $topic, array $region): ?string
+    private function fallbackPressReleaseForPair(string $apiKey, array $topic, array $region): ?array
     {
         $pattern = $this->titlePatternForKeywords($topic['title_keywords']);
         $local = ($region['kind'] ?? null) === 'region';
+        $provinceFallback = false;
         try {
             $items = $local
                 ? $this->latestPressReleases($apiKey, $pattern, 1, 6, (string) $region['domain'])
@@ -1190,15 +1194,62 @@ class BpsWebApiService
             }
             if ($items === [] && $local) {
                 $items = $this->latestPressReleases($apiKey, $pattern, 1);
-                $intro = str_replace('{topic}', $topic['label'], config('chatbot_fallback.topic_intro'))
-                    .' Catatan: data berikut berlaku untuk tingkat Provinsi Sumatera Selatan, bukan untuk '.$region['label'].'.';
+                $intro = str_replace('{topic}', $topic['label'], config('chatbot_fallback.topic_intro'));
+                $provinceFallback = true;
             }
         } catch (ConnectionException) {
             return null;
         }
 
-        return $items === [] ? null : $intro."\n".$items[0]['judul']
-            .(isset($items[0]['tanggal']) ? ' (rilis: '.$items[0]['tanggal'].')' : '');
+        if ($items === []) {
+            return null;
+        }
+
+        return [
+            'topic' => $topic['label'],
+            'intro' => $intro,
+            'title' => $items[0]['judul'],
+            'date' => $items[0]['tanggal'] ?? null,
+            'region' => $region['label'],
+            'province_fallback' => $provinceFallback,
+        ];
+    }
+
+    private function formatGroupedPressReleases(array $entries, int $limit): array
+    {
+        $groups = [];
+        foreach ($entries as $entry) {
+            $key = json_encode([
+                $entry['topic'],
+                $entry['title'],
+                $entry['date'],
+                $entry['province_fallback'],
+                $entry['province_fallback'] ? null : $entry['intro'],
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (! isset($groups[$key])) {
+                $groups[$key] = $entry;
+                $groups[$key]['regions'] = [];
+            }
+            $groups[$key]['regions'][] = $entry['region'];
+        }
+
+        $lines = [];
+        foreach (array_slice($groups, 0, $limit) as $group) {
+            $intro = $group['intro'];
+            if ($group['province_fallback']) {
+                $regions = array_values(array_unique($group['regions']));
+                $regionList = count($regions) > 1
+                    ? implode(', ', array_slice($regions, 0, -1)).' dan '.end($regions)
+                    : ($regions[0] ?? 'wilayah yang diminta');
+                $intro .= ' Catatan: data berikut berlaku untuk tingkat Provinsi Sumatera Selatan, bukan untuk '
+                    .$regionList.'.';
+            }
+
+            $lines[] = $intro."\n".$group['title']
+                .($group['date'] !== null ? ' (rilis: '.$group['date'].')' : '');
+        }
+
+        return $lines;
     }
 
     private function catalogIntent(string $question): ?array

@@ -1805,6 +1805,40 @@ class AdminManagementPagesTest extends BaseTestCase
         Carbon::setTestNow();
     }
 
+    public function test_same_provincial_press_release_is_shown_once_for_multiple_regions(): void
+    {
+        $service = app(BpsWebApiService::class);
+        $formatMethod = new \ReflectionMethod(BpsWebApiService::class, 'formatGroupedPressReleases');
+        $lines = $formatMethod->invoke($service, [
+            [
+                'topic' => 'kemiskinan',
+                'intro' => 'Berita Resmi Statistik terbaru tentang kemiskinan:',
+                'title' => 'Persentase Penduduk Miskin Maret 2026 sebesar 9,50 persen',
+                'date' => '2026-08-05',
+                'region' => 'Kabupaten Ogan Komering Ulu',
+                'province_fallback' => true,
+            ],
+            [
+                'topic' => 'kemiskinan',
+                'intro' => 'Berita Resmi Statistik terbaru tentang kemiskinan:',
+                'title' => 'Persentase Penduduk Miskin Maret 2026 sebesar 9,50 persen',
+                'date' => '2026-08-05',
+                'region' => 'Kabupaten Penukal Abab Lematang Ilir',
+                'province_fallback' => true,
+            ],
+        ], 5);
+
+        $this->assertCount(1, $lines);
+        $this->assertStringContainsString(
+            'bukan untuk Kabupaten Ogan Komering Ulu dan Kabupaten Penukal Abab Lematang Ilir.',
+            $lines[0]
+        );
+        $this->assertSame(
+            1,
+            substr_count($lines[0], 'Persentase Penduduk Miskin Maret 2026 sebesar 9,50 persen')
+        );
+    }
+
     public function test_chatbot_replaces_ai_http_error_with_fallback_instead_of_returning_502(): void
     {
         /** @var User $user */
