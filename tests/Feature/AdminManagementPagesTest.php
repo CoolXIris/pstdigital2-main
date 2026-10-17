@@ -1500,13 +1500,21 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_user_can_open_and_complete_their_profile(): void
     {
+        $this->seedWilayahCatalog();
+
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
         /** @var Authenticatable $authenticatedUser */
         $authenticatedUser = $user;
 
-        $this->actingAs($authenticatedUser)->get(route('profile'))->assertOk()->assertSee('Profil Saya')->assertSee('Katalog Publikasi');
+        $this->actingAs($authenticatedUser)
+            ->get(route('profile'))
+            ->assertOk()
+            ->assertSee('Profil Saya')
+            ->assertSee('Katalog Publikasi')
+            ->assertSee('list="profile-provinces"', false)
+            ->assertSee('list="profile-regencies"', false);
 
         $this->actingAs($authenticatedUser)->put(route('profile.update', $user), [
             'name' => $user->name,
@@ -1514,12 +1522,149 @@ class AdminManagementPagesTest extends BaseTestCase
             'jenis_kelamin' => '1',
             'tanggal_lahir' => '2000-01-01',
             'asal_prov' => 'Sumatera Selatan',
-            'asal_kab' => 'Palembang',
+            'asal_kab' => 'Kota Palembang',
             'no_hp' => '08123456789',
             'pendidikan' => 'S1 Statistik',
-        ])->assertRedirect('/')->assertSessionHas('message');
+        ])->assertRedirect(route('konsultasi.index'))->assertSessionHas('message');
 
-        $this->assertDatabaseHas('users', ['id' => $user->id, 'asal_kab' => 'Palembang', 'pendidikan' => 'S1 Statistik']);
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'asal_kab' => 'Kota Palembang', 'pendidikan' => 'S1 Statistik']);
+    }
+
+    public function test_region_api_returns_provinces_and_their_regencies(): void
+    {
+        $this->seedWilayahCatalog();
+
+        $user = User::factory()->create();
+        $this->actingAs($user)
+            ->getJson(route('profile.regions.provinces'))
+            ->assertOk()
+            ->assertJsonPath('0.code', '16');
+
+        $this->actingAs($user)
+            ->getJson(route('profile.regions.regencies', '16'))
+            ->assertOk()
+            ->assertJsonPath('0.name', 'Kota Palembang');
+
+        $this->actingAs($user)
+            ->getJson(route('profile.regions.regencies', '17'))
+            ->assertNotFound();
+        Http::assertNothingSent();
+    }
+
+    public function test_wilayah_sync_saves_the_api_snapshot_and_runtime_uses_sql(): void
+    {
+        Http::fake([
+            'https://wilayah.id/api/provinces.json' => Http::response([
+                'data' => [['code' => '16', 'name' => 'Sumatera Selatan']],
+            ]),
+            'https://wilayah.id/api/regencies/16.json' => Http::response([
+                'data' => [['code' => '16.71', 'name' => 'Kota Palembang']],
+            ]),
+        ]);
+
+        $this->artisan('wilayah:sync')->assertExitCode(0);
+        $this->assertDatabaseHas('wilayah_provinces', ['code' => '16', 'name' => 'Sumatera Selatan']);
+        $this->assertDatabaseHas('wilayah_regencies', [
+            'code' => '16.71',
+            'province_code' => '16',
+            'name' => 'Kota Palembang',
+        ]);
+
+        $this->assertSame('Kota Palembang', app(\App\Services\WilayahService::class)->regencies('16')[0]['name']);
+        $this->artisan('wilayah:sync')->assertExitCode(0);
+        Http::assertSentCount(2);
+    }
+
+    public function test_incomplete_profile_is_redirected_from_chatbot_and_consultation(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create([
+            'pekerjaan' => null,
+            'jenis_kelamin' => null,
+            'tanggal_lahir' => null,
+            'asal_prov' => null,
+            'asal_kab' => null,
+            'no_hp' => null,
+            'pendidikan' => null,
+        ]);
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+
+        $this->actingAs($authenticatedUser)
+            ->get(route('chatbot.index'))
+            ->assertRedirect(route('profile'))
+            ->assertSessionHas('warning');
+        $this->actingAs($authenticatedUser)
+            ->postJson(route('chatbot.message'), ['message' => 'Halo'])
+            ->assertRedirect(route('profile'));
+        $this->actingAs($authenticatedUser)
+            ->get(route('konsultasi.index'))
+            ->assertRedirect(route('profile'));
+        $this->actingAs($authenticatedUser)
+            ->get(route('profile'))
+            ->assertOk()
+            ->assertSee('Nomor telepon')
+            ->assertSee('required', false);
+    }
+
+    public function test_admin_can_access_services_with_an_incomplete_profile(): void
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create([
+            'pekerjaan' => null,
+            'jenis_kelamin' => null,
+            'tanggal_lahir' => null,
+            'asal_prov' => null,
+            'asal_kab' => null,
+            'no_hp' => null,
+            'pendidikan' => null,
+        ]);
+        $admin->assignRole('admin');
+        /** @var Authenticatable $authenticatedAdmin */
+        $authenticatedAdmin = $admin;
+
+        $this->actingAs($authenticatedAdmin)
+            ->get(route('konsultasi.index'))
+            ->assertRedirect(route('admin.konsultasi'));
+        $this->actingAs($authenticatedAdmin)
+            ->get(route('chatbot.index'))
+            ->assertRedirect(route('admin.chatbot'));
+    }
+
+    public function test_profile_cannot_be_saved_without_a_phone_number_or_with_a_mismatched_city(): void
+    {
+        $this->seedWilayahCatalog();
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+        $profile = [
+            'name' => $user->name,
+            'pekerjaan' => 'Pelajar/Mahasiswa',
+            'jenis_kelamin' => '1',
+            'tanggal_lahir' => '2000-01-01',
+            'asal_prov' => 'Sumatera Selatan',
+            'asal_kab' => 'Kota Palembang',
+            'pendidikan' => 'S1',
+        ];
+
+        $this->actingAs($authenticatedUser)
+            ->from(route('profile'))
+            ->put(route('profile.update', $user), $profile)
+            ->assertRedirect(route('profile'))
+            ->assertSessionHasErrors('no_hp');
+
+        $this->actingAs($authenticatedUser)
+            ->from(route('profile'))
+            ->put(route('profile.update', $user), array_merge($profile, [
+                'no_hp' => '08123456789',
+                'asal_kab' => 'Kota Prabumulih',
+            ]))
+            ->assertRedirect(route('profile'))
+            ->assertSessionHasErrors('asal_kab');
     }
 
     public function test_user_can_submit_a_future_consultation_request(): void
@@ -1530,17 +1675,81 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var Authenticatable $authenticatedUser */
         $authenticatedUser = $user;
 
-        $this->actingAs($authenticatedUser)->get('/konsultasi')->assertOk()->assertSee('Jadwal Mendatang')->assertSee('Buat konsultasi');
+        $this->actingAs($authenticatedUser)
+            ->get('/konsultasi')
+            ->assertOk()
+            ->assertSee('Jadwal Mendatang')
+            ->assertSee('Buat konsultasi')
+            ->assertSee('list="meeting-topics"', false)
+            ->assertSee('minlength="10"', false)
+            ->assertSee('readonly', false);
         $this->actingAs($authenticatedUser)->post('/konsultasi', [
             'name' => 'Metodologi Statistik',
             'deskripsi' => 'Saya memerlukan penjelasan metodologi untuk penelitian.',
             'tanggal' => '2027-01-15',
             'waktu_mulai' => '09:00',
-            'waktu_selesai' => '10:00',
+            'waktu_selesai' => '09:45',
         ])->assertRedirect()->assertSessionHas('message');
         $this->assertDatabaseHas('meeting', ['user_id' => $user->id, 'status' => 0, 'name' => 'Metodologi Statistik']);
 
         $this->assertDatabaseHas('meeting', ['user_id' => $user->id, 'status' => 0, 'name' => 'Metodologi Statistik']);
+    }
+
+    public function test_consultation_requires_ten_description_characters_and_a_45_minute_end_time(): void
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        /** @var Authenticatable $authenticatedUser */
+        $authenticatedUser = $user;
+        $request = [
+            'name' => 'Metodologi Statistik',
+            'tanggal' => '2027-01-15',
+            'waktu_mulai' => '09:00',
+            'waktu_selesai' => '09:45',
+        ];
+
+        $this->actingAs($authenticatedUser)
+            ->from('/konsultasi')
+            ->post('/konsultasi', $request + ['deskripsi' => '123456789'])
+            ->assertRedirect('/konsultasi')
+            ->assertSessionHasErrors('deskripsi');
+
+        $this->actingAs($authenticatedUser)
+            ->from('/konsultasi')
+            ->post('/konsultasi', array_merge($request, [
+                'deskripsi' => '1234567890',
+                'waktu_selesai' => '10:00',
+            ]))
+            ->assertRedirect('/konsultasi')
+            ->assertSessionHasErrors('waktu_selesai');
+    }
+
+    public function test_consultation_rejects_a_past_start_time_for_today_in_jakarta_timezone(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-17 14:00:00', 'Asia/Jakarta'));
+
+        try {
+            /** @var User $user */
+            $user = User::factory()->create();
+            $user->assignRole('user');
+            /** @var Authenticatable $authenticatedUser */
+            $authenticatedUser = $user;
+
+            $this->actingAs($authenticatedUser)
+                ->from('/konsultasi')
+                ->post('/konsultasi', [
+                    'name' => 'Metodologi Statistik',
+                    'deskripsi' => 'Mohon konsultasi metodologi statistik.',
+                    'tanggal' => '2026-10-17',
+                    'waktu_mulai' => '13:00',
+                    'waktu_selesai' => '13:45',
+                ])
+                ->assertRedirect('/konsultasi')
+                ->assertSessionHasErrors('waktu_mulai');
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_user_chatbot_screen_uses_the_user_portal(): void
@@ -2670,6 +2879,19 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringEndsWith('.jpg', $completed->documentation_path);
         Storage::disk('local')->assertExists($completed->documentation_path);
         $this->actingAs($this->admin)->get(route('konsultasi.documentation', $meeting))->assertOk();
+    }
+
+    private function seedWilayahCatalog(): void
+    {
+        DB::table('wilayah_provinces')->insert([
+            'code' => '16',
+            'name' => 'Sumatera Selatan',
+        ]);
+        DB::table('wilayah_regencies')->insert([
+            'code' => '16.71',
+            'province_code' => '16',
+            'name' => 'Kota Palembang',
+        ]);
     }
 
     private function createMeeting(array $attributes = []): Meeting

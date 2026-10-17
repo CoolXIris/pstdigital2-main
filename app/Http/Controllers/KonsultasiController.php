@@ -45,16 +45,22 @@ class KonsultasiController extends Controller
     public function store(Request $request)
     {
         try {
+            $jakartaNow = now('Asia/Jakarta');
             $validated = $request->validate([
                 'name' => ['required', 'string', 'max:255'],
-                'deskripsi' => ['required', 'string', 'min:15', 'max:3000'],
-                'tanggal' => ['required', 'date', 'after_or_equal:today'],
+                'deskripsi' => ['required', 'string', 'min:10', 'max:3000'],
+                'tanggal' => ['required', 'date', 'after_or_equal:'.$jakartaNow->toDateString()],
                 'waktu_mulai' => ['required', 'date_format:H:i'],
                 'waktu_selesai' => ['required', 'date_format:H:i', 'after:waktu_mulai'],
             ]);
 
-            if ($validated['tanggal'] === now()->toDateString() && $validated['waktu_mulai'] <= now()->format('H:i')) {
+            if ($validated['tanggal'] === $jakartaNow->toDateString() && $validated['waktu_mulai'] <= $jakartaNow->format('H:i')) {
                 throw ValidationException::withMessages(['waktu_mulai' => 'Pilih waktu konsultasi yang masih akan datang.']);
+            }
+
+            $expectedEndTime = Carbon::createFromFormat('H:i', $validated['waktu_mulai'])->addMinutes(45)->format('H:i');
+            if ($validated['waktu_selesai'] !== $expectedEndTime) {
+                throw ValidationException::withMessages(['waktu_selesai' => 'Waktu selesai ditetapkan otomatis 45 menit setelah waktu mulai.']);
             }
 
             Meeting::create([

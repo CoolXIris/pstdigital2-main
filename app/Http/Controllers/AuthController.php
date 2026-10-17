@@ -77,15 +77,7 @@ class AuthController extends Controller
             if (Auth::user()->hasRole('admin|super_admin')) {
                 return redirect('dashboard');
             } else {
-                $profileComplete = $user->pekerjaan
-                    && $user->jenis_kelamin
-                    && $user->tanggal_lahir
-                    && $user->asal_prov
-                    && $user->asal_kab
-                    && $user->no_hp
-                    && $user->pendidikan;
-
-                return $profileComplete
+                return $user->hasCompleteProfile()
                     ? redirect('/')
                     : redirect()->route('profile')->with('message', 'Lengkapi profil Anda untuk menggunakan seluruh layanan.');
             }
@@ -115,19 +107,9 @@ class AuthController extends Controller
         if (Auth::user()->hasRole('admin|super_admin')) {
             return redirect('dashboard');
         } else {
-            if (
-                $user->pekerjaan
-                || $user->jenis_kelamin
-                || $user->tanggal_lahir
-                || $user->asal_prov
-                || $user->asal_kab
-                || $user->no_hp
-                || $user->pendidikan
-            ) {
-                return redirect('/');
-            } else {
-                return redirect('profile')->with('error', 'Ada Isian profile belum lengkap');
-            }
+            return $user->hasCompleteProfile()
+                ? redirect('/')
+                : redirect('profile')->with('error', 'Ada isian profil yang belum lengkap.');
         }
     }
     public function auth_user()
@@ -138,11 +120,9 @@ class AuthController extends Controller
         if (Auth::user()->hasRole('admin|super_admin')) {
             return redirect('dashboard');
         } else {
-            if ($user->pekerjaan && $user->jenis_kelamin && $user->tanggal_lahir && $user->asal_prov && $user->asal_kab && $user->pendidikan) {
-                return redirect('/');
-            } else {
-                return redirect('profile')->with('message', 'Ayo Lengkapi Datamu');
-            }
+            return $user->hasCompleteProfile()
+                ? redirect('/')
+                : redirect('profile')->with('message', 'Lengkapi profil Anda untuk menggunakan seluruh layanan.');
         }
     }
 }

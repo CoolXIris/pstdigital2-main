@@ -146,22 +146,20 @@
                 <div class="modal-body">
                     <div class="portal-form-section mb-3">
                         <h2>Topik konsultasi</h2>
-                        <p>Pilih bidang yang paling sesuai dengan kebutuhan Anda.</p><label class="form-label" for="meeting-topic">Jenis konsultasi</label><select class="form-select" name="name" id="meeting-topic" required>
-                            <option value="">Pilih jenis konsultasi</option>
+                        <p>Pilih bidang yang paling sesuai dengan kebutuhan Anda.</p><label class="form-label" for="meeting-topic">Jenis konsultasi</label><input class="form-control" type="text" name="name" id="meeting-topic" list="meeting-topics" value="{{ old('name') }}" placeholder="Ketik atau pilih jenis konsultasi" autocomplete="off" required>
+                        <datalist id="meeting-topics">
                             @foreach (['Statistik secara umum', 'Rekomendasi Statistik', 'Metodologi Statistik', 'Statistik Sektoral', 'Sains data', 'Data Spasial', 'Data Ekonomi', 'Data Sosial dan Kependudukan', 'Data Pertanian', 'Potensi Desa', 'Ekspor-Impor', 'Harga & Inflasi', 'Tenaga Kerja', 'Kemiskinan', 'Pertumbuhan Ekonomi', 'Statistik Industri', 'Statistik Produksi', 'Indeks Pembangunan Manusia', 'Data Transportasi dan Distribusi'] as $topic)
-                            <option value="{{ $topic }}" @selected(old('name')===$topic)>{{ $topic }}</option>
+                            <option value="{{ $topic }}">
                             @endforeach
-                        </select>
+                        </datalist>
                     </div>
-                    <div class="mb-3"><label class="form-label" for="meeting-description">Deskripsi kebutuhan</label><textarea class="form-control" id="meeting-description" name="deskripsi" rows="4" minlength="15" maxlength="3000" placeholder="Ceritakan data, indikator, atau metodologi yang ingin dikonsultasikan..." required>{{ old('deskripsi') }}</textarea><small class="form-text text-muted">Jelaskan konteks pertanyaan agar petugas dapat menyiapkan konsultasi.</small></div>
+                    <div class="mb-3"><label class="form-label" for="meeting-description">Deskripsi kebutuhan</label><textarea class="form-control" id="meeting-description" name="deskripsi" rows="4" minlength="10" maxlength="3000" placeholder="Ceritakan data, indikator, atau metodologi yang ingin dikonsultasikan..." required>{{ old('deskripsi') }}</textarea><small class="form-text text-muted">Minimal 10 karakter. Jelaskan konteks pertanyaan agar petugas dapat menyiapkan konsultasi.</small></div>
                     <div class="row g-3">
-                        <div class="col-md-4"><label class="form-label" for="meeting-date">Tanggal konsultasi</label><input class="form-control" id="meeting-date" type="date" name="tanggal" min="{{ now()->toDateString() }}" value="{{ old('tanggal') }}" required></div>
-                        <div class="col-md-4"><label class="form-label" for="meeting-start">Waktu mulai</label><select class="form-select" id="meeting-start" name="waktu_mulai" required>
+                        <div class="col-md-4"><label class="form-label" for="meeting-date">Tanggal konsultasi</label><input class="form-control" id="meeting-date" type="date" name="tanggal" min="{{ now('Asia/Jakarta')->toDateString() }}" value="{{ old('tanggal') }}" required></div>
+                        <div class="col-md-4"><label class="form-label" for="meeting-start">Waktu mulai</label><select class="form-select" id="meeting-start" name="waktu_mulai" required disabled>
                                 <option value="">Pilih waktu</option>@foreach (['09:00', '10:00', '11:00', '13:00', '14:00', '15:00'] as $time)<option value="{{ $time }}" @selected(old('waktu_mulai')===$time)>{{ $time }} WIB</option>@endforeach
-                            </select></div>
-                        <div class="col-md-4"><label class="form-label" for="meeting-end">Waktu selesai</label><select class="form-select" id="meeting-end" name="waktu_selesai" required>
-                                <option value="">Pilih waktu</option>@foreach (['10:00', '11:00', '12:00', '14:00', '15:00', '16:00'] as $time)<option value="{{ $time }}" @selected(old('waktu_selesai')===$time)>{{ $time }} WIB</option>@endforeach
-                            </select></div>
+                            </select><small class="form-text text-muted">Untuk tanggal hari ini, waktu yang sudah lewat tidak tersedia.</small></div>
+                        <div class="col-md-4"><label class="form-label" for="meeting-end">Waktu selesai</label><input class="form-control" id="meeting-end" name="waktu_selesai" type="time" value="{{ old('waktu_selesai') }}" required readonly><small class="form-text text-muted">Terisi otomatis 45 menit setelah waktu mulai.</small></div>
                     </div>
                     <div class="portal-chat-note mt-3"><i class="bi bi-info-circle me-1"></i>Permintaan akan berstatus menunggu sampai admin menyetujui dan menetapkan petugas.</div>
                 </div>
@@ -178,26 +176,65 @@
 <script>
     (() => {
         const form = document.getElementById('new-meeting-form');
+        const date = document.getElementById('meeting-date');
         const start = document.getElementById('meeting-start');
         const end = document.getElementById('meeting-end');
-        const syncEndOptions = () => {
-            [...end.options].forEach((option) => {
-                if (option.value) option.disabled = !start.value || option.value <= start.value;
-            });
-            if (end.value && end.value <= start.value) end.value = '';
+        const jakartaDateTime = () => {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Jakarta',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hourCycle: 'h23',
+            }).formatToParts(new Date()).reduce((values, part) => {
+                values[part.type] = part.value;
+                return values;
+            }, {});
+            return {
+                date: `${parts.year}-${parts.month}-${parts.day}`,
+                time: `${parts.hour}:${parts.minute}`,
+            };
         };
-        start.addEventListener('change', syncEndOptions);
+        const syncEndTime = () => {
+            end.setCustomValidity('');
+            if (!start.value) {
+                end.value = '';
+                return;
+            }
+
+            const [hours, minutes] = start.value.split(':').map(Number);
+            const endMinutes = hours * 60 + minutes + 45;
+            end.value = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+        };
+        const updateStartTimes = () => {
+            const now = jakartaDateTime();
+            const selectedDate = date.value;
+            start.disabled = !selectedDate || selectedDate < now.date;
+            [...start.options].forEach((option) => {
+                option.disabled = Boolean(option.value) && (
+                    selectedDate < now.date || (selectedDate === now.date && option.value <= now.time)
+                );
+            });
+            if (start.selectedOptions[0]?.disabled) start.value = '';
+            syncEndTime();
+        };
+        date.addEventListener('change', updateStartTimes);
+        start.addEventListener('change', updateStartTimes);
+        window.addEventListener('focus', updateStartTimes);
+        window.setInterval(updateStartTimes, 30000);
         form.addEventListener('submit', (event) => {
-            if (!start.value || !end.value || end.value <= start.value) {
+            if (!start.value || !end.value) {
                 event.preventDefault();
-                end.setCustomValidity('Waktu selesai harus setelah waktu mulai.');
-                end.reportValidity();
+                start.setCustomValidity('Pilih waktu mulai untuk mengisi waktu selesai secara otomatis.');
+                start.reportValidity();
             } else {
-                end.setCustomValidity('');
+                start.setCustomValidity('');
             }
         });
-        end.addEventListener('change', () => end.setCustomValidity(''));
-        syncEndOptions();
+        start.addEventListener('change', () => start.setCustomValidity(''));
+        updateStartTimes();
 
         if (document.getElementById('newMeetingModal').dataset.openOnLoad === 'true') {
             new bootstrap.Modal(document.getElementById('newMeetingModal')).show();

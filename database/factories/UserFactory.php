@@ -29,6 +29,13 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            'pekerjaan' => 'Pelajar/Mahasiswa',
+            'jenis_kelamin' => '1',
+            'tanggal_lahir' => '2000-01-01',
+            'asal_prov' => 'Sumatera Selatan',
+            'asal_kab' => 'Kota Palembang',
+            'no_hp' => '08123456789',
+            'pendidikan' => 'S1',
         ];
     }
 
