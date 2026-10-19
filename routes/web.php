@@ -56,9 +56,11 @@ Route::get('logout', [AuthController::class, 'logout'])->name('logout');
 
 Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::get('dashboard', [HomeController::class, 'index'])->name('dashboard');
+    Route::get('dashboard/reviews/export', [HomeController::class, 'exportReviews'])->name('dashboard.reviews.export');
     Route::resource('users', UserController::class);
     Route::get('users_export', [UserController::class, 'export'])->name('users_export');
     Route::get('admin/konsultasi', [KonsultasiAdminController::class, 'index'])->name('admin.konsultasi');
+    Route::get('admin/konsultasi/riwayat/export', [KonsultasiAdminController::class, 'exportHistory'])->name('admin.konsultasi.history.export');
     Route::patch('admin/konsultasi/{meeting}/status', [KonsultasiAdminController::class, 'updateStatus'])
         ->name('admin.konsultasi.status');
     Route::get('admin/chatbot', [ChatbotController::class, 'management'])->name('admin.chatbot');
@@ -82,6 +84,7 @@ Route::group(['middleware' => ['auth']], function () {
         Route::get('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.poll');
         Route::get('konsultasi/{meeting}/presence', [KonsultasiAdminController::class, 'presence'])->middleware('throttle:120,1')->name('konsultasi.presence');
         Route::get('konsultasi/{meeting}/messages', [KonsultasiAdminController::class, 'messages'])->middleware('throttle:120,1')->name('konsultasi.messages');
+        Route::get('konsultasi/{meeting}/messages/history', [KonsultasiAdminController::class, 'messageHistory'])->middleware('throttle:60,1')->name('konsultasi.messages.history');
         Route::get('konsultasi/{meeting}/messages/status', [KonsultasiAdminController::class, 'messageStatus'])->middleware('throttle:120,1')->name('konsultasi.messages.status');
         Route::post('konsultasi/{meeting}/messages', [KonsultasiAdminController::class, 'sendMessage'])->middleware('throttle:120,1')->name('konsultasi.messages.send');
         Route::post('konsultasi/{meeting}/signals', [KonsultasiAdminController::class, 'signals'])->middleware('throttle:120,1')->name('konsultasi.signals.send');

@@ -105,13 +105,16 @@
             <h2 class="admin-panel-title">Kritik dan Saran Pengguna</h2>
             <div class="admin-dashboard-rating"><span>★</span><strong>{{ $data['average_rating'] !== null ? number_format($data['average_rating'], 1) : '-' }}</strong><small>rata-rata dari {{ number_format($data['review_total']) }} ulasan</small></div>
         </div>
-        <form method="GET" action="{{ route('dashboard') }}" class="admin-review-sort">
-            <input type="hidden" name="periode" value="{{ $period }}"><input type="hidden" name="bulan" value="{{ $month }}"><input type="hidden" name="tahun" value="{{ $year }}"><input type="hidden" name="rating" value="{{ $ratingFilter }}">
-            <label class="visually-hidden" for="urut">Urutan ulasan</label><select class="form-select" id="urut" name="urut" onchange="this.form.submit()">
-                <option value="baru" @selected($reviewSort==='baru' )>Terbaru</option>
-                <option value="lama" @selected($reviewSort==='lama' )>Terlama</option>
-            </select>
-        </form>
+        <div class="admin-review-actions">
+            <form method="GET" action="{{ route('dashboard') }}" class="admin-review-sort">
+                <input type="hidden" name="periode" value="{{ $period }}"><input type="hidden" name="bulan" value="{{ $month }}"><input type="hidden" name="tahun" value="{{ $year }}"><input type="hidden" name="rating" value="{{ $ratingFilter }}">
+                <label class="visually-hidden" for="urut">Urutan ulasan</label><select class="form-select" id="urut" name="urut" onchange="this.form.submit()">
+                    <option value="baru" @selected($reviewSort==='baru' )>Terbaru</option>
+                    <option value="lama" @selected($reviewSort==='lama' )>Terlama</option>
+                </select>
+            </form>
+            <a class="admin-btn admin-btn-outline" href="{{ route('dashboard.reviews.export', ['periode' => $period, 'bulan' => $month, 'tahun' => $year, 'rating' => $ratingFilter, 'urut' => $reviewSort]) }}"><i class="fe fe-download" aria-hidden="true"></i> Ekspor XLSX</a>
+        </div>
     </div>
     <div class="admin-panel-body pt-2">
         <nav class="admin-review-tabs" aria-label="Filter rating ulasan">

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exports\UsersExport;
 use App\Models\User;
+use App\Services\WilayahService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -14,7 +15,7 @@ use Spatie\Permission\Models\Role;
 
 class UserController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, WilayahService $wilayah)
     {
         $search = trim((string) $request->query('q', ''));
         $roleFilter = (string) $request->query('role', '');
@@ -23,7 +24,8 @@ class UserController extends Controller
                 $query->where(function ($userQuery) use ($search) {
                     $userQuery->where('name', 'like', "%{$search}%")
                         ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('instansi', 'like', "%{$search}%");
+                        ->orWhere('instansi', 'like', "%{$search}%")
+                        ->orWhere('jabatan', 'like', "%{$search}%");
                 });
             })
             ->when($roleFilter !== '', fn ($query) => $query->whereHas('roles', fn ($roleQuery) => $roleQuery->where('name', $roleFilter)))
@@ -38,7 +40,9 @@ class UserController extends Controller
             'admins' => User::role(['admin', 'super_admin'])->count(),
             'total' => User::count(),
         ];
-        return view('admin.users.index', compact('data', 'roles', 'search', 'roleFilter', 'stats'));
+        $provinces = $wilayah->provinces();
+
+        return view('admin.users.index', compact('data', 'roles', 'search', 'roleFilter', 'stats', 'provinces'));
     }
 
     public function store(Request $request)
@@ -72,6 +76,13 @@ class UserController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'instansi' => ['nullable', 'string', 'max:255'],
             'jabatan' => ['nullable', 'string', 'max:255'],
+            'pekerjaan' => ['nullable', 'string', 'max:100'],
+            'jenis_kelamin' => ['nullable', Rule::in(['1', '2'])],
+            'tanggal_lahir' => ['nullable', 'date', 'before:today'],
+            'asal_prov' => ['nullable', 'string', 'max:100'],
+            'asal_kab' => ['nullable', 'string', 'max:100'],
+            'no_hp' => ['nullable', 'string', 'max:30'],
+            'pendidikan' => ['nullable', 'string', 'max:100'],
             'role' => ['required', Rule::exists('roles', 'name')],
         ]);
         $this->authorizeRoleAssignment($validated['role']);
@@ -85,6 +96,13 @@ class UserController extends Controller
             'email' => $validated['email'],
             'instansi' => $validated['instansi'] ?? null,
             'jabatan' => $validated['jabatan'] ?? null,
+            'pekerjaan' => $validated['pekerjaan'] ?? null,
+            'jenis_kelamin' => $validated['jenis_kelamin'] ?? null,
+            'tanggal_lahir' => $validated['tanggal_lahir'] ?? null,
+            'asal_prov' => $validated['asal_prov'] ?? null,
+            'asal_kab' => $validated['asal_kab'] ?? null,
+            'no_hp' => $validated['no_hp'] ?? null,
+            'pendidikan' => $validated['pendidikan'] ?? null,
         ]);
         $user->syncRoles($validated['role']);
 

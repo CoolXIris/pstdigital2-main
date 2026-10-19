@@ -175,6 +175,9 @@
 .admin-dashboard-donut { min-height: 265px; }
 .admin-dashboard-donut-chart { position: relative; width: min(100%, 330px); height: 205px; margin: 0 auto; }
 .admin-dashboard-reviews .admin-review-heading { align-items: center; }
+.admin-review-actions, .admin-history-actions { display: flex; align-items: center; gap: 8px; }
+.admin-history-actions { min-width: 0; }
+.admin-history-actions .admin-search { min-width: min(250px, 100%); }
 .admin-dashboard-rating { display: flex; align-items: center; gap: 5px; margin-top: 5px; color: #c88721; font-size: 10px; }
 .admin-dashboard-rating strong { font-weight: 600; }
 .admin-dashboard-rating small { color: #7d8998; font-size: 9px; }
@@ -275,10 +278,13 @@
     .admin-dashboard-filters .admin-filter-field { min-width: 0; }
     .admin-dashboard-filters .admin-btn { width: 100%; }
     .admin-review-heading { align-items: flex-start !important; }
+    .admin-review-actions { flex-wrap: wrap; }
     .admin-review-sort .form-select { min-width: 84px; }
     .admin-confirmed-grid { grid-template-columns: 1fr; }
     .admin-section-heading { align-items: flex-start; flex-direction: column; }
     .admin-consultation-section .admin-search { width: 100%; }
+    .admin-history-actions { width: 100%; flex-wrap: wrap; }
+    .admin-history-actions .admin-search { flex: 1 1 220px; min-width: 0; width: auto; }
     .admin-approval-details { grid-template-columns: 1fr; }
     .admin-approval-description { grid-column: auto; }
     .admin-pending-main { align-items: flex-start; flex-direction: column; }

@@ -94,7 +94,10 @@
     <section class="admin-consultation-section">
         <div class="admin-section-heading">
             <div><span class="admin-eyebrow">Arsip layanan</span><h2>Riwayat Konsultasi</h2><p>Sesi yang telah selesai atau dibatalkan.</p></div>
-            <form class="admin-search" method="GET" action="{{ route('admin.konsultasi') }}"><i class="fe fe-search" aria-hidden="true"></i><input class="form-control" type="search" name="q" value="{{ $search }}" placeholder="Cari pengguna atau topik" aria-label="Cari riwayat konsultasi"></form>
+            <div class="admin-history-actions">
+                <form class="admin-search" method="GET" action="{{ route('admin.konsultasi') }}"><i class="fe fe-search" aria-hidden="true"></i><input class="form-control" type="search" name="q" value="{{ $search }}" placeholder="Cari pengguna atau topik" aria-label="Cari riwayat konsultasi"></form>
+                <a class="admin-btn admin-btn-outline" href="{{ route('admin.konsultasi.history.export', ['q' => $search]) }}"><i class="fe fe-download" aria-hidden="true"></i> Ekspor XLSX</a>
+            </div>
         </div>
         <section class="admin-panel">
             <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Pengguna</th><th>Topik konsultasi</th><th>Tanggal</th><th>Waktu</th><th>Petugas</th><th>Status akhir</th><th>Rating</th><th>Detail</th></tr></thead><tbody>

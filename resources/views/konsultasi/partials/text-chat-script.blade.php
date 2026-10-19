@@ -9,9 +9,13 @@
         const form = document.getElementById('consultationChatForm');
         const input = document.getElementById('consultationChatInput');
         const sendButton = document.getElementById('consultationChatSend');
+        const compose = form;
+        const chatHint = document.getElementById('consultationChatHint');
+        const olderButton = document.getElementById('consultationHistoryOlder');
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
         const chatButtons = [...document.querySelectorAll('[data-consultation-chat]')];
-        let endpoint = '', lastId = 0, pollTimer = null, unreadTimer = null, activeTrigger = null, loading = false;
+        const historyButtons = [...document.querySelectorAll('[data-consultation-history]')];
+        let endpoint = '', lastId = 0, pollTimer = null, unreadTimer = null, activeTrigger = null, loading = false, historyMode = false;
 
         const setUnread = (button, count) => {
             if (!button) return;
@@ -55,8 +59,9 @@
             }
             container.append(document.createTextNode(text.slice(cursor)));
         };
-        const appendMessage = (message) => {
+        const createMessage = (message) => {
             const bubble = document.createElement('div');
+            bubble.dataset.messageId = String(message.id);
             bubble.className = 'portal-bubble admin-chat-bubble' + (message.is_mine ? ' is-user' : '');
             const content = document.createElement('div');
             appendTextAndLinks(content, message.body);
@@ -65,13 +70,17 @@
             const sender = document.createElement('span');
             sender.textContent = (message.is_mine ? 'Anda' : message.sender_name) + ' - ' + message.sent_at;
             meta.append(sender);
-            if (message.is_mine) {
+            if (message.is_mine && !historyMode) {
                 const receipt = document.createElement('span');
                 receipt.className = 'consultation-read-receipt'; receipt.dataset.readReceipt = String(message.id);
                 receipt.textContent = message.is_read ? 'Dibaca' : 'Belum dibaca';
                 meta.append(receipt);
             }
-            bubble.append(content, meta); log.append(bubble);
+            bubble.append(content, meta);
+            return bubble;
+        };
+        const appendMessage = (message) => {
+            log.append(createMessage(message));
             lastId = Math.max(lastId, Number(message.id));
         };
         const applyReadReceipts = (ids) => {
@@ -85,31 +94,54 @@
             stopChat(); status.textContent = message; closeTrigger(activeTrigger);
             input.disabled = true; sendButton.disabled = true;
         };
-        const loadMessages = async () => {
+        const loadMessages = async (loadOlder = false) => {
             if (!endpoint || loading) return;
             loading = true;
             try {
-                const response = await fetch(endpoint + '?after=' + encodeURIComponent(lastId), { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-                if (response.status === 404) { disableChat('Konsultasi sudah selesai atau chat tidak lagi tersedia.'); return; }
+                const firstMessageId = Number(log.firstElementChild?.dataset.messageId || 0);
+                const query = historyMode
+                    ? (loadOlder && firstMessageId ? '?before=' + encodeURIComponent(firstMessageId) : '')
+                    : '?after=' + encodeURIComponent(lastId);
+                const response = await fetch(endpoint + query, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+                if (response.status === 404 && !historyMode) { disableChat('Konsultasi sudah selesai atau chat tidak lagi tersedia.'); return; }
                 if (!response.ok) throw new Error('Pesan belum dapat dimuat.');
                 const result = await response.json();
-                for (const message of result.messages || []) appendMessage(message);
-                applyReadReceipts(result.read_message_ids);
+                const messages = result.messages || [];
+                if (historyMode && loadOlder) {
+                    const previousHeight = log.scrollHeight;
+                    for (const message of [...messages].reverse()) log.insertBefore(createMessage(message), log.firstChild);
+                    log.scrollTop += log.scrollHeight - previousHeight;
+                } else {
+                    for (const message of messages) appendMessage(message);
+                }
+                olderButton.hidden = !historyMode || !result.has_older;
+                if (!historyMode) applyReadReceipts(result.read_message_ids);
                 if (activeTrigger) setUnread(activeTrigger, result.unread_count);
-                if ((result.messages || []).length) log.scrollTop = log.scrollHeight;
-                status.textContent = 'Terhubung dengan ' + context.dataset.counterpart + '.';
+                if (messages.length && !loadOlder) log.scrollTop = log.scrollHeight;
+                status.textContent = historyMode ? 'Riwayat chat selesai.' : 'Terhubung dengan ' + context.dataset.counterpart + '.';
             } catch (error) { status.textContent = error.message || 'Koneksi chat terputus. Coba lagi.'; }
             finally { loading = false; }
         };
+        const resetModal = () => { stopChat(); lastId = 0; log.replaceChildren(); olderButton.hidden = true; };
         chatButtons.forEach((button) => {
             button.addEventListener('click', () => {
-                endpoint = button.dataset.chatUrl; activeTrigger = button; lastId = 0; log.replaceChildren();
+                resetModal(); historyMode = false; endpoint = button.dataset.chatUrl; activeTrigger = button;
+                compose.hidden = false; chatHint.hidden = false;
                 input.value = ''; input.disabled = false; sendButton.disabled = false;
                 context.dataset.counterpart = button.dataset.chatPerson || 'peserta konsultasi';
                 context.textContent = button.dataset.chatTopic + ' - ' + context.dataset.counterpart;
                 status.textContent = 'Memuat pesan...'; modal.show();
             });
         });
+        historyButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                resetModal(); historyMode = true; endpoint = button.dataset.historyUrl; activeTrigger = null;
+                compose.hidden = true; chatHint.hidden = true;
+                context.textContent = button.dataset.chatTopic + ' - Riwayat chat';
+                status.textContent = 'Memuat riwayat chat...'; modal.show();
+            });
+        });
+        olderButton.addEventListener('click', () => loadMessages(true));
         const refreshAllUnread = () => {
             if (document.hidden) return;
             chatButtons.forEach((button, index) => {
@@ -122,8 +154,8 @@
             if (!document.hidden) refreshAllUnread();
         });
         modalElement.addEventListener('shown.bs.modal', () => {
-            loadMessages(); input.focus();
-            if (!pollTimer) pollTimer = window.setInterval(loadMessages, 5000);
+            loadMessages(); if (!historyMode) input.focus();
+            if (!historyMode && !pollTimer) pollTimer = window.setInterval(loadMessages, 5000);
         });
         modalElement.addEventListener('hidden.bs.modal', stopChat);
         form.addEventListener('submit', async (event) => {

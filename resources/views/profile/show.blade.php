@@ -45,6 +45,8 @@ $jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/
             <div class="col-md-6"><label class="form-label" for="profile-job">Pekerjaan</label><select class="form-select" id="profile-job" name="pekerjaan" required>
                     <option value="">Pilih kategori pekerjaan</option>@foreach ($jobs as $job)<option value="{{ $job }}" @selected(old('pekerjaan', $data->pekerjaan) === $job)>{{ $job }}</option>@endforeach
                 </select></div>
+            <div class="col-md-6"><label class="form-label" for="profile-instansi">Instansi <span class="text-muted">(opsional)</span></label><input class="form-control" id="profile-instansi" name="instansi" value="{{ old('instansi', $data->instansi) }}" placeholder="Nama instansi atau organisasi" maxlength="255"></div>
+            <div class="col-md-6"><label class="form-label" for="profile-jabatan">Jabatan <span class="text-muted">(opsional)</span></label><input class="form-control" id="profile-jabatan" name="jabatan" value="{{ old('jabatan', $data->jabatan) }}" placeholder="Jabatan atau peran Anda" maxlength="255"></div>
             <div class="col-md-6"><label class="form-label" for="profile-education">Pendidikan terakhir</label><input class="form-control" id="profile-education" name="pendidikan" value="{{ old('pendidikan', $data->pendidikan) }}" placeholder="Contoh: S1 Statistik" maxlength="100" required></div>
             <div class="col-md-6"><label class="form-label" for="profile-gender">Jenis kelamin</label><select class="form-select" id="profile-gender" name="jenis_kelamin" required>
                     <option value="">Pilih jenis kelamin</option>

@@ -60,7 +60,7 @@
                             <td>{{ $user->created_at?->translatedFormat('d M Y') ?? '—' }}</td>
                             <td>
                                 <div class="admin-action-group">
-                                    <button class="admin-action-icon" type="button" data-edit-user data-id="{{ $user->id }}" data-name="{{ $user->name }}" data-email="{{ $user->email }}" data-instansi="{{ $user->instansi }}" data-jabatan="{{ $user->jabatan }}" data-role="{{ $userRole }}" title="Edit pengguna" aria-label="Edit {{ $user->name }}"><i class="fe fe-edit-2"></i></button>
+                                    <button class="admin-action-icon" type="button" data-edit-user data-id="{{ $user->id }}" data-name="{{ $user->name }}" data-email="{{ $user->email }}" data-instansi="{{ $user->instansi }}" data-jabatan="{{ $user->jabatan }}" data-pekerjaan="{{ $user->pekerjaan }}" data-jenis-kelamin="{{ $user->jenis_kelamin }}" data-tanggal-lahir="{{ $user->tanggal_lahir }}" data-asal-prov="{{ $user->asal_prov }}" data-asal-kab="{{ $user->asal_kab }}" data-no-hp="{{ $user->no_hp }}" data-pendidikan="{{ $user->pendidikan }}" data-role="{{ $userRole }}" title="Edit pengguna" aria-label="Edit {{ $user->name }}"><i class="fe fe-edit-2"></i></button>
                                     @if ((int) $user->id !== (int) Auth::id())
                                         <form method="POST" action="{{ route('users.destroy', $user) }}" onsubmit="return confirm('Hapus akun {{ addslashes($user->name) }}?')">
                                             @csrf @method('DELETE')<button class="admin-action-icon is-danger" type="submit" title="Hapus pengguna" aria-label="Hapus {{ $user->name }}"><i class="fe fe-trash-2"></i></button>
@@ -99,14 +99,25 @@
     </div>
 
     <div class="modal fade admin-modal" id="editUserModal" tabindex="-1" aria-labelledby="editUserTitle" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-            <form method="POST" id="edit-user-form" data-users-url="{{ url('users') }}">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content">
+            <form method="POST" id="edit-user-form" data-users-url="{{ url('users') }}" data-regencies-url="{{ url('profile/regions/provinces') }}">
                 @csrf @method('PUT')
-                <div class="modal-header"><div><h2 class="modal-title" id="editUserTitle">Edit pengguna</h2><p class="admin-panel-subtitle mb-0">Perbarui informasi akun dan akses.</p></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+                <div class="modal-header"><div><h2 class="modal-title" id="editUserTitle">Edit pengguna</h2><p class="admin-panel-subtitle mb-0">Perbarui biodata, instansi, dan akses pengguna.</p></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
                 <div class="modal-body">
-                    <div class="mb-3"><label class="form-label" for="edit-name">Nama lengkap</label><input class="form-control" id="edit-name" name="name" required maxlength="255"></div>
-                    <div class="mb-3"><label class="form-label" for="edit-email">Email</label><input class="form-control" id="edit-email" name="email" type="email" required maxlength="255"></div>
-                    <div class="row g-3 mb-3"><div class="col-sm-6"><label class="form-label" for="edit-instansi">Instansi</label><input class="form-control" id="edit-instansi" name="instansi" maxlength="255"></div><div class="col-sm-6"><label class="form-label" for="edit-jabatan">Jabatan</label><input class="form-control" id="edit-jabatan" name="jabatan" maxlength="255"></div></div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6"><label class="form-label" for="edit-name">Nama lengkap</label><input class="form-control" id="edit-name" name="name" required maxlength="255"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-email">Email</label><input class="form-control" id="edit-email" name="email" type="email" required maxlength="255"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-instansi">Instansi</label><input class="form-control" id="edit-instansi" name="instansi" maxlength="255"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-jabatan">Jabatan</label><input class="form-control" id="edit-jabatan" name="jabatan" maxlength="255"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-pekerjaan">Pekerjaan</label><input class="form-control" id="edit-pekerjaan" name="pekerjaan" maxlength="100"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-pendidikan">Pendidikan terakhir</label><input class="form-control" id="edit-pendidikan" name="pendidikan" maxlength="100"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-jenis-kelamin">Jenis kelamin</label><select class="form-select" id="edit-jenis-kelamin" name="jenis_kelamin"><option value="">Tidak diisi</option><option value="1">Laki-laki</option><option value="2">Perempuan</option></select></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-tanggal-lahir">Tanggal lahir</label><input class="form-control" id="edit-tanggal-lahir" name="tanggal_lahir" type="date" max="{{ now()->subDay()->toDateString() }}"></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-asal-prov">Provinsi</label><input class="form-control" id="edit-asal-prov" name="asal_prov" list="edit-provinces" maxlength="100" autocomplete="off"><datalist id="edit-provinces">@foreach ($provinces as $province)<option value="{{ $province['name'] }}"></option>@endforeach</datalist></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-asal-kab">Kabupaten / kota</label><input class="form-control" id="edit-asal-kab" name="asal_kab" list="edit-regencies" maxlength="100" autocomplete="off"><datalist id="edit-regencies"></datalist></div>
+                        <div class="col-sm-6"><label class="form-label" for="edit-no-hp">Nomor telepon</label><input class="form-control" id="edit-no-hp" name="no_hp" type="tel" maxlength="30"></div>
+                        <div class="col-12"><small id="edit-region-status" class="form-text" role="status" aria-live="polite"></small></div>
+                    </div>
                     <div><label class="form-label" for="edit-role">Role</label><select class="form-select" id="edit-role" name="role" required>
                         @foreach ($roles as $role)
                             @if (Auth::user()->hasRole('super_admin') || $role->name === 'user')<option value="{{ $role->name }}">{{ ucfirst(str_replace('_', ' ', $role->name)) }}</option>@endif
@@ -124,16 +135,59 @@
     (() => {
         const editModalElement = document.getElementById('editUserModal');
         const editModal = window.bootstrap ? new bootstrap.Modal(editModalElement) : null;
+        const form = document.getElementById('edit-user-form');
+        const provinceInput = document.getElementById('edit-asal-prov');
+        const cityInput = document.getElementById('edit-asal-kab');
+        const cityList = document.getElementById('edit-regencies');
+        const regionStatus = document.getElementById('edit-region-status');
+        let regencyRequest = 0;
+
+        const loadRegencies = async (provinceName, preferredCity = '', clearCity = false) => {
+            const requestId = ++regencyRequest;
+            const province = @json($provinces).find((item) => item.name === provinceName);
+            cityList.replaceChildren();
+            if (!province) {
+                if (clearCity) cityInput.value = '';
+                regionStatus.textContent = provinceName ? 'Provinsi belum ada dalam daftar wilayah; kabupaten/kota dapat diisi manual.' : '';
+                return;
+            }
+
+            regionStatus.textContent = 'Memuat daftar kabupaten/kota...';
+            try {
+                const response = await fetch(`${form.dataset.regenciesUrl}/${encodeURIComponent(province.code)}/regencies`, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+                if (!response.ok) throw new Error('Daftar kabupaten/kota tidak dapat dimuat.');
+                const regencies = await response.json();
+                if (requestId !== regencyRequest) return;
+                regencies.forEach((regency) => {
+                    const option = document.createElement('option');
+                    option.value = regency.name;
+                    cityList.append(option);
+                });
+                cityInput.value = preferredCity;
+                regionStatus.textContent = regencies.length ? 'Pilih kabupaten/kota yang sesuai atau isi secara manual.' : 'Kabupaten/kota belum tersedia; Anda dapat mengisinya secara manual.';
+            } catch (error) {
+                if (requestId === regencyRequest) regionStatus.textContent = error.message;
+            }
+        };
+
+        provinceInput.addEventListener('change', () => loadRegencies(provinceInput.value, '', true));
         document.querySelectorAll('[data-edit-user]').forEach((button) => {
             button.addEventListener('click', () => {
-                const form = document.getElementById('edit-user-form');
                 form.action = `${form.dataset.usersUrl}/${button.dataset.id}`;
-                document.getElementById('edit-name').value = button.dataset.name;
-                document.getElementById('edit-email').value = button.dataset.email;
-                document.getElementById('edit-instansi').value = button.dataset.instansi;
-                document.getElementById('edit-jabatan').value = button.dataset.jabatan;
+                document.getElementById('edit-name').value = button.dataset.name || '';
+                document.getElementById('edit-email').value = button.dataset.email || '';
+                document.getElementById('edit-instansi').value = button.dataset.instansi || '';
+                document.getElementById('edit-jabatan').value = button.dataset.jabatan || '';
+                document.getElementById('edit-pekerjaan').value = button.dataset.pekerjaan || '';
+                document.getElementById('edit-jenis-kelamin').value = button.dataset.jenisKelamin || '';
+                document.getElementById('edit-tanggal-lahir').value = button.dataset.tanggalLahir || '';
+                provinceInput.value = button.dataset.asalProv || '';
+                cityInput.value = button.dataset.asalKab || '';
+                document.getElementById('edit-no-hp').value = button.dataset.noHp || '';
+                document.getElementById('edit-pendidikan').value = button.dataset.pendidikan || '';
                 document.getElementById('edit-role').value = button.dataset.role;
                 editModal?.show();
+                loadRegencies(provinceInput.value, cityInput.value);
             });
         });
     })();

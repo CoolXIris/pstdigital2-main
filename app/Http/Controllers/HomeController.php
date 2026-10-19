@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\DashboardReviewsExport;
 use App\Models\User;
 use Illuminate\Http\Request;
 use App\Models\Meeting;
 use Illuminate\Support\Carbon;
+use Maatwebsite\Excel\Facades\Excel;
 
 class HomeController extends Controller
 {
@@ -87,5 +89,22 @@ class HomeController extends Controller
         ];
 
         return view('admin.dashboard', compact('data', 'chart_data', 'donut_data', 'period', 'year', 'month', 'periodLabel', 'ratingFilter', 'reviewSort'));
+    }
+
+    public function exportReviews(Request $request)
+    {
+        $period = $request->query('periode') === 'tahun' ? 'tahun' : 'bulan';
+        $year = max(2020, min((int) $request->query('tahun', now()->year), now()->year));
+        $month = max(1, min((int) $request->query('bulan', now()->month), 12));
+        $ratingFilter = (int) $request->query('rating', 0);
+        if ($ratingFilter < 1 || $ratingFilter > 5) {
+            $ratingFilter = 0;
+        }
+        $reviewSort = $request->query('urut') === 'lama' ? 'lama' : 'baru';
+
+        return Excel::download(
+            new DashboardReviewsExport($period, $year, $month, $ratingFilter, $reviewSort),
+            'kritik-saran-pengguna.xlsx'
+        );
     }
 }

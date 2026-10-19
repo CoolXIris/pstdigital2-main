@@ -82,6 +82,8 @@ class ProfileController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'pekerjaan' => ['required', Rule::in(['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/BUMD', 'Wiraswasta', 'ASN/TNI/Polri', 'Lainnya'])],
+            'instansi' => ['nullable', 'string', 'max:255'],
+            'jabatan' => ['nullable', 'string', 'max:255'],
             'jenis_kelamin' => ['required', Rule::in(['1', '2'])],
             'tanggal_lahir' => ['required', 'date', 'before:today'],
             'asal_prov' => ['required', 'string', 'max:100', Rule::in(array_column($provinces, 'name'))],

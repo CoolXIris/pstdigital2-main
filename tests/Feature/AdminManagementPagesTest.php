@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Exports\DashboardReviewsExport;
+use App\Exports\UsersExport;
 use App\Models\Meeting;
 use App\Models\User;
 use App\Services\BpsWebApiService;
@@ -15,6 +17,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase as BaseTestCase;
 
@@ -49,6 +52,126 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)->get(route('admin.konsultasi'))->assertOk();
         $this->actingAs($this->admin)->get(route('admin.chatbot'))->assertOk();
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
+    }
+
+    public function test_admin_can_edit_delete_and_export_user_profile_fields(): void
+    {
+        $user = User::factory()->create();
+        $user->assignRole('user');
+
+        $this->actingAs($this->admin)
+            ->put(route('users.update', $user), [
+                'name' => 'Pengguna Diperbarui',
+                'email' => $user->email,
+                'instansi' => 'BPS Sumatera Selatan',
+                'jabatan' => 'Analis Statistik',
+                'pekerjaan' => 'Peneliti/Dosen',
+                'jenis_kelamin' => '2',
+                'tanggal_lahir' => '1990-02-03',
+                'asal_prov' => 'Sumatera Selatan',
+                'asal_kab' => 'Kota Palembang',
+                'no_hp' => '08123456789',
+                'pendidikan' => 'S2 Statistik',
+                'role' => 'user',
+            ])
+            ->assertRedirect(route('users.index'));
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'name' => 'Pengguna Diperbarui',
+            'instansi' => 'BPS Sumatera Selatan',
+            'jabatan' => 'Analis Statistik',
+            'pekerjaan' => 'Peneliti/Dosen',
+            'asal_kab' => 'Kota Palembang',
+            'pendidikan' => 'S2 Statistik',
+        ]);
+
+        Excel::fake();
+        $this->actingAs($this->admin)->get(route('users_export'))->assertOk();
+        Excel::assertDownloaded('users.xlsx', fn (UsersExport $export) => $export->collection()->contains(
+            fn (array $row) => $row['id'] === $user->id
+                && $row['instansi'] === 'BPS Sumatera Selatan'
+                && $row['jabatan'] === 'Analis Statistik'
+        ));
+
+        $this->actingAs($this->admin)
+            ->delete(route('users.destroy', $user))
+            ->assertRedirect(route('users.index'));
+        $this->assertDatabaseMissing('users', ['id' => $user->id]);
+    }
+
+    public function test_admin_can_export_dashboard_reviews_with_active_filters(): void
+    {
+        $user = User::factory()->create();
+        Meeting::create([
+            'name' => 'Topik bulan ini',
+            'status' => 1,
+            'user_id' => $user->id,
+            'description' => 'Deskripsi konsultasi',
+            'tanggal' => now()->startOfMonth()->toDateString(),
+            'start_time' => '09:00:00',
+            'end_time' => '09:45:00',
+            'rating' => 5,
+            'kritik_saran' => 'Saran yang cocok',
+        ]);
+        Meeting::create([
+            'name' => 'Topik rating berbeda',
+            'status' => 1,
+            'user_id' => $user->id,
+            'description' => 'Deskripsi konsultasi',
+            'tanggal' => now()->startOfMonth()->toDateString(),
+            'start_time' => '10:00:00',
+            'end_time' => '10:45:00',
+            'rating' => 4,
+            'kritik_saran' => 'Saran rating berbeda',
+        ]);
+
+        Excel::fake();
+
+        $this->actingAs($this->admin)
+            ->get(route('dashboard.reviews.export', [
+                'periode' => 'bulan',
+                'tahun' => now()->year,
+                'bulan' => now()->month,
+                'rating' => 5,
+                'urut' => 'baru',
+            ]))
+            ->assertOk();
+
+        Excel::assertDownloaded('kritik-saran-pengguna.xlsx', fn (DashboardReviewsExport $export) => $export->query()->count() === 1);
+    }
+
+    public function test_admin_can_export_searched_consultation_history(): void
+    {
+        $user = User::factory()->create(['name' => 'Pemohon Dicari']);
+        Meeting::create([
+            'name' => 'Topik yang dicari',
+            'status' => 1,
+            'user_id' => $user->id,
+            'description' => 'Deskripsi konsultasi',
+            'tanggal' => now()->toDateString(),
+            'start_time' => '09:00:00',
+            'end_time' => '09:45:00',
+            'rating' => 5,
+            'kritik_saran' => 'Saran pengguna',
+        ]);
+        Meeting::create([
+            'name' => 'Topik lain',
+            'status' => 9,
+            'user_id' => $user->id,
+            'description' => 'Deskripsi konsultasi lain',
+            'tanggal' => now()->toDateString(),
+            'start_time' => '10:00:00',
+            'end_time' => '10:45:00',
+        ]);
+
+        Excel::fake();
+
+        $this->actingAs($this->admin)
+            ->get(route('admin.konsultasi.history.export', ['q' => 'yang dicari']))
+            ->assertOk();
+
+        Excel::assertDownloaded('riwayat-konsultasi.xlsx', fn ($export) => $export->query()->count() === 1);
     }
 
     public function test_regular_user_cannot_open_admin_management_pages(): void
@@ -1519,6 +1642,8 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($authenticatedUser)->put(route('profile.update', $user), [
             'name' => $user->name,
             'pekerjaan' => 'Pelajar/Mahasiswa',
+            'instansi' => 'BPS Sumatera Selatan',
+            'jabatan' => 'Analis Statistik',
             'jenis_kelamin' => '1',
             'tanggal_lahir' => '2000-01-01',
             'asal_prov' => 'Sumatera Selatan',
@@ -1527,7 +1652,7 @@ class AdminManagementPagesTest extends BaseTestCase
             'pendidikan' => 'S1 Statistik',
         ])->assertRedirect(route('konsultasi.index'))->assertSessionHas('message');
 
-        $this->assertDatabaseHas('users', ['id' => $user->id, 'asal_kab' => 'Kota Palembang', 'pendidikan' => 'S1 Statistik']);
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'asal_kab' => 'Kota Palembang', 'pendidikan' => 'S1 Statistik', 'instansi' => 'BPS Sumatera Selatan', 'jabatan' => 'Analis Statistik']);
     }
 
     public function test_region_api_returns_provinces_and_their_regencies(): void
