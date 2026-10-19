@@ -39,7 +39,16 @@ class KonsultasiController extends Controller
             return $meeting;
         });
 
-        return view('konsultasi.index', compact('data_mendatang','data_riwayat', 'user'));
+        return view('konsultasi.index', [
+            'data_mendatang' => $data_mendatang,
+            'data_riwayat' => $data_riwayat,
+            'user' => $user,
+            'consultationStartTimes' => config('pst.consultation_start_times'),
+            'consultationDuration' => config('pst.consultation_duration_minutes'),
+            'consultationHolidays' => config('pst.consultation_holidays'),
+            'jakartaToday' => now('Asia/Jakarta')->toDateString(),
+            'jakartaNowTime' => now('Asia/Jakarta')->format('H:i'),
+        ]);
     }
 
     public function store(Request $request)
@@ -47,15 +56,23 @@ class KonsultasiController extends Controller
         try {
             $validated = $request->validate([
                 'name' => ['required', 'string', 'max:255'],
-                'deskripsi' => ['required', 'string', 'min:15', 'max:3000'],
-                'tanggal' => ['required', 'date', 'after_or_equal:today'],
-                'waktu_mulai' => ['required', 'date_format:H:i'],
-                'waktu_selesai' => ['required', 'date_format:H:i', 'after:waktu_mulai'],
+                'deskripsi' => ['required', 'string', 'min:50', 'max:3000'],
+                'tanggal' => ['required', 'date_format:Y-m-d', 'after_or_equal:' . now('Asia/Jakarta')->toDateString()],
+                'waktu_mulai' => ['required', 'date_format:H:i', \Illuminate\Validation\Rule::in(config('pst.consultation_start_times'))],
             ]);
 
-            if ($validated['tanggal'] === now()->toDateString() && $validated['waktu_mulai'] <= now()->format('H:i')) {
+            $meetingDate = Carbon::createFromFormat('Y-m-d', $validated['tanggal'], 'Asia/Jakarta');
+            if ($meetingDate->isWeekend() || in_array($validated['tanggal'], config('pst.consultation_holidays', []), true)) {
+                throw ValidationException::withMessages(['tanggal' => 'Pilih tanggal hari kerja. Konsultasi tidak tersedia pada akhir pekan, hari libur nasional, atau cuti bersama.']);
+            }
+
+            if ($validated['tanggal'] === now('Asia/Jakarta')->toDateString() && $validated['waktu_mulai'] <= now('Asia/Jakarta')->format('H:i')) {
                 throw ValidationException::withMessages(['waktu_mulai' => 'Pilih waktu konsultasi yang masih akan datang.']);
             }
+
+            $endTime = Carbon::createFromFormat('H:i', $validated['waktu_mulai'], 'Asia/Jakarta')
+                ->addMinutes((int) config('pst.consultation_duration_minutes', 45))
+                ->format('H:i');
 
             Meeting::create([
                 'user_id' => Auth::id(),
@@ -63,7 +80,7 @@ class KonsultasiController extends Controller
                 'description' => $validated['deskripsi'],
                 'tanggal' => $validated['tanggal'],
                 'start_time' => $validated['waktu_mulai'],
-                'end_time' => $validated['waktu_selesai'],
+                'end_time' => $endTime,
                 'google_event_id' => null,
                 'google_meet_link' => null,
                 'status' => 0

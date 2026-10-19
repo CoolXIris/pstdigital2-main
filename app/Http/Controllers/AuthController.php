@@ -77,15 +77,7 @@ class AuthController extends Controller
             if (Auth::user()->hasRole('admin|super_admin')) {
                 return redirect('dashboard');
             } else {
-                $profileComplete = $user->pekerjaan
-                    && $user->jenis_kelamin
-                    && $user->tanggal_lahir
-                    && $user->asal_prov
-                    && $user->asal_kab
-                    && $user->no_hp
-                    && $user->pendidikan;
-
-                return $profileComplete
+                return $user->hasCompleteProfile()
                     ? redirect('/')
                     : redirect()->route('profile')->with('message', 'Lengkapi profil Anda untuk menggunakan seluruh layanan.');
             }

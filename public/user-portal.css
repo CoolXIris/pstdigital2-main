@@ -34,6 +34,8 @@
 .portal-nav-link:hover { color: var(--portal-blue) !important; background: #f3f6fa; }
 .portal-nav-link.is-active { color: var(--portal-blue) !important; background: var(--portal-blue-light); font-weight: 600; }
 .portal-nav-link.is-active > i:first-child { color: var(--portal-blue); }
+.portal-nav-link.is-disabled { color: #9aa6b2 !important; cursor: not-allowed; opacity: .72; }
+.portal-nav-link.is-disabled > i:first-child { color: #9aa6b2; }
 .portal-external { margin-left: auto; color: #97a4b3; font-size: 10px; }
 .portal-sidebar-bottom { display: grid; gap: 4px; margin-top: auto; }
 .portal-logout { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 0 11px; color: #67788b !important; border-top: 1px solid var(--portal-line); font-size: 10px; text-decoration: none; }
@@ -456,6 +458,55 @@ html[data-theme="dark"] .portal-scrim.is-visible { background: rgba(5,10,15,.68)
 .portal-meeting-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .portal-meeting-card h3 { font-size: 16px; line-height: 1.4; }
 .portal-meeting-card .portal-meeting-description { max-width: 900px; margin-top: 7px; }
+.portal-meeting-description-wrap { display: flex; width: min(52%, 700px); min-width: 0; align-items: flex-start; gap: 10px; }
+.portal-meeting-description-wrap .portal-meeting-description { display: -webkit-box; flex: 1 1 auto; min-width: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.portal-meeting-description-wrap .portal-detail-button { flex: 0 0 auto; margin-top: 4px; }
+.portal-history-table th:first-child, .portal-history-table td:first-child { width: 132px; }
+.portal-history-table th:nth-child(3), .portal-history-table td:nth-child(3) { min-width: 130px; white-space: nowrap; }
+.portal-history-table td:nth-child(2) { min-width: 145px; }
+.portal-history-button { min-height: 34px; padding: 6px 9px; white-space: nowrap; font-size: 11px; }
+.portal-rating-stars { color: #bd771a; letter-spacing: 1px; white-space: nowrap; }
+.portal-meeting-detail-list { display: grid; gap: 13px; margin: 0; }
+.portal-meeting-detail-list > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--portal-line); }
+.portal-meeting-detail-list > div:last-child { padding-bottom: 0; border-bottom: 0; }
+.portal-meeting-detail-list dt { color: #6c7f94; font-size: 12px; font-weight: 600; }
+.portal-meeting-detail-list dd { min-width: 0; margin: 0; color: var(--portal-ink); font-size: 13px; }
+.portal-detail-long-text { overflow-wrap: anywhere; white-space: pre-line; }
+.consultation-history-older { margin: 0 auto 10px; }
+.consultation-history-older[hidden] { display: none !important; }
+#consultationChatForm[hidden], #consultationChatHint[hidden] { display: none !important; }
+@media (max-width: 700px) {
+    .portal-meeting-top { flex-direction: column; }
+    .portal-meeting-description-wrap { width: 100%; }
+    .portal-meeting-description-wrap .portal-detail-button { margin-top: 0; }
+    .portal-meeting-detail-list > div { grid-template-columns: 1fr; gap: 3px; }
+}
+html[data-theme="dark"] .portal-meeting-detail-list dt { color: #b7c4d0; }
+.portal-date-picker { position: relative; z-index: 3; }
+.portal-date-picker-control { position: relative; }
+.portal-date-picker-control .form-control { padding-right: 46px; cursor: pointer; }
+.portal-date-picker-toggle { position: absolute; top: 4px; right: 4px; display: grid; width: 36px; height: 35px; place-items: center; color: var(--portal-blue); background: transparent; border: 0; border-radius: 4px; }
+.portal-date-picker-toggle:hover { background: #eaf1fa; }
+.portal-calendar { position: fixed; top: 0; left: 0; z-index: 1080; width: min(320px, calc(100vw - 52px)); padding: 12px; background: #fff; border: 1px solid #cad8e7; border-radius: 7px; box-shadow: 0 10px 30px rgba(18,39,65,.2); }
+.portal-calendar[hidden] { display: none !important; }
+.portal-calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: var(--portal-ink); }
+.portal-calendar-header strong { font-size: 13px; font-weight: 600; text-transform: capitalize; }
+.portal-calendar-header button { display: grid; width: 30px; height: 30px; place-items: center; color: var(--portal-blue); background: transparent; border: 0; border-radius: 4px; }
+.portal-calendar-header button:hover:not(:disabled) { background: #eaf1fa; }
+.portal-calendar-header button:disabled { color: #b8c3ce; cursor: not-allowed; }
+.portal-calendar-weekdays, .portal-calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; text-align: center; }
+.portal-calendar-weekdays { margin-bottom: 4px; color: #78899c; font-size: 10px; font-weight: 600; }
+.portal-calendar-day { min-width: 0; height: 34px; color: #385675; background: transparent; border: 0; border-radius: 4px; font-size: 12px; }
+.portal-calendar-day:hover:not(:disabled) { background: #eaf1fa; }
+.portal-calendar-day.is-today { box-shadow: inset 0 0 0 1px #9bb5d0; }
+.portal-calendar-day.is-selected { color: #fff; background: var(--portal-blue); }
+.portal-calendar-day:disabled { color: #b9c2cb; background: #f5f6f7; cursor: not-allowed; text-decoration: line-through; }
+.portal-calendar-note { display: block; margin-top: 9px; color: #78899c; font-size: 10px; }
+.portal-date-picker > .form-text { display: block; }
+html[data-theme="dark"] .portal-calendar { color: #e4ebf1; background: #252f39; border-color: #536272; }
+html[data-theme="dark"] .portal-calendar-header, html[data-theme="dark"] .portal-calendar-day { color: #d5e2ed; }
+html[data-theme="dark"] .portal-calendar-day:disabled { color: #788796; background: #202a33; }
+html[data-theme="dark"] .portal-calendar-note, html[data-theme="dark"] .portal-calendar-weekdays { color: #aebdca; }
 .portal-meeting-card .portal-meeting-meta { gap: 9px 24px; margin-top: 15px !important; }
 .portal-meeting-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 17px; padding-top: 14px; border-top: 1px solid #edf1f5; }
 .portal-room-presence, .admin-room-presence { display: inline-flex; align-items: center; gap: 7px; color: #6c7c8f; font-size: 11px; }

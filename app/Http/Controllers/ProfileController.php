@@ -63,7 +63,7 @@ class ProfileController extends Controller
         abort_unless((int) $id === (int) Auth::id(), 403);
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'pekerjaan' => ['required', Rule::in(['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/BUMD', 'Wiraswasta', 'ASN/TNI/Polri'])],
+            'pekerjaan' => ['required', Rule::in(['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/BUMD', 'Wiraswasta', 'ASN/TNI/Polri', 'Lainnya'])],
             'jenis_kelamin' => ['required', Rule::in(['1', '2'])],
             'tanggal_lahir' => ['required', 'date', 'before:today'],
             'asal_prov' => ['required', 'string', 'max:100'],
@@ -79,7 +79,11 @@ class ProfileController extends Controller
             return redirect()->route('dashboard')->with('message', 'Profil berhasil diperbarui.');
         }
 
-        return redirect('/')->with('message', 'Profil berhasil dilengkapi. Selamat menggunakan layanan PST Digital.');
+        if (! $user->hasCompleteProfile()) {
+            return redirect()->route('profile')->with('error', 'Profil belum lengkap. Lengkapi semua data hingga mencapai 100%.');
+        }
+
+        return redirect()->route('profile')->with('message', 'Profil berhasil dilengkapi 100%. Semua fitur layanan kini dapat diakses.');
     }
 
     /**

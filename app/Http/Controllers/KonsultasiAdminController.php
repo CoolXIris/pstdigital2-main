@@ -359,6 +359,42 @@ class KonsultasiAdminController extends Controller
         ]);
     }
 
+    public function messageHistory(Request $request, Meeting $meeting): JsonResponse
+    {
+        $this->authorizeMeetingChatParticipant($meeting);
+        abort_unless((int) $meeting->status === 1, 404, 'Riwayat chat hanya tersedia setelah konsultasi selesai.');
+
+        $validated = $request->validate([
+            'before' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $query = DB::table('consultation_messages')
+            ->join('users', 'users.id', '=', 'consultation_messages.sender_user_id')
+            ->where('consultation_messages.meeting_id', $meeting->id)
+            ->when(isset($validated['before']), fn ($builder) => $builder->where('consultation_messages.id', '<', $validated['before']))
+            ->select([
+                'consultation_messages.id',
+                'consultation_messages.sender_user_id',
+                'consultation_messages.body',
+                'consultation_messages.created_at',
+                'users.name as sender_name',
+            ]);
+        $messages = $query->orderByDesc('consultation_messages.id')->limit(101)->get();
+        $hasOlder = $messages->count() > 100;
+        $messages = $messages->take(100)->reverse()->values();
+
+        return response()->json([
+            'has_older' => $hasOlder,
+            'messages' => $messages->map(fn ($message) => [
+                'id' => (int) $message->id,
+                'sender_id' => (int) $message->sender_user_id,
+                'sender_name' => $message->sender_name,
+                'body' => $message->body,
+                'is_mine' => (int) $message->sender_user_id === (int) Auth::id(),
+                'sent_at' => Carbon::parse($message->created_at)->timezone('Asia/Jakarta')->format('d/m/Y H:i'),
+            ]),
+        ]);
+    }
+
     public function messageStatus(Meeting $meeting): JsonResponse
     {
         $this->authorizeMeetingChatParticipant($meeting);
@@ -413,7 +449,7 @@ class KonsultasiAdminController extends Controller
 
     public function documentation(Meeting $meeting)
     {
-        $this->authorizeParticipant($meeting);
+        abort_unless(Auth::user()->hasRole(['admin', 'super_admin']), 403);
         abort_unless($meeting->documentation_path && Storage::disk('local')->exists($meeting->documentation_path), 404);
 
         return Storage::disk('local')->download(

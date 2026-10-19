@@ -39,9 +39,16 @@
             <nav class="portal-nav" aria-label="Menu utama">
                 <span class="portal-nav-label">LAYANAN</span>
                 <a class="portal-nav-link {{ request()->is('/') ? 'is-active' : '' }}" href="{{ url('/') }}"><i class="bi bi-house-door"></i><span>Landing page</span></a>
+                @php($profileComplete = Auth::user()->hasRole('admin|super_admin') || Auth::user()->hasCompleteProfile())
+                @if ($profileComplete)
                 <a class="portal-nav-link {{ request()->is('konsultasi*') ? 'is-active' : '' }}" href="{{ url('konsultasi') }}"><i class="bi bi-calendar2-week"></i><span>Konsultasi</span></a>
                 <a class="portal-nav-link {{ request()->is('chatbot*') ? 'is-active' : '' }}" href="{{ url('chatbot') }}"><i class="bi bi-chat-square-text"></i><span>Chatbot</span></a>
                 <a class="portal-nav-link" href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener"><i class="bi bi-journal-bookmark"></i><span>Katalog Publikasi</span><i class="bi bi-box-arrow-up-right portal-external"></i></a>
+                @else
+                <span class="portal-nav-link is-disabled" aria-disabled="true" title="Lengkapi profil hingga 100% untuk membuka fitur ini"><i class="bi bi-calendar2-week"></i><span>Konsultasi (nonaktif)</span><i class="bi bi-lock ms-auto"></i></span>
+                <span class="portal-nav-link is-disabled" aria-disabled="true" title="Lengkapi profil hingga 100% untuk membuka fitur ini"><i class="bi bi-chat-square-text"></i><span>Chatbot (nonaktif)</span><i class="bi bi-lock ms-auto"></i></span>
+                <span class="portal-nav-link is-disabled" aria-disabled="true" title="Lengkapi profil hingga 100% untuk membuka fitur ini"><i class="bi bi-journal-bookmark"></i><span>Katalog (nonaktif)</span><i class="bi bi-lock ms-auto"></i></span>
+                @endif
             </nav>
             <div class="portal-sidebar-bottom">
                 <a class="portal-nav-link {{ request()->is('profile*') ? 'is-active' : '' }}" href="{{ route('profile') }}"><i class="bi bi-person-vcard"></i><span>Profil Saya</span></a>
