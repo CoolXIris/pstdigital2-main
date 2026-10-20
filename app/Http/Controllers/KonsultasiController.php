@@ -48,6 +48,7 @@ class KonsultasiController extends Controller
             'consultationHolidays' => config('pst.consultation_holidays'),
             'jakartaToday' => now('Asia/Jakarta')->toDateString(),
             'jakartaNowTime' => now('Asia/Jakarta')->format('H:i'),
+            'jakartaNowTimestamp' => now('Asia/Jakarta')->timestamp,
         ]);
     }
 

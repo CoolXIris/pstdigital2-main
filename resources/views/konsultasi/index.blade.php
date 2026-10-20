@@ -184,7 +184,7 @@
                     <div class="mb-3"><label class="form-label" for="meeting-description">Deskripsi kebutuhan</label><textarea class="form-control" id="meeting-description" name="deskripsi" rows="4" minlength="50" maxlength="3000" placeholder="Ceritakan data, indikator, atau metodologi yang ingin dikonsultasikan..." required>{{ old('deskripsi') }}</textarea><small class="form-text text-muted">Tuliskan minimal 50 karakter agar petugas dapat memahami kebutuhan konsultasi Anda.</small></div>
                     <div class="row g-3">
                         <div class="col-md-4"><label class="form-label" for="meeting-date-display">Tanggal konsultasi</label>
-                            <div class="portal-date-picker" id="consultation-date-picker" data-today="{{ $jakartaToday }}" data-now-time="{{ $jakartaNowTime }}" data-holidays='@json($consultationHolidays)'>
+                            <div class="portal-date-picker" id="consultation-date-picker" data-today="{{ $jakartaToday }}" data-now-time="{{ $jakartaNowTime }}" data-now-timestamp="{{ $jakartaNowTimestamp }}" data-holidays='@json($consultationHolidays)'>
                                 <div class="portal-date-picker-control"><input class="form-control" id="meeting-date-display" type="text" placeholder="Pilih hari kerja" readonly aria-haspopup="dialog" aria-expanded="false"><button class="portal-date-picker-toggle" type="button" aria-label="Buka kalender"><i class="bi bi-calendar3"></i></button></div>
                                 <input id="meeting-date" type="hidden" name="tanggal" value="{{ old('tanggal') }}">
                                 <div class="portal-calendar" id="consultation-calendar" role="dialog" aria-label="Pilih tanggal konsultasi" hidden>
@@ -226,9 +226,21 @@
         const calendarMonth = calendar.querySelector('[data-calendar-month]');
         const calendarMessage = datePicker.querySelector('[data-calendar-message]');
         const holidays = new Set(JSON.parse(datePicker.dataset.holidays));
-        const today = datePicker.dataset.today;
-        const nowTime = datePicker.dataset.nowTime;
+        const serverNowTimestamp = Number(datePicker.dataset.nowTimestamp) * 1000;
+        const browserStartedAt = Date.now();
         const duration = {{ (int) $consultationDuration }};
+        const getJakartaClock = () => {
+            const serverSyncedNow = new Date(serverNowTimestamp + Date.now() - browserStartedAt);
+            const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+            }).formatToParts(serverSyncedNow).map((part) => [part.type, part.value]));
+            return {
+                today: `${parts.year}-${parts.month}-${parts.day}`,
+                time: `${parts.hour}:${parts.minute}`,
+            };
+        };
+        let { today, time: nowTime } = getJakartaClock();
         const asDate = (iso) => {
             const [year, month, day] = iso.split('-').map(Number);
             return new Date(Date.UTC(year, month - 1, day));
@@ -294,7 +306,15 @@
             const below = anchor.bottom + 7;
             calendar.style.top = `${below + calendar.offsetHeight <= window.innerHeight - 12 ? below : Math.max(12, anchor.top - calendar.offsetHeight - 7)}px`;
         };
-        const openCalendar = () => { renderCalendar(); setCalendarOpen(true); positionCalendar(); };
+        const openCalendar = () => {
+            updateTimes();
+            const currentMonth = asDate(today);
+            currentMonth.setUTCDate(1);
+            if (visibleMonth < currentMonth) visibleMonth = currentMonth;
+            renderCalendar();
+            setCalendarOpen(true);
+            positionCalendar();
+        };
         dateDisplay.addEventListener('click', openCalendar);
         datePicker.querySelector('.portal-date-picker-toggle').addEventListener('click', () => {
             if (calendar.hidden) openCalendar(); else setCalendarOpen(false);
@@ -319,6 +339,11 @@
         if (dateInput.value && !isUnavailable(dateInput.value)) dateDisplay.value = formatDate(dateInput.value);
 
         const updateTimes = () => {
+            ({ today, time: nowTime } = getJakartaClock());
+            if (dateInput.value && dateInput.value < today) {
+                dateInput.value = '';
+                dateDisplay.value = '';
+            }
             const selectedDate = dateInput.value;
             [...start.options].forEach((option) => {
                 if (!option.value) return;
@@ -336,7 +361,19 @@
         };
         dateInput.addEventListener('change', updateTimes);
         start.addEventListener('change', updateTimes);
+        start.addEventListener('focus', updateTimes);
+        start.addEventListener('pointerdown', updateTimes);
         updateTimes();
+        window.setInterval(() => {
+            updateTimes();
+            if (!calendar.hidden) {
+                const currentMonth = asDate(today);
+                currentMonth.setUTCDate(1);
+                if (visibleMonth < currentMonth) visibleMonth = currentMonth;
+                renderCalendar();
+                positionCalendar();
+            }
+        }, 15000);
         form.addEventListener('submit', (event) => {
             if (!dateInput.value || isUnavailable(dateInput.value)) {
                 event.preventDefault();
