@@ -13,7 +13,7 @@
         return out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
     };
 
-    const render = (source) => {
+    const renderBasic = (source) => {
         const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
         const html = [];
         let i = 0;
@@ -81,6 +81,82 @@
             html.push(`<p>${inline(para.join('\n')).replace(/\n/g, '<br>')}</p>`);
         }
         return html.join('');
+    };
+
+    const allowedTags = new Set([
+        'a', 'b', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3',
+        'h4', 'h5', 'h6', 'hr', 'i', 'li', 'ol', 'p', 'pre', 's', 'strong',
+        'sub', 'sup', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
+    ]);
+    const blockedTags = new Set([
+        'embed', 'iframe', 'math', 'object', 'script', 'style', 'svg', 'template',
+    ]);
+
+    const safeHref = (value) => {
+        const href = String(value || '').trim();
+        if (!href || /[\u0000-\u001f]/.test(href)) return null;
+        if (/^(https?:|mailto:)/i.test(href)) {
+            return href;
+        }
+        return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith('//') ? null : href;
+    };
+
+    const sanitizeNode = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return document.createTextNode(node.nodeValue || '');
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+            return document.createDocumentFragment();
+        }
+
+        const tag = node.tagName.toLowerCase();
+        if (blockedTags.has(tag)) {
+            return document.createDocumentFragment();
+        }
+
+        if (!allowedTags.has(tag)) {
+            const fragment = document.createDocumentFragment();
+            node.childNodes.forEach((child) => fragment.append(sanitizeNode(child)));
+            return fragment;
+        }
+
+        const cleanNode = document.createElement(tag);
+        if (tag === 'a') {
+            const href = safeHref(node.getAttribute('href'));
+            if (href) {
+                cleanNode.setAttribute('href', href);
+                cleanNode.setAttribute('target', '_blank');
+                cleanNode.setAttribute('rel', 'noopener noreferrer');
+            }
+        }
+        node.childNodes.forEach((child) => cleanNode.append(sanitizeNode(child)));
+        return cleanNode;
+    };
+
+    const sanitizeHtml = (html) => {
+        const parsed = new DOMParser().parseFromString(String(html), 'text/html');
+        const container = document.createElement('div');
+        parsed.body.childNodes.forEach((node) => container.append(sanitizeNode(node)));
+        container.querySelectorAll('table').forEach((table) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chat-md-table';
+            table.replaceWith(wrapper);
+            wrapper.append(table);
+        });
+        return container.innerHTML;
+    };
+
+    const render = (source) => {
+        const markdown = String(source ?? '');
+        if (window.marked && typeof window.marked.parse === 'function') {
+            return sanitizeHtml(window.marked.parse(markdown, {
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false,
+            }));
+        }
+        return renderBasic(markdown);
     };
 
     window.renderChatMarkdown = render;

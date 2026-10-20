@@ -1,36 +1,29 @@
 """Tools WebAPI BPS untuk Gemini (function calling)."""
 import functools
-import csv
-import hashlib
 import html
-import itertools
 import json
 import logging
 import math
 import os
 import re
-import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
-from urllib.parse import quote_plus
+from typing import Any, Optional
 
-import httpx
 from dotenv import load_dotenv
+
+import bps_csv_catalog
+import bps_data_store
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-BASE = "https://webapi.bps.go.id/v1/api"
 DOMAIN = os.getenv("BPS_DOMAIN", "1600")
 WIB = timezone(timedelta(hours=7))
-_http = httpx.Client(timeout=8.0)
-_cache: dict[str, tuple[float, Any]] = {}
-_cache_lock = threading.Lock()
 _REGIONS = (
     ("Provinsi Sumatera Selatan", ("sumatera selatan", "sumsel")),
     ("Kabupaten Ogan Komering Ulu", ("ogan komering ulu", "oku")),
@@ -52,13 +45,6 @@ _REGIONS = (
     ("Kota Lubuklinggau", ("lubuklinggau", "lubuk linggau")),
 )
 _SHORT_REGION_ALIASES = {"oku", "oki", "pali", "muba"}
-_VARIABLE_INDEX_TTL = 24 * 60 * 60
-_API_RESPONSE_TTL = 30 * 60
-_API_CATALOG_TTL = 24 * 60 * 60
-_API_PERIOD_TTL = 60 * 60
-_CATALOG_DIR = Path(__file__).resolve().parent
-_SUBJECT_CATALOG_PATH = _CATALOG_DIR / "katalog_subjek_1600.csv"
-_VARIABLE_CATALOG_PATH = _CATALOG_DIR / "katalog_variabel_1600.csv"
 _VARIABLE_SYNONYMS = {
     "kemiskinan": "miskin",
     "miskin": "kemiskinan",
@@ -151,17 +137,6 @@ class BpsError(Exception):
     pass
 
 
-def _cached(key: str, ttl: int, loader: Callable[[], Any]) -> Any:
-    with _cache_lock:
-        hit = _cache.get(key)
-    if hit and time.time() - hit[0] < ttl:
-        return hit[1]
-    value = loader()
-    with _cache_lock:
-        _cache[key] = (time.time(), value)
-    return value
-
-
 def strip_notes(value: Any) -> Any:
     if isinstance(value, dict):
         return {
@@ -174,84 +149,42 @@ def strip_notes(value: Any) -> Any:
     return value
 
 
-def _api_response_ttl(path: str) -> int:
-    normalized = path.strip("/")
-    if (
-        normalized.startswith("interoperabilitas/datasource/simdasi/id/23/")
-        or normalized.startswith("list/model/var/")
-        or normalized.startswith("list/model/subject/")
-        or normalized.startswith("list/model/statictable/")
-    ):
-        return _API_CATALOG_TTL
-    if normalized.startswith("list/model/th/"):
-        return _API_PERIOD_TTL
-    return _API_RESPONSE_TTL
-
-
-def _get(path: str) -> dict:
-    api_key = os.getenv("BPS_API_KEY")
-    if not api_key:
-        raise BpsError("BPS_API_KEY belum dikonfigurasi.")
-    cache_key = "api-response:"+hashlib.sha256(
-        f"{api_key}\0{path.strip('/')}".encode()
-    ).hexdigest()
-    ttl = _api_response_ttl(path)
-    with _cache_lock:
-        hit = _cache.get(cache_key)
-    if hit and time.time() - hit[0] < ttl:
-        return hit[1]
-
+def _fetch_catalog_row(row: dict[str, str]) -> dict:
     try:
-        response = _http.get(f"{BASE}/{path.strip('/')}/key/{api_key}/")
-    except httpx.RequestError:
-        # Sengaja tanpa pesan asli: URL pada exception memuat API key.
-        raise BpsError("WebAPI BPS tidak dapat diakses saat ini.") from None
+        return bps_csv_catalog.fetch_json(row)
+    except bps_csv_catalog.CatalogError as exc:
+        raise BpsError(str(exc)) from None
+
+
+def _catalog_rows() -> list[dict[str, str]]:
     try:
-        payload = response.json()
-    except ValueError:
-        raise BpsError("WebAPI BPS mengembalikan JSON yang tidak valid.") from None
-    if not isinstance(payload, dict):
-        raise BpsError("Format respons BPS tidak dikenali.")
-    if response.status_code >= 500:
-        raise BpsError("WebAPI BPS mengalami gangguan.")
-    availability = response.headers.get("data-availability", "").strip().lower()
-    if availability == "list-not-available":
-        payload["status"] = "OK"
-        payload["data"] = [{"pages": 1}, []]
-        payload["data_availability"] = availability
-        with _cache_lock:
-            _cache[cache_key] = (time.time(), payload)
-        return payload
-    if payload.get("status") != "OK":
-        payload["status"] = "OK"
-        payload["data"] = [{"pages": 1}, []]
-        return payload
-    if response.is_success:
-        with _cache_lock:
-            _cache[cache_key] = (time.time(), payload)
-    return payload
-
-
-def _list_rows(payload: dict) -> tuple[list[dict], int]:
-    data = payload.get("data")
-    if isinstance(data, list) and len(data) >= 2 and isinstance(data[1], list):
-        meta = data[0] if isinstance(data[0], dict) else {}
-        return data[1], int(meta.get("pages", 1) or 1)
-    return [], 1
-
-
-def _strip_html(text: Any, limit: int = 400) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", str(text or ""))).strip()[:limit]
+        return bps_csv_catalog.load_catalog()
+    except bps_csv_catalog.CatalogError as exc:
+        raise BpsError(str(exc)) from None
 
 
 def _periods(var_id: int) -> list[dict]:
     """Daftar tahun tersedia untuk satu variabel, terbaru dulu."""
-    def load() -> list[dict]:
-        rows, _ = _list_rows(_get(f"list/model/th/domain/{DOMAIN}/var/{var_id}"))
-        rows = [r for r in rows if str(r.get("th", "")).isdigit()]
-        return sorted(rows, key=lambda r: int(r["th"]), reverse=True)
+    periods = []
+    for row in _catalog_rows():
+        if row.get("jenis_tabel") != "Tabel Dinamis" or row.get("id_tabel") != str(var_id):
+            continue
+        year = row.get("tahun", "")
+        th_id = re.search(r"/th/([^/]+)/", row.get("link_json", ""))
+        if year.isdigit() and th_id and th_id.group(1).isdigit():
+            periods.append({"th": year, "th_id": th_id.group(1)})
+    return sorted(periods, key=lambda row: int(row["th"]), reverse=True)
 
-    return _cached(f"th:{DOMAIN}:{var_id}", 3600, load)
+
+def _dynamic_table_row(var_id: int, year: str) -> dict[str, str]:
+    for row in _catalog_rows():
+        if (
+            row.get("jenis_tabel") == "Tabel Dinamis"
+            and row.get("id_tabel") == str(var_id)
+            and row.get("tahun") == str(year)
+        ):
+            return row
+    raise BpsError(f"Baris katalog untuk tahun {year} tidak tersedia.")
 
 
 def _latest_year(var_id: int) -> tuple[Optional[str], int, bool]:
@@ -351,136 +284,62 @@ def _search_keyword_variants(keyword: str) -> list[str]:
     return list(dict.fromkeys(query for query in candidates if query))[:24]
 
 
-def _variable_index_key() -> str:
-    return f"variables-index:{DOMAIN}"
-
-
-def _load_model_rows(path: str) -> list[dict]:
-    rows: list[dict] = []
-    pages = 1
-    page = 1
-    while page <= pages:
-        page_path = path if page == 1 else f"{path}/page/{page}"
-        payload = _get(page_path)
-        data = payload.get("data")
-        if data == "":
-            return rows
-        if not isinstance(data, list) or len(data) < 2 or not isinstance(data[1], list):
-            raise BpsError("Format daftar variabel BPS tidak dikenali.")
-        page_rows, pages = _list_rows(payload)
-        if pages > 200:
-            raise BpsError("WebAPI BPS melaporkan jumlah halaman variabel yang tidak wajar.")
-        rows.extend(row for row in page_rows if isinstance(row, dict))
-        page += 1
-    return rows
-
-
 def _load_variable_index() -> dict:
-    subject_rows = _load_model_rows(f"list/model/subject/domain/{DOMAIN}")
-    subjects = [
-        (
-            str(row.get("sub_id") or row.get("subject_id")),
-            str(row.get("sub_name") or row.get("subject") or row.get("name") or ""),
-        )
-        for row in subject_rows
-        if row.get("sub_id") is not None or row.get("subject_id") is not None
-    ]
-
-    def load_subject(subject: tuple[str, str]) -> list[dict]:
-        subject_id, subject_name = subject
-        rows = _load_model_rows(
-            f"list/model/var/domain/{DOMAIN}/subject/{quote_plus(subject_id)}"
-        )
-        variables = []
-        for row in rows:
-            var_id = row.get("var_id")
-            title = row.get("title") or row.get("var_name")
-            if var_id is None or not isinstance(title, str) or not title.strip():
-                continue
-            variables.append({
-                "var_id": str(var_id),
-                "title": title.strip(),
-                "unit": row.get("unit") or row.get("unit_name") or row.get("satuan"),
-                "subject": subject_name,
-            })
-        return variables
-
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        subject_variables = list(pool.map(load_subject, subjects))
     variables_by_id: dict[str, dict] = {}
-    for variables in subject_variables:
-        for variable in variables:
-            variables_by_id.setdefault(variable["var_id"], variable)
-    variables = sorted(
-        variables_by_id.values(),
-        key=lambda variable: (variable["title"].casefold(), variable["var_id"]),
-    )
+    subjects_by_id: dict[str, dict] = {}
+    for row in _catalog_rows():
+        subject_id = row.get("id_subjek", "")
+        subject = subjects_by_id.setdefault(subject_id, {
+            "sub_id": subject_id,
+            "subject": row.get("subjek", ""),
+            "category": row.get("kategori_subjek", ""),
+            "category_id": "",
+            "jumlah_tabel": None,
+        })
+        if row.get("jenis_tabel") != "Tabel Dinamis":
+            continue
+        variable_id = row.get("id_tabel", "")
+        title = row.get("judul", "")
+        if not variable_id.isdigit() or not title:
+            continue
+        variable = variables_by_id.setdefault(variable_id, {
+            "var_id": variable_id,
+            "title": title,
+            "unit": None,
+            "subject_id": subject_id,
+            "subject": subject.get("subject", ""),
+            "category": subject.get("category", ""),
+            "category_id": "",
+            "years": [],
+            "aliases": list(dict.fromkeys([
+                *_variable_aliases(title),
+                row.get("subjek", ""),
+                row.get("kategori_subjek", ""),
+            ])),
+        })
+        year = row.get("tahun", "")
+        if year.isdigit() and year not in variable["years"]:
+            variable["years"].append(year)
+    variables = list(variables_by_id.values())
+    for variable in variables:
+        variable["years"].sort(key=int, reverse=True)
+        variable["latest_year"] = variable["years"][0] if variable["years"] else None
+        variable["year_count"] = len(variable["years"])
     return {
-        "variables": variables,
-        "subjects": [
-            {
-                "sub_id": subject_id,
-                "subject": subject_name,
-                "category": "",
-                "category_id": "",
-                "jumlah_tabel": None,
-            }
-            for subject_id, subject_name in subjects
-        ],
+        "variables": sorted(
+            variables,
+            key=lambda variable: (variable["title"].casefold(), variable["var_id"]),
+        ),
+        "subjects": sorted(
+            subjects_by_id.values(),
+            key=lambda subject: subject["subject"].casefold(),
+        ),
         "refreshed_at": datetime.now(WIB).isoformat(timespec="seconds"),
     }
 
 
 def _load_catalog_index() -> dict:
-    def read_rows(path: Path) -> list[dict]:
-        if not path.is_file():
-            return []
-        try:
-            with path.open(encoding="utf-8-sig", newline="") as source:
-                return list(csv.DictReader(source))
-        except (OSError, UnicodeError, csv.Error) as exc:
-            raise BpsError(f"Katalog BPS lokal tidak dapat dibaca: {path.name}.") from exc
-
-    subjects = []
-    for row in read_rows(_SUBJECT_CATALOG_PATH):
-        subject_id = (row.get("sub_id") or "").strip()
-        subject_name = (row.get("subjek") or "").strip()
-        if not subject_id or not subject_name:
-            continue
-        table_count = (row.get("jumlah_tabel") or "").strip()
-        subjects.append({
-            "sub_id": subject_id,
-            "subject": subject_name,
-            "category": (row.get("kategori") or "").strip(),
-            "category_id": (row.get("subcat_id") or "").strip(),
-            "jumlah_tabel": int(table_count) if table_count.isdigit() else None,
-        })
-
-    subject_by_id = {subject["sub_id"]: subject for subject in subjects}
-    variables = []
-    for row in read_rows(_VARIABLE_CATALOG_PATH):
-        variable_id = (row.get("var_id") or "").strip()
-        title = (row.get("judul") or "").strip()
-        if not variable_id.isdigit() or not title:
-            continue
-        subject_id = (row.get("sub_id") or "").strip()
-        subject = subject_by_id.get(subject_id, {})
-        latest_year = (row.get("tahun_terbaru") or "").strip()
-        year_count = (row.get("jumlah_tahun") or "").strip()
-        variables.append({
-            "var_id": variable_id,
-            "title": title,
-            "unit": (row.get("satuan") or "").strip() or None,
-            "subject_id": subject_id,
-            "subject": (row.get("subjek") or "").strip() or subject.get("subject", ""),
-            "category": (row.get("kategori") or "").strip() or subject.get("category", ""),
-            "category_id": subject.get("category_id", ""),
-            "latest_year": latest_year if latest_year.isdigit() else None,
-            "year_count": int(year_count) if year_count.isdigit() else None,
-            "aliases": _variable_aliases(title),
-        })
-
-    return {"variables": variables, "subjects": subjects}
+    return _load_variable_index()
 
 
 def _variable_aliases(title: str) -> list[str]:
@@ -537,26 +396,15 @@ def _combine_variable_indexes(remote: dict, catalog: dict) -> dict:
 
 
 def _load_searchable_variable_index() -> dict:
-    catalog = _load_catalog_index()
-    try:
-        remote = _load_variable_index()
-    except BpsError:
-        if not catalog["variables"]:
-            raise
-        logger.warning("WebAPI BPS tidak tersedia; memakai metadata dari katalog CSV lokal.")
-        remote = {"variables": [], "subjects": []}
-    return _combine_variable_indexes(remote, catalog)
+    return _load_variable_index()
 
 
 def refresh_variable_index() -> dict:
-    index = _load_searchable_variable_index()
-    with _cache_lock:
-        _cache[_variable_index_key()] = (time.time(), index)
-    return index
+    return _load_searchable_variable_index()
 
 
 def _variable_index() -> dict:
-    return _cached(_variable_index_key(), _VARIABLE_INDEX_TTL, _load_searchable_variable_index)
+    return _load_searchable_variable_index()
 
 
 def _token_match_score(term: str, title_tokens: set[str]) -> float:
@@ -719,12 +567,12 @@ def cari_variabel(kata_kunci: str) -> dict:
 
     hasil = []
     for variable in candidates:
-        try:
-            year, count, future = _latest_year(int(variable["var_id"]))
-        except BpsError:
-            year = variable.get("latest_year")
-            count = variable.get("year_count") or 0
-            future = False
+        year = variable.get("latest_year")
+        count = variable.get("year_count") or 0
+        future = bool(
+            variable.get("years")
+            and any(int(value) > datetime.now(WIB).year for value in variable["years"])
+        )
         hasil.append({
             "var_id": int(variable["var_id"]),
             "judul": variable.get("title"),
@@ -806,21 +654,29 @@ def cari_subjek(kata_kunci: str = "") -> dict:
 
 
 def _simdasi_tables() -> list[dict]:
-    def load() -> list[dict]:
-        payload = _get("interoperabilitas/datasource/simdasi/id/23/wilayah/1600000")
-        data = payload.get("data")
-        table_block = data[1] if isinstance(data, list) and len(data) > 1 else {}
-        tables = table_block.get("data") if isinstance(table_block, dict) else None
-        if not isinstance(tables, list):
-            raise BpsError("Format katalog tabel SIMDASI BPS tidak dikenali.")
-        return [
-            table for table in tables
-            if isinstance(table, dict)
-            and isinstance(table.get("id_tabel"), str)
-            and isinstance(table.get("judul"), str)
-        ]
-
-    return _cached("simdasi:tables:1600000", _VARIABLE_INDEX_TTL, load)
+    tables: dict[str, dict] = {}
+    for row in _catalog_rows():
+        table_id = row.get("id_tabel", "")
+        title = row.get("judul", "")
+        if row.get("jenis_tabel") != "SIMDASI" or not table_id or not title:
+            continue
+        table = tables.setdefault(table_id, {
+            "id_tabel": table_id,
+            "judul": title,
+            "subject": row.get("subjek", ""),
+            "bab": row.get("kategori_subjek", ""),
+            "ketersediaan_tahun": [],
+            "baris_tahun": {},
+        })
+        year = row.get("tahun", "")
+        if year.isdigit():
+            table["ketersediaan_tahun"].append(year)
+            table["baris_tahun"][year] = row
+    for table in tables.values():
+        table["ketersediaan_tahun"] = sorted(
+            set(table["ketersediaan_tahun"]), key=int
+        )
+    return list(tables.values())
 
 
 def simdasi_daftar_tabel(kata_kunci: str = "", jumlah: int = 250) -> dict:
@@ -860,7 +716,11 @@ def simdasi_daftar_tabel(kata_kunci: str = "", jumlah: int = 250) -> dict:
             "id_tabel": table["id_tabel"],
             "subjek": table.get("subject"),
             "bab": table.get("bab"),
-            "tahun_tersedia": table.get("ketersediaan_tahun") or [],
+            "tahun_tersedia": [
+                int(year)
+                for year in table.get("ketersediaan_tahun", [])
+                if str(year).isdigit()
+            ],
         }
         for _, table in ranked[:count]
     ]
@@ -937,13 +797,14 @@ def simdasi_cari_data(
 
     table = ranked[0][1]
     current_year = datetime.now(WIB).year
-    available_years = sorted(
-        {
-            int(value)
-            for value in table.get("ketersediaan_tahun", [])
-            if str(value).isdigit() and int(value) <= current_year
-        }
-    )
+    all_available_years = [
+        int(value)
+        for value in table.get("ketersediaan_tahun", [])
+        if str(value).isdigit()
+    ]
+    available_years = [
+        year for year in all_available_years if year <= current_year
+    ] or all_available_years
     if not available_years:
         return {
             "judul": table.get("judul"),
@@ -957,25 +818,25 @@ def simdasi_cari_data(
             requested_year = int(str(tahun).strip())
         except ValueError:
             return {"error": "Tahun harus berupa angka.", "status_hasil": "kosong"}
-    eligible_years = [
-        year for year in available_years
-        if requested_year is None or year <= requested_year
-    ]
-    if not eligible_years:
+    if requested_year is not None and requested_year not in all_available_years:
         return {
             "judul": table.get("judul"),
-            "tahun_tersedia": available_years,
+            "tahun_tersedia": all_available_years,
             "tahun_diminta_tidak_tersedia": requested_year,
             "status_hasil": "kosong",
         }
-    selected_year = eligible_years[-1]
+    selected_year = requested_year if requested_year is not None else available_years[-1]
 
     try:
-        table_id = quote_plus(str(table["id_tabel"]), safe="")
-        detail = _get(
-            "interoperabilitas/datasource/simdasi/id/25"
-            f"/tahun/{selected_year}/id_tabel/{table_id}/wilayah/1600000"
-        )
+        selected_row = table["baris_tahun"].get(str(selected_year))
+        if selected_row is None:
+            return {
+                "judul": table.get("judul"),
+                "tahun_tersedia": available_years,
+                "tahun_diminta_tidak_tersedia": requested_year,
+                "status_hasil": "kosong",
+            }
+        detail = _fetch_catalog_row(selected_row)
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
 
@@ -1066,6 +927,7 @@ def simdasi_cari_data(
 
     result = {
         "judul": table_data.get("judul_tabel") or table.get("judul"),
+        "sumber": "BPS Provinsi Sumatera Selatan",
         "tahun": table_data.get("tahun_data") or selected_year,
         "subjek": table_data.get("subject") or table.get("subject"),
         "wilayah_ditafsirkan": resolved_region or "Provinsi Sumatera Selatan",
@@ -1082,27 +944,6 @@ def simdasi_cari_data(
 
 
 def warm_cache() -> None:
-    now = datetime.now(WIB)
-
-    def brs(i: int) -> None:
-        year, month0 = divmod(now.year * 12 + (now.month - 1) - i, 12)
-        try:
-            _brs_month(year, month0 + 1)
-        except BpsError:
-            pass
-
-    cutoff = time.time() - _API_CATALOG_TTL
-    with _cache_lock:
-        stale_keys = [
-            key for key, (timestamp, _) in _cache.items()
-            if key != _variable_index_key() and timestamp < cutoff
-        ]
-        for key in stale_keys:
-            if _cache[key][0] < cutoff:
-                _cache.pop(key, None)
-
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        list(pool.map(brs, range(12)))
     try:
         _variable_index()
     except BpsError as exc:
@@ -1189,7 +1030,46 @@ def resolve_region_from_text(text: str) -> tuple[Optional[str], list[str]]:
     return None, sorted(candidates)[:3]
 
 
-def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str], available: list[str]) -> dict:
+def resolve_regions_from_text(text: str) -> list[str]:
+    normalized = _norm_region(text)
+    matches: list[tuple[int, int, str]] = []
+    for canonical, aliases in _REGIONS:
+        for alias in aliases:
+            normalized_alias = _norm_region(alias)
+            if not normalized_alias:
+                continue
+            matches.extend(
+                (match.start(), -len(normalized_alias), canonical)
+                for match in re.finditer(
+                    rf"(?<!\w){re.escape(normalized_alias)}(?!\w)",
+                    normalized,
+                )
+            )
+
+    regions: list[str] = []
+    occupied: list[tuple[int, int]] = []
+    for start, negative_length, canonical in sorted(matches):
+        end = start - negative_length
+        if any(start < occupied_end and end > occupied_start for occupied_start, occupied_end in occupied):
+            continue
+        occupied.append((start, end))
+        if canonical not in regions:
+            regions.append(canonical)
+
+    if regions:
+        return regions
+    resolved, _ = resolve_region_from_text(text)
+    return [resolved] if resolved else []
+
+
+def _format_data(
+    payload: dict,
+    var_id: int,
+    period: dict,
+    wilayah: Optional[str],
+    available: list[str],
+    kategori: Optional[str] = None,
+) -> dict:
     var_info = (payload.get("var") or [{}])[0]
     judul = var_info.get("label") or var_info.get("title")
     resolved_region = None
@@ -1202,52 +1082,125 @@ def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str
                 "wilayah_kandidat": candidates,
                 "status_hasil": "kosong",
             }
-    vervar = _labels(payload.get("vervar")) or {"0": ""}
-    turvar = _labels(payload.get("turvar")) or {"0": ""}
-    turth = _labels(payload.get("turtahun") or payload.get("turth")) or {"0": ""}
     content = payload.get("datacontent") or {}
-    th_id = str(period["th_id"])
+    connection = None
+    try:
+        connection = bps_data_store.init_db()
+        table_id = str(var_id)
+        stored = bps_data_store.cari_nilai(
+            connection,
+            table_id,
+            tahun=[str(period["th"])],
+        )
+        if stored["meta"] is None or (content and not stored["baris"]):
+            bps_data_store.simpan_nilai(
+                connection,
+                payload,
+                table_id=table_id,
+            )
+            connection.commit()
+            stored = bps_data_store.cari_nilai(
+                connection,
+                table_id,
+                tahun=[str(period["th"])],
+            )
 
-    # Kunci datacontent diasumsikan: vervar + var + turvar + th + turtahun (VERIFIKASI dengan respons asli).
-    index = {
-        f"{v}{var_id}{t}{th_id}{tt}": (vervar[v], turvar[t], turth[tt])
-        for v, t, tt in itertools.product(vervar, turvar, turth)
-    }
-    rows = []
-    for key, value in content.items():
-        parsed = index.get(str(key))
-        if parsed is None:
-            continue
-        row = {"wilayah": parsed[0], "kategori": parsed[1], "periode": parsed[2], "nilai": value}
-        rows.append({k: v for k, v in row.items() if v not in ("", None)})
-
-    if content and not rows:
-        return {
-            "catatan": "Kunci data tidak dapat didekode; berikut data mentah.",
-            "judul": var_info.get("label"),
-            "satuan": var_info.get("unit"),
-            "tahun": period["th"],
-            "vervar": vervar,
-            "turvar": turvar,
-            "datacontent": dict(list(content.items())[:150]),
-        }
-
-    if resolved_region:
-        target_names = set(_region_aliases(resolved_region))
-        rows = [r for r in rows if _norm_region(r.get("wilayah", "")) in target_names]
-        if not rows:
+        available_regions = [
+            str(row["wilayah"])
+            for row in connection.execute(
+                "SELECT DISTINCT wilayah FROM nilai_data WHERE id_tabel=? AND tahun=?",
+                (table_id, str(period["th"])),
+            )
+        ]
+        matched_regions = (
+            bps_data_store.deteksi_wilayah(connection, table_id, wilayah)
+            if wilayah
+            else None
+        )
+        if wilayah and not matched_regions:
             return {
-                "judul": judul,
+                "judul": stored["meta"]["judul"] if stored["meta"] else judul,
                 "error": f"Data untuk {resolved_region} tidak tersedia pada variabel ini.",
                 "wilayah_ditafsirkan": resolved_region,
-                "wilayah_tersedia": [v for v in vervar.values() if v][:30],
+                "wilayah_tersedia": available_regions[:30],
                 "status_hasil": "kosong",
             }
 
-    return {
-        "judul": judul,
+        requested_categories = (
+            bps_data_store.deteksi_kategori(connection, table_id, kategori)
+            if kategori
+            else None
+        )
+        if kategori and not requested_categories:
+            available_categories = [
+                str(row["turvar"])
+                for row in connection.execute(
+                    "SELECT DISTINCT turvar FROM nilai_data WHERE id_tabel=? AND tahun=? AND turvar<>''",
+                    (table_id, str(period["th"])),
+                )
+            ]
+            return {
+                "judul": stored["meta"]["judul"] if stored["meta"] else judul,
+                "error": f"Kategori '{kategori}' tidak tersedia pada tahun {period['th']}.",
+                "kategori_tersedia": available_categories[:30],
+                "status_hasil": "kosong",
+            }
+
+        result = bps_data_store.cari_nilai(
+            connection,
+            table_id,
+            wilayah=matched_regions,
+            tahun=[str(period["th"])],
+            turvar=requested_categories,
+        )
+    except bps_data_store.BpsDatabaseError:
+        logger.exception("MySQL query failed for BPS table %s.", var_id)
+        raise BpsError("Penyimpanan data BPS belum dapat dibaca saat ini.") from None
+    finally:
+        if connection is not None:
+            connection.close()
+
+    metadata = result["meta"] or {}
+    rows = [
+        {
+            key: value
+            for key, value in {
+                "wilayah": row["wilayah"],
+                "kategori": row["turvar"],
+                "periode": row["turtahun"],
+                "nilai": (
+                    int(row["nilai"])
+                    if isinstance(row["nilai"], float) and row["nilai"].is_integer()
+                    else row["nilai"]
+                ),
+            }.items()
+            if value not in ("", None, "0")
+        }
+        for row in result["baris"]
+        if row["nilai"] is not None
+    ]
+    if content and not rows:
+        return {
+            "catatan": "Nilai dari respons tersimpan tidak dapat didekode ke tabel terstruktur.",
+            "judul": metadata.get("judul") or judul,
+            "satuan": metadata.get("satuan") or var_info.get("unit"),
+            "tahun": period["th"],
+            "status_hasil": "kosong",
+        }
+    if resolved_region and not rows:
+        return {
+            "judul": metadata.get("judul") or judul,
+            "error": f"Data untuk {resolved_region} tidak tersedia pada variabel ini.",
+            "wilayah_ditafsirkan": resolved_region,
+            "wilayah_tersedia": available_regions[:30],
+            "status_hasil": "kosong",
+        }
+
+    formatted = {
+        "judul": metadata.get("judul") or judul,
+        "sumber": "BPS Provinsi Sumatera Selatan",
         "sifat_data": "proyeksi, bukan hasil pencacahan" if "proyeksi" in str(judul).lower() else "data resmi",
-        "satuan": var_info.get("unit"),
+        "satuan": metadata.get("satuan") or var_info.get("unit"),
         "definisi": str(var_info.get("def") or "")[:300],
         "tahun": period["th"],
         "tahun_mendatang": int(period["th"]) > datetime.now(WIB).year,
@@ -1257,6 +1210,13 @@ def _format_data(payload: dict, var_id: int, period: dict, wilayah: Optional[str
         "terpotong": len(rows) > 150,
         "data": rows[:150],
     }
+    if metadata.get("last_update_bps"):
+        formatted["last_update_bps"] = metadata["last_update_bps"]
+    if metadata.get("catatan"):
+        formatted["catatan_tabel"] = metadata["catatan"]
+    if payload.get("_catatan"):
+        formatted["catatan_data"] = payload["_catatan"]
+    return formatted
 
 
 def ambil_data(
@@ -1265,6 +1225,7 @@ def ambil_data(
     wilayah: Optional[str] = None,
     tahun_mulai: Optional[str] = None,
     tahun_akhir: Optional[str] = None,
+    kategori: Optional[str] = None,
 ) -> dict:
     """Mengambil nilai satu tahun atau rentang tahun untuk satu variabel BPS Sumatera Selatan.
 
@@ -1280,6 +1241,7 @@ def ambil_data(
         wilayah: nama kabupaten/kota untuk memfilter baris data.
         tahun_mulai: tahun awal rentang (opsional).
         tahun_akhir: tahun akhir rentang (opsional).
+        kategori: label kategori (turvar) yang diminta, mis. "SD". Kosongkan untuk semua kategori.
     """
     try:
         vid = int(var_id)
@@ -1358,14 +1320,10 @@ def ambil_data(
                 }
 
             def load_year(period: dict) -> dict:
-                payload = _cached(
-                    f"data:{DOMAIN}:{vid}:{period['th_id']}",
-                    1800,
-                    lambda: _get(
-                        f"list/model/data/domain/{DOMAIN}/var/{vid}/th/{period['th_id']}"
-                    ),
+                payload = _fetch_catalog_row(
+                    _dynamic_table_row(vid, str(period["th"]))
                 )
-                return _format_data(payload, vid, period, resolved_region, available)
+                return _format_data(payload, vid, period, resolved_region, available, kategori)
 
             with ThreadPoolExecutor(max_workers=6) as pool:
                 yearly_results = list(pool.map(load_year, selected_periods))
@@ -1389,6 +1347,7 @@ def ambil_data(
                     (result.get("judul") for result in yearly_results if result.get("judul")),
                     None,
                 ),
+                "sumber": "BPS Provinsi Sumatera Selatan",
                 "satuan": next(
                     (result.get("satuan") for result in yearly_results if result.get("satuan")),
                     None,
@@ -1415,12 +1374,10 @@ def ambil_data(
         else:
             this_year = datetime.now(WIB).year
             chosen = next((p for p in periods if int(p["th"]) <= this_year), periods[0])
-        payload = _cached(
-            f"data:{DOMAIN}:{vid}:{chosen['th_id']}",
-            1800,
-            lambda: _get(f"list/model/data/domain/{DOMAIN}/var/{vid}/th/{chosen['th_id']}"),
+        payload = _fetch_catalog_row(
+            _dynamic_table_row(vid, str(chosen["th"]))
         )
-        return _format_data(payload, vid, chosen, resolved_region, available)
+        return _format_data(payload, vid, chosen, resolved_region, available, kategori)
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
     except (KeyError, ValueError, TypeError):
@@ -1436,6 +1393,7 @@ def indikator_utama(
     wilayah: Optional[str] = None,
     tahun_mulai: Optional[str] = None,
     tahun_akhir: Optional[str] = None,
+    kategori: Optional[str] = None,
 ) -> dict:
     """Mengambil data indikator kanonik untuk tahun dan wilayah yang diminta.
 
@@ -1450,6 +1408,7 @@ def indikator_utama(
         wilayah: nama wilayah (opsional); kosongkan untuk semua wilayah.
         tahun_mulai: tahun awal rentang opsional, sampai dengan tahun_akhir.
         tahun_akhir: tahun akhir rentang opsional; rentang maksimal 10 tahun.
+        kategori: label kategori turvar yang diminta; kosongkan untuk semua kategori.
     """
     if not isinstance(nama, str) or nama not in _INDIKATOR_UTAMA:
         return {
@@ -1459,15 +1418,22 @@ def indikator_utama(
         }
 
     indicator = _INDIKATOR_UTAMA[nama]
+    category_filter = {"kategori": kategori} if kategori is not None else {}
     if tahun_mulai is not None or tahun_akhir is not None:
         result = ambil_data(
             int(indicator["var_id"]),
             wilayah=wilayah,
             tahun_mulai=tahun_mulai,
             tahun_akhir=tahun_akhir,
+            **category_filter,
         )
     else:
-        result = ambil_data(int(indicator["var_id"]), tahun=tahun, wilayah=wilayah)
+        result = ambil_data(
+            int(indicator["var_id"]),
+            tahun=tahun,
+            wilayah=wilayah,
+            **category_filter,
+        )
     if "error" in result:
         return {"nama_indikator": nama, "var_id": int(indicator["var_id"]), **result}
     result["nama_indikator"] = nama
@@ -1522,196 +1488,240 @@ def nama_indikator_utama() -> list[str]:
     return list(_INDIKATOR_UTAMA)
 
 
-def _brs_month(year: int, month: int) -> list[dict]:
-    def load() -> list[dict]:
-        base = f"list/model/pressrelease/domain/{DOMAIN}/year/{year}/month/{month}"
-        rows, pages = _list_rows(_get(base))
-        if pages > 1:
-            more, _ = _list_rows(_get(f"{base}/page/2"))
-            rows = rows + more
-        return rows
+_EDITORIAL_ID_FIELDS = {
+    "pressrelease": ("br_id", "pressrelease_id", "id"),
+    "publication": ("pub_id", "publication_id", "id"),
+    "news": ("news_id", "id"),
+}
+_EDITORIAL_MONTHS = {
+    "januari": 1, "februari": 2, "maret": 3, "april": 4,
+    "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
+    "september": 9, "oktober": 10, "november": 11, "desember": 12,
+}
 
-    return _cached(f"brs:{DOMAIN}:{year}-{month}", 1800, load)
+
+def _editorial_records(payload: dict) -> list[dict]:
+    data = payload.get("data")
+    if isinstance(data, dict):
+        for key in ("items", "results", "list"):
+            records = data.get(key)
+            if isinstance(records, list):
+                return [record for record in records if isinstance(record, dict)]
+        if any(
+            key in data
+            for key in ("title", "judul", "abstract", "br_id", "pub_id", "news_id", "id")
+        ):
+            return [data]
+        if not data:
+            return []
+        raise bps_csv_catalog.CatalogError("Format detail arsip dari WebAPI BPS tidak dikenali.")
+    if not isinstance(data, list):
+        raise bps_csv_catalog.CatalogError("Format arsip dari WebAPI BPS tidak dikenali.")
+    if not data:
+        return []
+    for part in reversed(data):
+        if isinstance(part, list):
+            return [record for record in part if isinstance(record, dict)]
+    records = [
+        record for record in data
+        if isinstance(record, dict)
+        and any(
+            key in record
+            for key in ("title", "judul", "abstract", "br_id", "pub_id", "news_id", "id")
+        )
+    ]
+    if records:
+        return records
+    if all(
+        isinstance(record, dict)
+        and set(record).issubset({"pages", "total", "page", "limit"})
+        for record in data
+    ):
+        return []
+    raise bps_csv_catalog.CatalogError("Format daftar arsip dari WebAPI BPS tidak dikenali.")
+
+
+def _editorial_value(record: dict, *fields: str) -> str:
+    for field in fields:
+        value = record.get(field)
+        if isinstance(value, (str, int, float)) and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _editorial_date_sort_key(value: str) -> datetime:
+    if not value:
+        return datetime.min
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized).replace(tzinfo=None)
+    except ValueError:
+        pass
+    for date_format in ("%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%Y-%m"):
+        try:
+            return datetime.strptime(value.strip(), date_format)
+        except ValueError:
+            continue
+    return datetime.min
+
+
+def _editorial_content_search(
+    model: str,
+    kata_kunci: Optional[str],
+    jumlah: int,
+    tahun: Optional[int],
+    bulan: Optional[str],
+    halaman: int,
+) -> dict:
+    requested_period = {"tahun": tahun, "bulan": bulan}
+    try:
+        normalized_month = None
+        if bulan is not None and str(bulan).strip():
+            month_text = str(bulan).strip().casefold()
+            normalized_month = (
+                int(month_text)
+                if month_text.isdecimal()
+                else _EDITORIAL_MONTHS.get(month_text, month_text)
+            )
+        payload = bps_csv_catalog.fetch_editorial_json(
+            model,
+            domain=DOMAIN,
+            keyword=kata_kunci,
+            year=tahun,
+            month=normalized_month,
+            page=halaman,
+        )
+        rows = _editorial_records(payload)
+        rows.sort(
+            key=lambda row: _editorial_date_sort_key(
+                _editorial_value(
+                    row, "rl_date", "release_date", "pub_date", "date", "updt_date"
+                )
+            ),
+            reverse=True,
+        )
+        limit = min(3, max(1, int(jumlah)))
+        selected = rows[:limit]
+        results = []
+        detail_failures = 0
+        for row in selected:
+            item_id = _editorial_value(row, *_EDITORIAL_ID_FIELDS[model])
+            detail = {}
+            detail_unavailable = not item_id
+            if item_id:
+                try:
+                    detail_payload = bps_csv_catalog.fetch_editorial_json(
+                        model,
+                        domain=DOMAIN,
+                        identifier=item_id,
+                    )
+                    detail_records = _editorial_records(detail_payload)
+                    detail = next(iter(detail_records), {})
+                    detail_unavailable = not detail_records
+                except bps_csv_catalog.CatalogError:
+                    detail_unavailable = True
+
+            merged = {**row, **detail}
+            abstract = _editorial_value(
+                merged, "abstract", "abstrak", "description", "isi", "content"
+            )
+            summary = re.sub(r"<[^>]*>", " ", html.unescape(abstract))
+            summary = re.sub(r"\s+", " ", summary).strip()[:900]
+            if detail_unavailable or not summary:
+                detail_failures += 1
+            source_link = _editorial_value(
+                merged, "pdf", "pdf_url", "url_pdf", "link", "url", "permalink"
+            )
+            if source_link and not source_link.startswith(("https://", "http://")):
+                source_link = ""
+            results.append({
+                "id": item_id or None,
+                "judul": _editorial_value(merged, "title", "judul", "name"),
+                "tanggal_rilis": _editorial_value(
+                    merged, "rl_date", "release_date", "pub_date", "date", "updt_date"
+                ),
+                "ringkasan": summary,
+                "tautan": source_link,
+            })
+
+        result = {
+            "jenis_konten": model,
+            "kata_kunci": str(kata_kunci).strip() if kata_kunci else None,
+            "periode_diminta": requested_period,
+            "halaman": int(halaman),
+            "hasil": results,
+            "status_hasil": "ditemukan" if results else "kosong",
+        }
+        if detail_failures:
+            result["abstrak_tidak_tersedia"] = detail_failures
+        return result
+    except (bps_csv_catalog.CatalogError, TypeError, ValueError) as exc:
+        return {
+            "jenis_konten": model,
+            "periode_diminta": requested_period,
+            "error": str(exc),
+            "status_hasil": "gagal_teknis",
+        }
 
 
 def berita_resmi_statistik(
     kata_kunci: Optional[str] = None,
-    jumlah: int = 5,
+    jumlah: int = 3,
     tahun: Optional[int] = None,
     bulan: Optional[str] = None,
+    halaman: int = 1,
 ) -> dict:
-    """Mengambil Berita Resmi Statistik (BRS) terbaru BPS Sumatera Selatan.
-
-    Gunakan untuk indikator bulanan/triwulanan dan pertanyaan tentang rilis terbaru: inflasi,
-    NTP, ekspor-impor, pariwisata/hotel, penumpang, ketenagakerjaan, kemiskinan, atau
-    pertumbuhan ekonomi triwulan. Untuk nilai tingkat pengangguran provinsi, gunakan
-    indikator kanonik tingkat_pengangguran; gunakan tool ini jika yang ditanya adalah rilisnya.
-    Angka utama BRS biasanya tertulis pada judul. Isi kata_kunci dengan 1-2 kata inti
-    (mis. "inflasi"); kosongkan untuk BRS terbaru secara umum.
-
-    Args:
-        kata_kunci: kata inti topik, misalnya "inflasi" atau "penduduk miskin".
-        jumlah: banyak entri yang diminta (1-10).
-        tahun: filter tahun yang tercantum pada judul BRS (opsional).
-        bulan: filter nama bulan yang tercantum pada judul BRS (opsional).
-    """
-    count = max(1, min(int(jumlah or 5), 10))
-    keyword = _clean_search_keyword(kata_kunci or "")
-    token_groups = [
-        [token for token in query.split() if len(token) >= 3]
-        for query in _search_keyword_variants(keyword)
-    ]
-    token_groups = [tokens for tokens in token_groups if tokens]
-    now = datetime.now(WIB)
-    found: list[tuple[int, str, dict]] = []
-    month_names = {
-        "januari": ("januari", "jan"),
-        "februari": ("februari", "feb"),
-        "maret": ("maret", "mar"),
-        "april": ("april", "apr"),
-        "mei": ("mei",),
-        "juni": ("juni", "jun"),
-        "juli": ("juli", "jul"),
-        "agustus": ("agustus", "agu", "ags"),
-        "september": ("september", "sep"),
-        "oktober": ("oktober", "okt"),
-        "november": ("november", "nov"),
-        "desember": ("desember", "des"),
-    }
-    requested_month = (bulan or "").strip().lower()
-    month_variants = month_names.get(requested_month, (requested_month,)) if requested_month else ()
-    current_month_index = now.year * 12 + now.month - 1
-    if tahun is None:
-        month_indices = [current_month_index - back for back in range(12)]
-    elif requested_month in month_names:
-        month_number = list(month_names).index(requested_month) + 1
-        target_index = int(tahun) * 12 + month_number - 1
-        month_indices = [target_index + offset for offset in range(3)]
-    else:
-        start_index = int(tahun) * 12
-        month_indices = list(range(start_index, start_index + 24))
-
-    def load_month(month_index: int) -> tuple[int, int, list[dict]]:
-        year, month0 = divmod(month_index, 12)
-        return year, month0 + 1, _brs_month(year, month0 + 1)
-
-    def matching_score(item: dict) -> Optional[int]:
-        title = str(item.get("title", ""))
-        searchable_text = f"{title} {_strip_html(item.get('abstract'))}".lower()
-        score = max(
-            (
-                sum(token in searchable_text for token in tokens) * 100
-                + len(token_groups) - index
-                for index, tokens in enumerate(token_groups)
-            ),
-            default=0,
-        )
-        if token_groups and score == 0:
-            return None
-        if tahun is not None and not re.search(rf"\b{int(tahun)}\b", title):
-            return None
-        if month_variants and not any(
-            re.search(rf"\b{re.escape(variant)}\b", title.lower())
-            for variant in month_variants
-        ):
-            return None
-        return score
-
-    try:
-        if tahun is not None:
-            with ThreadPoolExecutor(max_workers=6) as pool:
-                month_results = list(pool.map(load_month, month_indices))
-            for _, _, month_rows in month_results:
-                for item in month_rows:
-                    score = matching_score(item)
-                    if score is not None:
-                        found.append((score, str(item.get("rl_date", "")), item))
-        else:
-            for month_index in month_indices:
-                _, _, month_rows = load_month(month_index)
-                for item in month_rows:
-                    score = matching_score(item)
-                    if score is not None:
-                        found.append((score, str(item.get("rl_date", "")), item))
-                if not bulan and (
-                    (not token_groups and found) or len(found) >= count
-                ):
-                    break
-    except BpsError as exc:
-        return {"error": str(exc), "status_hasil": "gagal_teknis"}
-
-    found.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    result = {
-        "hasil": [
-            {
-                "judul": item.get("title"),
-                "tanggal_rilis": item.get("rl_date"),
-                "ringkasan": _strip_html(item.get("abstract")),
-                "tautan": item.get("pdf") or item.get("url"),
-            }
-            for _, _, item in found[:count]
-        ]
-    }
-    if (bulan or tahun is not None) and not found:
-        result["periode_diminta_tidak_ditemukan"] = {
-            "bulan": bulan,
-            "tahun": tahun,
-        }
-    return result
+    """Search BPS press releases and retrieve the abstract for up to three results."""
+    return _editorial_content_search(
+        "pressrelease", kata_kunci, jumlah, tahun, bulan, halaman
+    )
 
 
-def publikasi_terbaru(kata_kunci: Optional[str] = None, jumlah: int = 5) -> dict:
-    """Mengambil daftar publikasi BPS Sumatera Selatan, terbaru dulu.
+def publikasi_terbaru(
+    kata_kunci: Optional[str] = None,
+    jumlah: int = 3,
+    tahun: Optional[int] = None,
+    bulan: Optional[str] = None,
+    halaman: int = 1,
+) -> dict:
+    """Search BPS publications and retrieve the abstract for up to three results."""
+    return _editorial_content_search(
+        "publication", kata_kunci, jumlah, tahun, bulan, halaman
+    )
 
-    Args:
-        kata_kunci: topik publikasi (opsional), mis. "pertanian".
-        jumlah: banyak entri yang diminta (1-10).
-    """
-    count = max(1, min(int(jumlah or 5), 10))
-    path = f"list/model/publication/domain/{DOMAIN}"
-    if kata_kunci and kata_kunci.strip():
-        path += f"/keyword/{quote_plus(' '.join(kata_kunci.split())[:80])}"
-    try:
-        rows, _ = _list_rows(_get(path))
-    except BpsError as exc:
-        return {"error": str(exc)}
 
-    rows.sort(key=lambda r: str(r.get("rl_date", "")), reverse=True)
-    return {
-        "hasil": [
-            {
-                "judul": r.get("title"),
-                "tanggal_rilis": r.get("rl_date"),
-                "ringkasan": _strip_html(r.get("abstract")),
-                "tautan": r.get("pdf") or r.get("url"),
-            }
-            for r in rows[:count]
-        ]
-    }
+def berita_statistik(
+    kata_kunci: Optional[str] = None,
+    jumlah: int = 3,
+    tahun: Optional[int] = None,
+    bulan: Optional[str] = None,
+    halaman: int = 1,
+) -> dict:
+    """Search BPS news and retrieve the returned article summary for up to three results."""
+    return _editorial_content_search("news", kata_kunci, jumlah, tahun, bulan, halaman)
 
 
 def _static_table_rows(keyword: str, domain: str) -> list[dict]:
-    tables_by_id: dict[str, dict] = {}
-    for query in _search_keyword_variants(keyword)[:8]:
-        base = f"list/model/statictable/domain/{domain}/keyword/{quote_plus(query)}"
-        for page in (1, 2):
-            path = base if page == 1 else f"{base}/page/{page}"
-            payload = _get(path)
-            rows, pages = _list_rows(payload)
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                table_id = row.get("table_id")
-                title = row.get("title")
-                if table_id is not None and isinstance(title, str) and title.strip():
-                    tables_by_id.setdefault(str(table_id), {
-                        "table_id": str(table_id),
-                        "title": title.strip(),
-                        "domain": domain,
-                    })
-            if page >= pages:
-                break
-    return list(tables_by_id.values())
+    if domain != DOMAIN:
+        return []
+    tables: dict[str, dict] = {}
+    for row in _catalog_rows():
+        table_id = row.get("id_tabel", "")
+        title = row.get("judul", "")
+        if row.get("jenis_tabel") != "Tabel Statis" or not table_id or not title:
+            continue
+        tables.setdefault(table_id, {
+            "table_id": table_id,
+            "title": title,
+            "domain": domain,
+            "aliases": list(dict.fromkeys([
+                *_variable_aliases(title),
+                row.get("subjek", ""),
+                row.get("kategori_subjek", ""),
+            ])),
+            "catalog_row": row,
+        })
+    return list(tables.values())
 
 
 def _static_table_text(payload: dict) -> Optional[str]:
@@ -1752,25 +1762,18 @@ def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
     count = max(1, min(int(jumlah or 1), 3))
     try:
         results = []
-        domains = [DOMAIN] if DOMAIN == "0000" else [DOMAIN, "0000"]
-        for domain in domains:
-            ranked = _rank_local_variables(keyword, _static_table_rows(keyword, domain))
-            for table in ranked[:count]:
-                path = (
-                    f"view/model/statictable/domain/{table['domain']}/lang/ind/id/"
-                    f"{quote_plus(table['table_id'])}"
-                )
-                text = _static_table_text(_get(path))
-                if text:
-                    results.append({
-                        "table_id": table["table_id"],
-                        "judul": table["title"],
-                        "domain": table["domain"],
-                        "cakupan": "nasional" if table["domain"] == "0000" else "Sumatera Selatan",
-                        "isi": text,
-                    })
-            if results:
-                break
+        ranked = _rank_local_variables(keyword, _static_table_rows(keyword, DOMAIN))
+        for table in ranked[:count]:
+            text = _static_table_text(_fetch_catalog_row(table["catalog_row"]))
+            if text:
+                results.append({
+                    "table_id": table["table_id"],
+                    "judul": table["title"],
+                    "domain": table["domain"],
+                    "cakupan": "Sumatera Selatan",
+                    "sumber": "BPS Provinsi Sumatera Selatan",
+                    "isi": text,
+                })
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
 
@@ -1805,6 +1808,7 @@ TOOLS = [
         indikator_utama,
         berita_resmi_statistik,
         publikasi_terbaru,
+        berita_statistik,
         tabel_statis,
         simdasi_daftar_tabel,
         simdasi_cari_data,

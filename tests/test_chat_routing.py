@@ -16,7 +16,14 @@ class ChatRoutingTests(unittest.TestCase):
             ("IPM Prabumulih", "nilai"),
             ("penduduk PALI 2023-2026", "rentang_waktu"),
             ("BRS terbaru", "brs"),
+            ("BRS inflasi 2024", "brs"),
+            ("inflasi 2024", "nilai"),
             ("publikasi terbaru", "publikasi"),
+            ("Kota Palembang dalam angka 2024", "publikasi"),
+            ("laporan pertanian terbaru", "publikasi"),
+            ("berita kegiatan BPS terbaru", "berita"),
+            ("sensus penduduk terbaru", "berita"),
+            ("berapa jumlah penduduk hasil sensus 2020", "nilai"),
             ("Daftar tabel SIMDASI", "nilai"),
             ("apa itu PDRB ADHB", "definisi"),
             ("Apa perbedaan PDRB ADHB dan ADHK?", "definisi"),
@@ -38,6 +45,214 @@ class ChatRoutingTests(unittest.TestCase):
         for question, expected in cases:
             with self.subTest(question=question):
                 self.assertEqual(main._classify_question_intent(question), expected)
+
+    def test_multi_topic_parser_does_not_split_regions_or_gender_categories(self):
+        with patch.object(main.bps_tools, "cari_variabel", return_value={"hasil": []}) as search:
+            self.assertEqual(
+                main._multi_topic_candidates("jumlah penduduk di Pali dan Lahat"),
+                [],
+            )
+            self.assertEqual(
+                main._multi_topic_candidates("jumlah penduduk laki-laki dan perempuan"),
+                [],
+            )
+        search.assert_not_called()
+
+    def test_multi_topic_parser_keeps_ambiguous_topics_and_alternatives(self):
+        candidates = {
+            "miskin": [
+                {
+                    "var_id": 683,
+                    "judul": "Jumlah Penduduk Miskin",
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                },
+                {
+                    "var_id": 604,
+                    "judul": "Persentase Penduduk Miskin",
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                },
+            ],
+            "kesehatan": [{
+                "var_id": 847,
+                "judul": "Jumlah Tenaga Kesehatan",
+                "skor_kemiripan": 100,
+                "jenis_kecocokan": "direct",
+            }],
+        }
+        with (
+            patch.object(main.bps_tools, "cari_variabel", return_value={"status_hasil": "ditemukan"}),
+            patch.object(
+                main,
+                "_rank_variable_candidate_options",
+                side_effect=lambda _result, keyword, _region, **_kwargs: candidates[keyword],
+            ),
+        ):
+            result = main._multi_topic_candidates(
+                "data kemiskinan dan kesehatan di Pali dan Lahat tahun 2021 sampai 2024"
+            )
+
+        self.assertEqual([item["keyword"] for item in result], ["miskin", "kesehatan"])
+        self.assertIsNone(result[0]["candidate"])
+        self.assertEqual(len(result[0]["suggestions"]), 2)
+        self.assertEqual(result[1]["candidate"]["var_id"], 847)
+
+    def test_latest_followup_fetches_all_indicators_from_prior_recommendations(self):
+        recommendation = (
+            "Berikut adalah data BPS yang sering digunakan untuk penelitian ekonomi:\n"
+            "- PDRB atas Dasar Harga Berlaku (ADHB) dan atas Dasar Harga Konstan (ADHK), "
+            "baik menurut lapangan usaha maupun pengeluaran.\n"
+            "- Persentase dan jumlah penduduk miskin serta garis kemiskinan.\n"
+            "- Indeks Pembangunan Manusia (IPM).\n"
+            "- Tingkat Ketimpangan (Gini Ratio).\n"
+            "- Tingkat Pengangguran Terbuka (TPT), jumlah angkatan kerja, dan tingkat "
+            "partisipasi angkatan kerja (TPAK).\n"
+            "- Jumlah penduduk, laju pertumbuhan penduduk, dan kepadatan penduduk."
+        )
+        dynamic_titles = {
+            "PDRB tahunan atas dasar harga berlaku lapangan usaha": (
+                "PDRB Tahunan Atas Dasar Harga Berlaku Menurut Lapangan Usaha"
+            ),
+            "PDRB atas dasar harga konstan lapangan usaha": (
+                "PDRB Triwulanan Atas Dasar Harga Konstan Menurut Lapangan Usaha "
+                "(Miliar Rupiah)"
+            ),
+            "PDRB tahunan atas dasar harga berlaku pengeluaran": (
+                "PDRB Tahunan Atas Dasar Harga Berlaku Menurut Pengeluaran"
+            ),
+            "PDRB tahunan atas dasar harga konstan pengeluaran": (
+                "PDRB Tahunan Atas Dasar Harga Konstan Menurut Pengeluaran"
+            ),
+            "garis kemiskinan": "Garis Kemiskinan",
+            "jumlah angkatan kerja": "Jumlah Angkatan Kerja",
+            "tingkat partisipasi angkatan kerja": "Tingkat Partisipasi Angkatan Kerja",
+            "pertumbuhan penduduk": "Laju Pertumbuhan Penduduk",
+        }
+
+        def search_variable(keyword):
+            return {
+                "status_hasil": "ditemukan",
+                "hasil": [{
+                    "var_id": 9000 + list(dynamic_titles).index(keyword),
+                    "judul": dynamic_titles[keyword],
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                }],
+            }
+
+        fetched = []
+
+        def fetch_data(candidate, requested_year, region, year_range):
+            fetched.append((candidate["judul"], requested_year, region, year_range))
+            return {
+                "judul": candidate["judul"],
+                "satuan": "indeks",
+                "tahun": "2026",
+                "status_hasil": "ditemukan",
+                "data": [{"wilayah": region, "nilai": 1}],
+            }
+
+        history = [
+            main.Turn(prompt="Data apa yang diperlukan untuk skripsi ekonomi Sumsel?", response=recommendation),
+            main.Turn(
+                prompt="minta seluruh data ini yang terbaru",
+                response="Data yang cocok belum ditemukan.",
+            ),
+        ]
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main.bps_tools, "cari_variabel", side_effect=search_variable),
+            patch.object(main, "_fetch_candidate_data", side_effect=fetch_data),
+        ):
+            result = main.chat_endpoint(main.ChatRequest(
+                question="minta seluruh data ini yang terbaru",
+                history=history,
+            ))
+
+        self.assertEqual(len(fetched), 17)
+        self.assertTrue(all(not year for _, year, _, _ in fetched))
+        for title in (
+            "Atas Dasar Harga Berlaku",
+            "Atas Dasar Harga Konstan",
+            "Lapangan Usaha",
+            "Pengeluaran",
+            "Persentase Penduduk Miskin",
+            "Jumlah Penduduk Miskin",
+            "Garis Kemiskinan",
+            "Indeks Pembangunan Manusia",
+            "Rasio Gini",
+            "Tingkat Pengangguran",
+            "Jumlah Angkatan Kerja",
+            "Tingkat Partisipasi Angkatan Kerja",
+            "Jumlah Penduduk",
+            "Kepadatan Penduduk",
+        ):
+            self.assertIn(title, result["reply"])
+        self.assertIn("Laju Pertumbuhan Penduduk", result["reply"])
+        self.assertNotIn("Data yang cocok belum ditemukan", result["reply"])
+
+    def test_multi_topic_route_fetches_each_topic_for_each_region_and_year_range(self):
+        topics = [
+            {
+                "keyword": "ipm",
+                "candidate": {
+                    "var_id": 959,
+                    "judul": "Indeks Pembangunan Manusia",
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                },
+                "suggestions": [],
+            },
+            {
+                "keyword": "penganggur",
+                "candidate": {
+                    "var_id": 334,
+                    "judul": "Tingkat Pengangguran",
+                    "skor_kemiripan": 100,
+                    "jenis_kecocokan": "direct",
+                },
+                "suggestions": [],
+            },
+        ]
+        regions = ["Kabupaten Lahat", "Kabupaten Penukal Abab Lematang Ilir"]
+
+        def fetch(candidate, _requested_year, region, _year_range):
+            value = candidate["var_id"] + (1 if region == regions[0] else 2)
+            return {
+                "judul": candidate["judul"],
+                "satuan": "Indeks",
+                "status_hasil": "ditemukan",
+                "data_per_tahun": [
+                    {
+                        "tahun": year,
+                        "data": [{"wilayah": region, "nilai": value}],
+                    }
+                    for year in ("2021", "2024")
+                ],
+            }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "_multi_topic_candidates", return_value=topics),
+            patch.object(main.bps_tools, "resolve_regions_from_text", return_value=regions),
+            patch.object(main, "_fetch_candidate_data", side_effect=fetch) as fetch_data,
+        ):
+            result = main.chat_endpoint(main.ChatRequest(
+                question="IPM dan tingkat pengangguran di Lahat dan PALI tahun 2021-2024"
+            ))
+
+        self.assertEqual(fetch_data.call_count, 4)
+        self.assertIn("Indeks Pembangunan Manusia", result["reply"])
+        self.assertIn("Tingkat Pengangguran", result["reply"])
+        self.assertIn("2021", result["reply"])
+        self.assertIn("2024", result["reply"])
+        self.assertIn("Kabupaten Lahat", result["reply"])
+        self.assertIn("Kabupaten Penukal Abab Lematang Ilir", result["reply"])
+        self.assertIn("Sumber: BPS Provinsi Sumatera Selatan", result["reply"])
+        self.assertTrue(result["tools_used"])
 
     def test_numeric_reply_must_be_present_in_user_visible_tool_data(self):
         records = [{
@@ -274,6 +489,71 @@ class ChatRoutingTests(unittest.TestCase):
                 ("perkawinan", "2026", "Provinsi Sumatera Selatan"),
             )
 
+    def test_school_levels_are_parsed_as_categories_not_indicator_keywords(self):
+        question = "jumlah guru SMP SD di Pali dan Lahat"
+
+        self.assertEqual(
+            main._dynamic_variable_intent(question)[0],
+            "jumlah guru",
+        )
+        self.assertEqual(main._explicit_category_hint(question), "SD, SMP")
+        variable_search = main.bps_tools.cari_variabel("jumlah guru")
+        candidates = main._rank_variable_candidate_options(
+            variable_search,
+            "jumlah guru SD SMP",
+            None,
+        )
+        self.assertEqual([candidate["var_id"] for candidate in candidates], [362])
+
+    def test_chat_returns_requested_teacher_categories_for_regions_and_province(self):
+        question = "jumlah guru SMP SD di Pali dan Lahat"
+        candidate = {
+            "var_id": 362,
+            "judul": "Jumlah Guru (Jiwa)",
+            "satuan": "Orang",
+            "tahun_terbaru": "2025",
+            "skor_kemiripan": 100,
+            "jenis_kecocokan": "direct",
+        }
+
+        def fetch_data(_candidate, requested_year, region, year_range, kategori=None):
+            self.assertEqual(kategori, "SD, SMP")
+            self.assertFalse(requested_year)
+            self.assertIsNone(year_range)
+            return {
+                "judul": "Jumlah Guru (Jiwa)",
+                "satuan": "Orang",
+                "tahun": "2025",
+                "sumber": "BPS Provinsi Sumatera Selatan",
+                "last_update_bps": "2026-04-02",
+                "data": [
+                    {"wilayah": region, "kategori": "SD", "nilai": 4024},
+                    {"wilayah": region, "kategori": "SMP", "nilai": 1864},
+                ],
+            }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(
+                main.bps_tools,
+                "cari_variabel",
+                return_value={"status_hasil": "ditemukan", "hasil": [candidate]},
+            ) as search,
+            patch.object(main, "_fetch_candidate_data", side_effect=fetch_data) as fetch,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(main.ChatRequest(question=question))
+
+        search.assert_called_once_with("jumlah guru")
+        self.assertEqual(fetch.call_count, 2)
+        self.assertIn("Kabupaten Penukal Abab Lematang Ilir (SD): 4.024", result["reply"])
+        self.assertIn("Kabupaten Penukal Abab Lematang Ilir (SMP): 1.864", result["reply"])
+        self.assertIn("Kabupaten Lahat (SD): 4.024", result["reply"])
+        self.assertIn("Kabupaten Lahat (SMP): 1.864", result["reply"])
+        self.assertIn("Sumber: BPS Provinsi Sumatera Selatan.", result["reply"])
+        self.assertIn("Pembaruan data: 2026-04-02.", result["reply"])
+
     def test_prison_term_alone_routes_to_the_related_catalog_candidate(self):
         question = "orang masuk penjara Sumsel"
         self.assertEqual(main._classify_question_intent(question), "nilai")
@@ -486,7 +766,7 @@ class ChatRoutingTests(unittest.TestCase):
                 prefer_latest=True,
             )
 
-        self.assertEqual([item["var_id"] for item in options], [813])
+        self.assertEqual([item["var_id"] for item in options], [642])
 
     def test_exact_marital_status_candidates_outrank_related_kawin_indicators(self):
         result = {
@@ -1562,6 +1842,123 @@ class ChatRoutingTests(unittest.TestCase):
             ("produksi padi", "", None),
         )
 
+    def test_resolves_multiple_regions_in_question_order(self):
+        self.assertEqual(
+            main.bps_tools.resolve_regions_from_text(
+                "jumlah penduduk menurut jenis kelamin di Lahat dan PALI"
+            ),
+            ["Kabupaten Lahat", "Kabupaten Penukal Abab Lematang Ilir"],
+        )
+
+    def test_requested_category_breakdown_includes_non_total_categories(self):
+        result = main._format_indicator_fallback(
+            {
+                "judul": "Jumlah Penduduk menurut Jenis Kelamin",
+                "tahun": "2026",
+                "satuan": "Jiwa",
+                "data": [
+                    {"wilayah": "Lahat", "kategori": "Laki-Laki", "nilai": 214138},
+                    {"wilayah": "Lahat", "kategori": "Perempuan", "nilai": 205434},
+                    {"wilayah": "Lahat", "kategori": "Laki-Laki + Perempuan", "nilai": 419572},
+                ],
+            },
+            "Kabupaten Lahat",
+            "",
+            include_categories=True,
+        )
+
+        self.assertIn("Lahat (Laki-Laki): 214.138", result)
+        self.assertIn("Lahat (Perempuan): 205.434", result)
+
+    def test_dynamic_indicator_returns_requested_details_for_multiple_regions(self):
+        search_result = {
+            "hasil": [
+                {
+                    "var_id": 642,
+                    "judul": "Jumlah Penduduk menurut Jenis Kelamin",
+                    "tahun_terbaru": "2026",
+                    "skor_kemiripan": 100,
+                },
+                {
+                    "var_id": 813,
+                    "judul": "Jumlah Penduduk Menurut Jenis Kelamin dan Kabupaten/Kota (Hasil SP2020)",
+                    "tahun_terbaru": "2026",
+                    "skor_kemiripan": 100,
+                },
+            ]
+        }
+
+        def fetch(variable_id, tahun=None, wilayah=None, **_kwargs):
+            values = {
+                "Kabupaten Lahat": (214138, 205434, 419572),
+                "Kabupaten Penukal Abab Lematang Ilir": (103430, 99689, 203119),
+            }
+            male, female, total = values[wilayah]
+            return {
+                "judul": search_result["hasil"][0]["judul"],
+                "tahun": "2026",
+                "satuan": "Jiwa",
+                "data": [
+                    {"wilayah": "Lahat" if "Lahat" in wilayah else "Pali", "kategori": "Laki-Laki", "nilai": male},
+                    {"wilayah": "Lahat" if "Lahat" in wilayah else "Pali", "kategori": "Perempuan", "nilai": female},
+                    {"wilayah": "Lahat" if "Lahat" in wilayah else "Pali", "kategori": "Laki-Laki + Perempuan", "nilai": total},
+                ],
+            }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main.bps_tools, "cari_variabel", return_value=search_result),
+            patch.object(main.bps_tools, "ambil_data", side_effect=fetch) as get_data,
+            patch.object(main, "get_client") as gemini,
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(
+                    question="Berapa jumlah penduduk menurut jenis kelamin di Lahat dan PALI?"
+                )
+            )
+
+        gemini.assert_not_called()
+        self.assertEqual(
+            [call.kwargs["wilayah"] for call in get_data.call_args_list],
+            ["Kabupaten Lahat", "Kabupaten Penukal Abab Lematang Ilir"],
+        )
+        self.assertEqual({call.args[0] for call in get_data.call_args_list}, {642})
+        self.assertIn("Lahat (Laki-Laki): 214.138", result["reply"])
+        self.assertIn("Lahat (Perempuan): 205.434", result["reply"])
+        self.assertIn("Pali (Laki-Laki): 103.430", result["reply"])
+        self.assertIn("Pali (Perempuan): 99.689", result["reply"])
+
+    def test_canonical_indicator_returns_values_for_multiple_regions(self):
+        def fetch_indicator(_name, tahun=None, wilayah=None, **_kwargs):
+            return {
+                "judul": "PDRB Atas Dasar Harga Berlaku",
+                "tahun": "2025",
+                "satuan": "Miliar rupiah",
+                "data": [{
+                    "wilayah": "Lahat" if "Lahat" in wilayah else "Pali",
+                    "nilai": 1234 if "Lahat" in wilayah else 567,
+                }],
+            }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main.bps_tools, "indikator_utama", side_effect=fetch_indicator) as indicator,
+            patch.object(main, "get_client") as gemini,
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="Berapa PDRB Lahat dan PALI terbaru?")
+            )
+
+        gemini.assert_not_called()
+        self.assertIn("Lahat: 1.234", result["reply"])
+        self.assertIn("Pali: 567", result["reply"])
+        self.assertEqual(
+            [call.kwargs["wilayah"] for call in indicator.call_args_list[-2:]],
+            ["Kabupaten Lahat", "Kabupaten Penukal Abab Lematang Ilir"],
+        )
+
     def test_variable_ranking_prefers_matching_regional_indicator(self):
         result = main._rank_variable_candidates(
             {
@@ -1579,10 +1976,17 @@ class ChatRoutingTests(unittest.TestCase):
         )
         self.assertEqual(result["var_id"], 10)
 
-    def test_month_and_year_are_routed_to_brs(self):
-        self.assertEqual(main._monthly_intent("inflasi Agustus 2026"), ("inflasi", "agustus", 2026))
-        self.assertEqual(main._monthly_intent("inflasi 2024"), ("inflasi", None, 2024))
-        self.assertIsNone(main._monthly_intent("jumlah penduduk tahun 2025"))
+    def test_editorial_filters_extract_keyword_year_month_and_page(self):
+        self.assertEqual(
+            main._editorial_request_parameters(
+                "BRS inflasi Agustus 2026 halaman 2"
+            ),
+            ("inflasi", 2026, 8, 2),
+        )
+        self.assertEqual(
+            main._editorial_request_parameters("berita BPS terbaru"),
+            (None, None, None, 1),
+        )
         self.assertEqual(main._year_range_intent("Jumlah warga PALI 2023-2026"), (2023, 2026))
 
     def test_full_pali_name_is_removed_from_dynamic_keyword(self):
@@ -1590,7 +1994,7 @@ class ChatRoutingTests(unittest.TestCase):
             main._dynamic_variable_intent(
                 "Jumlah warga Kabupaten Penukal Abab Lematang Ilir 2023-2026"
             ),
-            ("penduduk", "2023", "Kabupaten Penukal Abab Lematang Ilir"),
+            ("jumlah penduduk", "2023", "Kabupaten Penukal Abab Lematang Ilir"),
         )
 
     def test_dynamic_keyword_removes_filler_month_and_year(self):
@@ -1598,7 +2002,7 @@ class ChatRoutingTests(unittest.TestCase):
             main._dynamic_variable_intent(
                 "Tolong berapa jumlah warga Kota Palembang pada bulan Maret tahun 2024?"
             ),
-            ("penduduk", "2024", "Kota Palembang"),
+            ("jumlah penduduk", "2024", "Kota Palembang"),
         )
 
     def test_canonical_chat_routes_requested_year_range(self):
@@ -1850,7 +2254,7 @@ class ChatRoutingTests(unittest.TestCase):
             (),
             {"models": type("FakeModels", (), {"generate_content": lambda *_args, **_kwargs: reply})()},
         )()
-        request = main.ChatRequest(question="inflasi 2024")
+        request = main.ChatRequest(question="BRS inflasi 2024")
         with (
             patch.object(main, "verify_token"),
             patch.object(main, "allow_request", return_value=True),
@@ -1871,9 +2275,10 @@ class ChatRoutingTests(unittest.TestCase):
 
         brs.assert_called_once_with(
             kata_kunci="inflasi",
-            jumlah=5,
+            jumlah=3,
             tahun=2024,
             bulan=None,
+            halaman=1,
         )
 
     def test_empty_minimum_wage_search_returns_source_explanation(self):
@@ -1902,26 +2307,48 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("tidak menemukan data", result["reply"])
         self.assertIn("keputusan Gubernur", result["reply"])
 
-    def test_press_release_search_removes_region_and_year_from_keyword(self):
-        with patch.object(
-            main.bps_tools,
-            "_brs_month",
-            return_value=[{
-                "title": "Agustus 2026 inflasi Year on Year Sumatera Selatan sebesar 2,60 persen",
-                "rl_date": "2026-09-01",
-                "abstract": "Inflasi Sumatera Selatan tercatat sebesar 2,60 persen.",
-            }],
-        ) as month_search:
-            result = main.bps_tools.berita_resmi_statistik(
-                kata_kunci="inflasi PALI 2026",
-                jumlah=1,
+    def test_editorial_intents_route_keyword_period_and_page_to_their_api_models(self):
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(
+                main.bps_tools,
+                "berita_statistik",
+                return_value={"hasil": [], "status_hasil": "kosong"},
+            ) as news,
+        ):
+            main.chat_endpoint(
+                main.ChatRequest(question="berita inflasi Maret 2024 halaman 2")
             )
 
-        self.assertEqual(
-            result["hasil"][0]["judul"],
-            "Agustus 2026 inflasi Year on Year Sumatera Selatan sebesar 2,60 persen",
+        news.assert_called_once_with(
+            kata_kunci="inflasi",
+            jumlah=3,
+            tahun=2024,
+            bulan="3",
+            halaman=2,
         )
-        month_search.assert_called_once()
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(
+                main.bps_tools,
+                "publikasi_terbaru",
+                return_value={"hasil": [], "status_hasil": "kosong"},
+            ) as publication,
+        ):
+            main.chat_endpoint(
+                main.ChatRequest(question="publikasi Palembang dalam angka 2024")
+            )
+
+        publication.assert_called_once_with(
+            kata_kunci="palembang",
+            jumlah=3,
+            tahun=2024,
+            bulan=None,
+            halaman=1,
+        )
 
     def test_tool_results_distinguish_empty_and_technical_failure(self):
         self.assertEqual(main._label_tool_result({"hasil": []})["status_hasil"], "kosong")

@@ -52,28 +52,6 @@ class ChatbotController extends Controller
         ]);
     }
 
-    public function saveBpsApiKey(Request $request, BpsWebApiService $bps): RedirectResponse
-    {
-        $validated = $request->validate([
-            'api_key' => ['nullable', 'string', 'max:500'],
-            'clear_api_key' => ['nullable', 'boolean'],
-        ]);
-
-        if ($validated['clear_api_key'] ?? false) {
-            $bps->clearApiKey();
-
-            return back()->with('message', 'API key WebAPI BPS berhasil dihapus.');
-        }
-
-        if (! filled($validated['api_key'] ?? null)) {
-            return back()->with('error', 'Masukkan API key baru atau pilih opsi hapus API key.');
-        }
-
-        $bps->saveApiKey($validated['api_key']);
-
-        return back()->with('message', 'API key WebAPI BPS berhasil disimpan secara terenkripsi.');
-    }
-
     public function uploadKnowledge(Request $request, ChatbotKnowledgeService $knowledge): RedirectResponse
     {
         $validated = $request->validate([

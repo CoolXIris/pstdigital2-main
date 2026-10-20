@@ -87,9 +87,16 @@ _CONCEPT_VALUE_CUE = re.compile(
     r"\b(berapa|nilai|angka|terbaru|terkini|tahun|periode)\b|\b20\d{2}\b",
     re.IGNORECASE,
 )
-_PUBLICATION_QUESTION = re.compile(r"\b(publikasi|katalog)\b", re.IGNORECASE)
+_PUBLICATION_QUESTION = re.compile(
+    r"\b(publikasi|katalog|laporan|dalam\s+angka)\b",
+    re.IGNORECASE,
+)
 _BRS_QUESTION = re.compile(
     r"\b(brs|berita resmi statistik|rilis(?:an)?|siaran pers)\b",
+    re.IGNORECASE,
+)
+_NEWS_QUESTION = re.compile(
+    r"\b(berita|kegiatan|sensus|survei|survey)\b",
     re.IGNORECASE,
 )
 _NUMBER_TOKEN = re.compile(
@@ -170,15 +177,18 @@ def build_instructions() -> str:
         "1. Semua angka statistik WAJIB berasal dari sumber terverifikasi. Jangan menjawab angka dari ingatan. "
         "Jika referensi file pengetahuan yang relevan menjadi sumber utama, angka hanya boleh dikutip jika "
         "tercantum pada referensi tersebut; jika tidak, katakan bahwa sumber belum memuatnya. "
-        "Jika pengguna meminta data terbaru atau tahun yang tidak tercantum pada referensi, gunakan hasil tools WebAPI. "
+        "Untuk permintaan angka statistik, jika pengguna meminta data terbaru atau tahun yang tidak tercantum "
+        "pada referensi, gunakan tautan yang tercantum di tabel_bps_sumsel.csv. Jangan menyusun endpoint sendiri "
+        "untuk angka statistik; pengecualian arsip editorial diatur pada butir 3. "
         "Pertanyaan definisi/konsep, cara membaca indikator, dan panduan layanan tidak boleh memanggil tools; "
         "gunakan context/glosarium jika tersedia dan boleh dijawab tanpa tools "
         "serta tanpa memaksakan angka statistik. Untuk menjelaskan rumus/konsep, contoh angka hipotetis boleh "
         "digunakan tanpa tool asalkan jelas dilabeli sebagai ilustrasi, bukan data aktual BPS; pengaman angka "
         "hasil tool hanya berlaku untuk maksud pertanyaan yang memang meminta data aktual.\n"
         "2. Backend memilih sumber sebelum menyusun jawaban: gunakan referensi file yang cocok untuk pertanyaan "
-        "yang tidak meminta data terbaru dan periode yang didukung file; gunakan WebAPI bila file tidak cocok, "
-        "pengguna meminta data terbaru, atau tahun yang diminta tidak ada di file. Jika pesan memuat "
+        "yang tidak meminta data terbaru dan periode yang didukung file; gunakan baris katalog CSV yang cocok "
+        "bila file tidak cocok, pengguna meminta data terbaru, atau tahun yang diminta tidak ada di file. "
+        "Jika pesan memuat "
         "DATA TERVERIFIKASI, gunakan hanya angka, periode, dan wilayah di dalamnya; jangan memilih tool atau "
         f"variabel ulang. Nama indikator utama yang sah: {', '.join(bps_tools.nama_indikator_utama())}. "
         "IPM umum gunakan nama ipm (var_id kanonik 959), bukan seri menurut jenis kelamin yang lebih lama. "
@@ -195,15 +205,14 @@ def build_instructions() -> str:
         "sebutkan periode terakhirnya. Untuk tahun tertentu, gunakan var_id yang dikembalikan tool kanonik saat "
         "memanggil ambil_data. Jika hasil tool memuat wilayah_ditafsirkan, sebutkan tafsirannya secara eksplisit. "
         "Jika tool memberi wilayah_kandidat, jangan ambil data; minta pengguna memilih wilayah yang dimaksud.\n"
-        "3. Indikator bulanan/triwulanan dan pertanyaan tentang rilis terbaru (inflasi, NTP, ekspor-impor, pariwisata, "
-        "kemiskinan, dan pertumbuhan ekonomi triwulan): panggil berita_resmi_statistik dengan kata kunci inti; "
-        "angka utama dapat ada pada judul atau ringkasan. Jika pengguna meminta bulan dan tahun tertentu, cari BRS "
-        "yang judulnya memuat keduanya; jika hanya tahun yang disebut, cari seluruh rilis yang membahas tahun itu. "
-        "Jika periode yang diminta tidak ditemukan, sebutkan periode itu dengan jelas lalu bedakan dengan rilis terbaru. "
-        "Untuk pertanyaan wilayah, periksa ringkasan BRS untuk nama wilayah dan tampilkan kalimat yang memuat angka "
-        "wilayah tersebut; jangan menebak angka kota dari angka provinsi.\n"
-        "4. Pertanyaan publikasi atau katalog: panggil publikasi_terbaru. Jika memfilter berdasarkan bulan, bulan "
-        "merujuk pada tanggal rilis (tanggal_rilis), bukan bulan/periode yang dibahas dalam judul publikasi.\n"
+        "Untuk tabel dinamis yang memiliki kategori turvar, gunakan argumen kategori pada ambil_data/"
+        "indikator_utama jika pengguna menyebut kategori spesifik. Jika kategori tidak disebut atau "
+        "pertanyaannya ambigu, tampilkan kategori yang relevan apa adanya; jangan menggabungkan nilai kategori.\n"
+        "3. Untuk pertanyaan angka/statistik, gunakan tabel_bps_sumsel.csv sebagai katalog endpoint. "
+        "Pengecualian hanya untuk arsip editorial: BRS/rilis memakai model pressrelease, publikasi/dalam angka/"
+        "laporan memakai model publication, dan berita/kegiatan/sensus/survei memakai model news. "
+        "Ringkas hanya abstrak atau isi yang benar-benar dikembalikan detail API; jangan mengklaim telah membaca "
+        "PDF. Setiap hasil editorial harus menyebut judul, tanggal rilis, dan tautan sumber/PDF jika tersedia.\n"
         "5. Selalu sebutkan periode dan satuan. Jika tahun_terbaru suatu variabel jauh lebih lama dari tahun berjalan, "
         "katakan bahwa itu data terbaru yang tersedia pada seri tersebut. Sebut periode lengkap jika tersedia, "
         "misalnya 'Maret 2025', bukan hanya '2025'.\n"
@@ -214,7 +223,9 @@ def build_instructions() -> str:
         "pencarian/periode itu tidak menghasilkan data. Jika tools tidak menghasilkan data relevan, arahkan ke "
         "https://sumsel.bps.go.id. "
         "Jangan menebak angka, indikator, wilayah, atau tahun.\n"
-        "8. Gunakan paling banyak 4 panggilan tool dan jangan mengulang panggilan dengan argumen yang sama. "
+        "8. Untuk permintaan beberapa topik, wilayah, atau rentang tahun, jawab setiap topik dan wilayah secara "
+        "terpisah berdasarkan data terverifikasi; jangan berhenti setelah menemukan topik pertama. "
+        "Gunakan paling banyak 4 panggilan tool dan jangan mengulang panggilan dengan argumen yang sama. "
         "cari_variabel mencari indeks variabel domain lokal dengan toleransi salah ketik, stem, dan sinonim. "
         "Hasilnya menyertakan skor_kemiripan dan jenis_kecocokan untuk pemeringkatan internal. Jangan "
         "tampilkan skor kepada pengguna. Skor rendah atau jenis 'related' hanya boleh disajikan sebagai "
@@ -240,7 +251,8 @@ def build_instructions() -> str:
         "11. Jika pengguna menanyakan 'bulan ini' dan BRS terbaru berasal dari bulan sebelumnya, jelaskan bahwa data bulan berjalan belum dirilis dan sebut bulan data yang ditampilkan.\n"
         "12. Jika tahun yang diminta tidak tersedia, sebutkan tahun yang tersedia (dari tahun_tersedia); jangan mengarang.\n"
         "13. Sebutkan periode data menurut judul BRS (mis. bulan survei), bukan bulan tanggal rilisnya.\n"
-        "14. Untuk indikator yang dirilis berkala (kemiskinan, Gini, ketenagakerjaan, IPM), panggil juga berita_resmi_statistik untuk memeriksa rilis terbaru sebelum menyatakan angka tahunan sebagai yang terbaru.\n"
+        "14. Untuk indikator tahunan, tentukan kebaruan hanya dari tahun yang tercantum pada baris katalog CSV; "
+        "jangan memeriksa rilis melalui sumber API lain.\n"
         "15. Jangan menyatakan apa yang dikumpulkan atau tidak dikumpulkan BPS kecuali berdasarkan hasil tools; gunakan frasa 'tidak ditemukan pada data yang tersedia'.\n"
         "16. Jangan tampilkan label kategori kosong atau 'Tidak ada'; jangan menulis keluaran seperti 'Tidak ada: 9,04'. "
         "Jika BRS yang ditemukan sudah menjawab pertanyaan, jangan tampilkan pesan indikator keliru/B07 atau baris "
@@ -654,6 +666,345 @@ def _year_range_intent(question: str) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+def _multi_topic_candidates(question: str) -> list[dict]:
+    if (
+        re.search(r"\b(laki[- ]?laki|pria|lelaki|cowok)\b", question, re.IGNORECASE)
+        and re.search(r"\b(perempuan|wanita|cewek)\b", question, re.IGNORECASE)
+    ):
+        return []
+
+    topic_text = bps_tools._remove_region_names(question)
+    topic_text = re.sub(r"\b20\d{2}\b", " ", topic_text)
+    topic_text = re.sub(
+        r"\b(sampai|hingga|s\/d|data|terbaru|terkini|sekarang|saat\s+ini)\b",
+        " ",
+        topic_text,
+        flags=re.IGNORECASE,
+    )
+    fragments = re.split(r"\s+(?:dan|serta|atau|&)\s+|[,;]", topic_text, flags=re.IGNORECASE)
+    if len(fragments) < 2:
+        return []
+
+    selected: list[dict] = []
+    selected_ids: set[str] = set()
+    selected_keywords: set[str] = set()
+    for fragment in fragments:
+        keyword = bps_tools._clean_search_keyword(fragment)
+        if len(keyword) < 3:
+            continue
+        if keyword in selected_keywords:
+            continue
+        selected_keywords.add(keyword)
+        search_result = bps_tools.cari_variabel(keyword)
+        if search_result.get("status_hasil") == "gagal_teknis":
+            continue
+        candidates = _rank_variable_candidate_options(
+            search_result,
+            keyword,
+            None,
+            prefer_latest=_year_range_intent(question) is None
+            and re.search(r"\b20\d{2}\b", question) is None,
+        )
+        candidate = candidates[0] if len(candidates) == 1 else None
+        if candidate and (
+            int(candidate.get("skor_kemiripan") or 0) < 75
+            or candidate.get("jenis_kecocokan") == "related"
+        ):
+            candidate = None
+        candidate_id = str(candidate.get("var_id")) if candidate else ""
+        if candidate_id and candidate_id in selected_ids:
+            continue
+        if candidate_id:
+            selected_ids.add(candidate_id)
+        selected.append({
+            "keyword": keyword,
+            "candidate": candidate,
+            "suggestions": candidates[:3] if candidate is None else [],
+        })
+    return selected[:3] if len(selected) > 1 else []
+
+
+def _recommended_data_followup(question: str, history: list[Turn]) -> list[dict]:
+    text = question.casefold()
+    requests_all = (
+        re.search(r"\b(seluruh|semua|semuanya|lengkap)\b", text)
+        and re.search(r"\b(data|indikator|rekomendasi|saran)\b", text)
+        and re.search(r"\b(ini|itu|tadi|tersebut|di atas|disarankan|rekomendasi|saran)\b", text)
+    )
+    if not requests_all:
+        return []
+
+    recommendation_markers = (
+        "pdrb",
+        "adhb",
+        "adhk",
+        "penduduk miskin",
+        "garis kemiskinan",
+        "ipm",
+        "indeks pembangunan manusia",
+        "gini ratio",
+        "tpt",
+        "angkatan kerja",
+        "tpak",
+        "jumlah penduduk",
+        "kepadatan penduduk",
+    )
+    recommendation_text = next(
+        (
+            turn.response.casefold()
+            for turn in reversed(history)
+            if turn.response.strip()
+            and sum(
+                marker in turn.response.casefold()
+                for marker in recommendation_markers
+            ) >= 2
+        ),
+        "",
+    )
+    if not recommendation_text:
+        return []
+
+    topics: list[dict] = []
+    selected_ids: set[str] = set()
+    selected_keywords: set[str] = set()
+
+    def add_canonical(name: str) -> None:
+        indicator = bps_tools._INDIKATOR_UTAMA.get(name)
+        if not indicator or not indicator.get("var_id"):
+            return
+        variable_id = str(indicator["var_id"])
+        if variable_id in selected_ids:
+            return
+        selected_ids.add(variable_id)
+        topics.append({
+            "keyword": name.replace("_", " "),
+            "candidate": {
+                "var_id": int(variable_id),
+                "judul": indicator.get("title") or name,
+                "skor_kemiripan": 100,
+                "jenis_kecocokan": "direct",
+            },
+            "suggestions": [],
+        })
+
+    def add_catalog_topic(
+        keyword: str,
+        *,
+        title_terms: tuple[str, ...] = (),
+        excluded_title_terms: tuple[str, ...] = (),
+    ) -> None:
+        if keyword in selected_keywords:
+            return
+        selected_keywords.add(keyword)
+        search_result = bps_tools.cari_variabel(keyword)
+        if title_terms or excluded_title_terms:
+            options = [
+                dict(option)
+                for option in search_result.get("hasil") or []
+                if isinstance(option, dict)
+                if all(
+                    term in str(option.get("judul") or "").casefold()
+                    for term in title_terms
+                )
+                and not any(
+                    term in str(option.get("judul") or "").casefold()
+                    for term in excluded_title_terms
+                )
+            ]
+            options.sort(
+                key=lambda option: (
+                    int(option.get("tahun_terbaru") or 0),
+                    int(option.get("skor_kemiripan") or 0),
+                ),
+                reverse=True,
+            )
+        else:
+            options = _rank_variable_candidate_options(
+                search_result,
+                keyword,
+                None,
+                prefer_latest=True,
+            )
+        candidate = options[0] if options else None
+        if candidate and (
+            int(candidate.get("skor_kemiripan") or 0) < 75
+            or candidate.get("jenis_kecocokan") == "related"
+        ):
+            candidate = None
+        candidate_id = str(candidate.get("var_id")) if candidate else ""
+        if candidate_id and candidate_id in selected_ids:
+            return
+        if candidate_id:
+            selected_ids.add(candidate_id)
+        topics.append({
+            "keyword": keyword,
+            "candidate": candidate,
+            "suggestions": options[:3] if candidate is None else [],
+            "data": (
+                {"status_hasil": "gagal_teknis"}
+                if search_result.get("status_hasil") == "gagal_teknis"
+                else {"status_hasil": "kosong"}
+            ),
+        })
+
+    has_pdrb = re.search(r"\b(pdrb|produk domestik regional bruto)\b", recommendation_text)
+    if has_pdrb and re.search(r"\b(adhb|harga berlaku)\b", recommendation_text):
+        add_canonical("pdrb_adhb_kab_kota")
+    if has_pdrb and re.search(r"\b(adhk|harga konstan)\b", recommendation_text):
+        add_canonical("pdrb_adhk_kab_kota")
+    if has_pdrb and re.search(r"\blapangan usaha\b", recommendation_text):
+        if re.search(r"\b(adhb|harga berlaku)\b", recommendation_text):
+            add_catalog_topic(
+                "PDRB tahunan atas dasar harga berlaku lapangan usaha",
+                title_terms=("tahunan", "atas dasar harga berlaku", "lapangan usaha"),
+                excluded_title_terms=("distribusi", "indeks", "triwulanan"),
+            )
+        if re.search(r"\b(adhk|harga konstan)\b", recommendation_text):
+            add_catalog_topic(
+                "PDRB atas dasar harga konstan lapangan usaha",
+                title_terms=("atas dasar harga konstan", "lapangan usaha", "miliar rupiah"),
+                excluded_title_terms=("laju", "distribusi", "indeks"),
+            )
+    if has_pdrb and re.search(r"\bpengeluaran\b", recommendation_text):
+        if re.search(r"\b(adhb|harga berlaku)\b", recommendation_text):
+            add_catalog_topic(
+                "PDRB tahunan atas dasar harga berlaku pengeluaran",
+                title_terms=("tahunan", "atas dasar harga berlaku", "pengeluaran"),
+                excluded_title_terms=("distribusi", "indeks", "triwulanan"),
+            )
+        if re.search(r"\b(adhk|harga konstan)\b", recommendation_text):
+            add_catalog_topic(
+                "PDRB tahunan atas dasar harga konstan pengeluaran",
+                title_terms=("tahunan", "atas dasar harga konstan", "pengeluaran"),
+                excluded_title_terms=("laju", "triwulanan"),
+            )
+
+    if re.search(r"\b(persentase|persen)\b.{0,80}\b(penduduk )?miskin\b", recommendation_text):
+        add_canonical("kemiskinan_persen")
+    if re.search(r"\b(jumlah|banyak)\b.{0,80}\bpenduduk miskin\b", recommendation_text):
+        add_canonical("kemiskinan_jumlah")
+    if re.search(r"\bgaris kemiskinan\b", recommendation_text):
+        add_catalog_topic("garis kemiskinan")
+    if re.search(r"\b(ipm|indeks pembangunan manusia)\b", recommendation_text):
+        add_canonical("ipm")
+    if re.search(r"\b(gini ratio|rasio gini)\b", recommendation_text):
+        add_canonical("gini")
+    if re.search(r"\b(tpt|tingkat pengangguran terbuka)\b", recommendation_text):
+        add_canonical("tingkat_pengangguran")
+    if re.search(r"\bjumlah angkatan kerja\b", recommendation_text):
+        add_catalog_topic("jumlah angkatan kerja")
+    if re.search(r"\b(tpak|tingkat partisipasi angkatan kerja)\b", recommendation_text):
+        add_catalog_topic("tingkat partisipasi angkatan kerja")
+    if re.search(r"\b(laju pertumbuhan penduduk|pertumbuhan penduduk)\b", recommendation_text):
+        add_catalog_topic("pertumbuhan penduduk")
+    if re.search(r"\bkepadatan penduduk\b", recommendation_text):
+        add_canonical("kepadatan_penduduk")
+    if re.search(r"\bjumlah penduduk\b(?!\s+miskin)", recommendation_text):
+        add_canonical("jumlah_penduduk")
+
+    return topics[:20]
+
+
+def _limit_multi_topic_result(data: dict, max_rows: int = 30) -> dict:
+    bounded = dict(data)
+    rows = bounded.get("data")
+    if isinstance(rows, list) and len(rows) > max_rows:
+        bounded["data"] = rows[:max_rows]
+        bounded["baris_dipotong"] = len(rows) - max_rows
+    yearly_results = bounded.get("data_per_tahun")
+    if isinstance(yearly_results, list):
+        limited_years = []
+        for yearly_result in yearly_results:
+            if not isinstance(yearly_result, dict):
+                continue
+            year_item = dict(yearly_result)
+            year_rows = year_item.get("data")
+            if isinstance(year_rows, list) and len(year_rows) > max_rows:
+                year_item["data"] = year_rows[:max_rows]
+                year_item["baris_dipotong"] = len(year_rows) - max_rows
+            limited_years.append(year_item)
+        bounded["data_per_tahun"] = limited_years
+    return bounded
+
+
+def _format_multi_topic_fallback(
+    entries: list[dict],
+    region: Optional[str],
+    requested_year: str,
+    include_categories: bool,
+) -> str:
+    sections = []
+    for entry in entries:
+        candidate = entry.get("candidate")
+        if not candidate:
+            data = entry.get("data") or {}
+            if data.get("status_hasil") == "gagal_teknis":
+                sections.append(
+                    f"Topik '{entry['keyword']}' belum dapat diverifikasi saat ini."
+                )
+                continue
+            suggestions = [
+                str(item.get("judul") or "")
+                for item in entry.get("suggestions") or []
+                if item.get("judul")
+            ]
+            if suggestions:
+                sections.append(
+                    f"Topik '{entry['keyword']}' cocok dengan beberapa indikator: "
+                    + "; ".join(suggestions)
+                    + ". Mohon pilih indikator yang dimaksud."
+                )
+                continue
+            sections.append(
+                f"Topik '{entry['keyword']}' tidak ditemukan pada katalog statistik CSV BPS."
+            )
+            continue
+        data = entry.get("data") or {}
+        title = candidate.get("judul") or "Indikator BPS"
+        formatted = _format_indicator_fallback(
+            data,
+            region,
+            requested_year,
+            include_categories,
+        )
+        omitted = data.get("baris_dipotong")
+        if omitted:
+            formatted += f"\nSebagian rincian tidak ditampilkan ({omitted} baris dipangkas)."
+        sections.append(
+            f"{title}\n{formatted}\nSumber: BPS Provinsi Sumatera Selatan."
+        )
+    return "\n\n".join(sections)
+
+
+def _requests_category_breakdown(question: str) -> bool:
+    return re.search(
+        r"\b(menurut|berdasarkan|dirinci|terpilah|rincian|kategori|"
+        r"jenis\s+kelamin|gender|kelompok|golongan|jenjang|"
+        r"sd|smp|sma|smk|laki-laki|perempuan|wanita|pria|"
+        r"perkotaan|pedesaan|perdesaan)\b",
+        question,
+        re.IGNORECASE,
+    ) is not None
+
+
+def _explicit_category_hint(question: str) -> str | None:
+    categories = (
+        ("SD", r"\b(sd|sekolah dasar)\b"),
+        ("SMP", r"\b(smp|sekolah menengah pertama)\b"),
+        ("SMA", r"\b(sma|sekolah menengah atas)\b"),
+        ("SMK", r"\b(smk|sekolah menengah kejuruan)\b"),
+        ("Laki-Laki", r"\b(laki[\s-]*laki|pria)\b"),
+        ("Perempuan", r"\b(perempuan|wanita)\b"),
+        ("Perkotaan", r"\bperkotaan\b"),
+        ("Pedesaan", r"\b(pedesaan|perdesaan)\b"),
+    )
+    matches = [
+        label for label, pattern in categories
+        if re.search(pattern, question, re.IGNORECASE)
+    ]
+    return ", ".join(matches) if matches else None
+
+
 def _prefer_knowledge_context(question: str, context: str | None) -> bool:
     if not context or not context.strip():
         return False
@@ -692,6 +1043,22 @@ def _classify_question_intent(question: str) -> str:
         return "publikasi"
     if _BRS_QUESTION.search(text):
         return "brs"
+    if _NEWS_QUESTION.search(text):
+        explicit_value_request = re.search(
+            r"\b(berapa|jumlah|nilai|angka|data|persentase|tingkat|laju)\b",
+            text,
+        )
+        explicit_news_request = re.search(r"\b(berita|kegiatan)\b", text)
+        if (
+            explicit_value_request
+            and not explicit_news_request
+            and (
+                _STATISTIC_TOPIC.search(text)
+                or bps_tools.catalog_variable_matches(text)
+            )
+        ):
+            return "nilai"
+        return "berita"
 
     has_topic = _STATISTIC_TOPIC.search(text) is not None
     if _year_range_intent(text) and has_topic:
@@ -706,16 +1073,6 @@ def _classify_question_intent(question: str) -> str:
             is not None
             or resolved_region is not None
         )
-        if (
-            re.search(r"\b(terbaru|terkini|bulan ini|bulan lalu|rilis)\b", text)
-            or re.search(r"\b20\d{2}\b", text)
-        ) and re.search(
-            r"\b(inflasi|ntp|nilai tukar petani|ekspor|impor|pariwisata|hotel|"
-            r"wisatawan|penganggur\w*|tpt|miskin\w*|kemiskinan|gini|ketimpangan|"
-            r"pertumbuhan|pdrb|ekonomi)\b",
-            text,
-        ) and not explicit_value_request and not is_pdrb_question:
-            return "brs"
         return "nilai"
     if DATA_QUESTION.search(text) or bps_tools.catalog_variable_matches(text):
         return "nilai"
@@ -732,31 +1089,43 @@ def _minimum_wage_question(question: str) -> bool:
     return bool(has_income_term and has_minimum_term)
 
 
-def _monthly_intent(question: str) -> tuple[str, Optional[str], int] | None:
-    text = question.lower()
-    months = {
-        "januari": "januari", "februari": "februari", "maret": "maret", "april": "april",
-        "mei": "mei", "juni": "juni", "juli": "juli", "agustus": "agustus",
-        "september": "september", "oktober": "oktober", "november": "november", "desember": "desember",
-    }
-    month = next((value for key, value in months.items() if re.search(rf"\b{key}\b", text)), None)
+def _editorial_request_parameters(question: str) -> tuple[str | None, int | None, int | None, int]:
+    text = question.casefold()
     year_match = re.search(r"\b(20\d{2})\b", text)
-    if year_match is None:
-        return None
-
-    topics = (
-        (r"\b(inflasi)\b", "inflasi"),
-        (r"\b(ntp|nilai tukar petani)\b", "NTP"),
-        (r"\b(ekspor)\b", "ekspor"),
-        (r"\b(impor)\b", "impor"),
-        (r"\b(pariwisata|hotel|wisatawan|akomodasi)\b", "pariwisata"),
-        (r"\b(penganggur\w*|tpt|ketenagakerjaan)\b", "pengangguran"),
-        (r"\b(miskin\w*|kemiskinan)\b", "kemiskinan"),
-        (r"\b(gini|ketimpangan)\b", "gini"),
-        (r"\b(pertumbuhan|pdrb|ekonomi)\b", "pertumbuhan"),
-    )
-    topic = next((value for pattern, value in topics if re.search(pattern, text)), None)
-    return (topic, month, int(year_match.group(1))) if topic else None
+    month = None
+    month_match = re.search(r"\bbulan\s+(1[0-2]|[1-9])\b", text)
+    if month_match:
+        month = int(month_match.group(1))
+    else:
+        month = next(
+            (
+                number
+                for name, number in bps_tools._EDITORIAL_MONTHS.items()
+                if re.search(rf"\b{re.escape(name)}\b", text)
+            ),
+            None,
+        )
+    page_match = re.search(r"\b(?:halaman|hal|page)\s*(\d+)\b", text)
+    page = max(1, min(int(page_match.group(1)), 1000)) if page_match else 1
+    stopwords = {
+        "brs", "berita", "resmi", "statistik", "rilis", "rilisan", "siaran", "pers",
+        "publikasi", "katalog", "laporan", "dalam", "angka", "terbaru", "terkini",
+        "terakhir", "sekarang", "saat", "ini",
+        "tahun", "bulan", "halaman", "hal", "page", "bps", "sumsel", "sumatera",
+        "selatan", "provinsi", "kabupaten", "kota", "wilayah", "tentang", "mengenai",
+        "apa", "tolong", "minta", "carikan", "tampilkan", "daftar", "terbit", "terbitan",
+        "yang", "untuk", "di", "ke", "dari", "pada", "dan", "atau",
+    }
+    month_tokens = set(bps_tools._EDITORIAL_MONTHS)
+    tokens = re.findall(r"\w+", text, flags=re.UNICODE)
+    keywords = [
+        token for token in tokens
+        if not token.isdecimal()
+        and token not in stopwords
+        and token not in month_tokens
+    ]
+    keyword = " ".join(keywords).strip() or None
+    return keyword, int(year_match.group(1)) if year_match else None, month, page
 
 
 def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | None:
@@ -765,6 +1134,16 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
 
     region, _ = bps_tools.resolve_region_from_text(question)
     original_text = question.lower()
+    if re.search(
+        r"\b(guru|murid|siswa|tenaga pendidik|tenaga pengajar)\b",
+        original_text,
+    ):
+        original_text = re.sub(
+            r"\b(sd|smp|sma|smk|sekolah\s+dasar|sekolah\s+menengah\s+"
+            r"(?:pertama|atas|kejuruan))\b",
+            " ",
+            original_text,
+        )
     all_regions = re.search(
         r"\b(?:(?:menurut|per|tiap|seluruh)\s+)?"
         r"(?:kab(?:upaten)?\s*/?\s*kota|kabupaten dan kota)\b",
@@ -773,6 +1152,9 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
     year_match = re.search(r"\b(20\d{2})\b", original_text)
     year = year_match.group(1) if year_match else ""
     keyword = bps_tools._clean_search_keyword(original_text)
+    for measure in ("jumlah", "total", "persentase", "persen", "tingkat", "rasio"):
+        if re.search(rf"\b{measure}\b", original_text) and measure not in keyword.split():
+            keyword = f"{measure} {keyword}"
     keyword = re.sub(r"\b(laju|pertumbuhan)\b", "pertumbuhan", keyword)
     keyword = re.sub(r"\buhh\b", "harapan hidup", keyword)
     keyword = " ".join(dict.fromkeys(keyword.split()))[:80].strip()
@@ -909,7 +1291,7 @@ def _rank_variable_candidate_options(
         ]
         if not terms:
             terms.extend(("jumlah", "penduduk"))
-        elif "penduduk" in terms:
+        elif "penduduk" in terms and "jumlah" not in terms:
             terms.insert(0, "jumlah")
         terms.extend(("jenis", "kelamin"))
     if not terms:
@@ -981,7 +1363,39 @@ def _rank_variable_candidate_options(
                     title,
                 ) is not None
             )
-            specificity_score = 0 if requests_detail or not detailed_variant else -1
+            method_qualifiers = ("sp2020", "long form", "sensus", "proyeksi", "estimasi")
+            methodology_mismatch = any(
+                qualifier in title and qualifier not in keyword.casefold()
+                for qualifier in method_qualifiers
+            )
+            dimension_qualifiers = (
+                (r"\b(berumur|umur|usia|kelompok umur|kelompok usia)\b", r"\b(umur|usia|lansia)\b"),
+                (r"\b(pendidikan|tamatan|ijazah)\b", r"\b(pendidikan|sekolah|tamatan|ijazah)\b"),
+                (
+                    r"\b(tk|taman kanak-kanak|sd|sekolah dasar|smp|sekolah menengah pertama|"
+                    r"sma|sekolah menengah atas|smk|sekolah menengah kejuruan)\b",
+                    r"\b(tk|taman kanak-kanak|sd|sekolah dasar|smp|sekolah menengah pertama|"
+                    r"sma|sekolah menengah atas|smk|sekolah menengah kejuruan)\b",
+                ),
+                (r"\b(status perkawinan|perkawinan)\b", r"\b(status|perkawinan|kawin)\b"),
+                (
+                    r"\b(jenis kelamin|gender)\b",
+                    r"\b(jenis kelamin|gender|laki|pria|lelaki|perempuan|wanita|cewek|cowok)\b",
+                ),
+                (r"\b(lapangan usaha|sektor usaha)\b", r"\b(usaha|sektor|industri)\b"),
+            )
+            dimension_mismatch = any(
+                re.search(title_pattern, title)
+                and not re.search(question_pattern, keyword, re.IGNORECASE)
+                for title_pattern, question_pattern in dimension_qualifiers
+            )
+            if methodology_mismatch or dimension_mismatch:
+                level_score = 0
+            specificity_score = (
+                -1
+                if detailed_variant or methodology_mismatch or dimension_mismatch
+                else 0
+            )
             latest_year = int(candidate.get("tahun_terbaru") or 0)
             ranked.append((
                 similarity_score,
@@ -1121,34 +1535,42 @@ def _format_brs_fallback(
     month: Optional[str],
     year: int,
 ) -> str:
-    results = data.get("hasil")
-    period = f"{month.capitalize()} {year}" if month else f"tahun {year}"
-    if not isinstance(results, list) or not results:
-        return f"Data untuk {period} tidak ditemukan; BRS yang cocok belum tersedia."
+    del question, month, year
+    return _format_editorial_fallback(data, "BRS")
 
-    region, _ = bps_tools.resolve_region_from_text(question)
+
+def _format_editorial_fallback(data: dict, label: str) -> str:
+    results = data.get("hasil")
+    if not isinstance(results, list) or not results:
+        return f"Belum ditemukan hasil {label} yang cocok pada WebAPI BPS."
+
     formatted = []
     for item in results:
         if not isinstance(item, dict):
             continue
-        title = str(item.get("judul") or "").strip()
+        title = str(item.get("judul") or "").strip() or "Judul tidak tersedia"
+        date = str(item.get("tanggal_rilis") or "").strip()
         summary = str(item.get("ringkasan") or "").strip()
-        if region and region != "Provinsi Sumatera Selatan":
-            sentences = re.split(r"(?<=[.!?])\s+", summary)
-            region_key = bps_tools._norm_region(region)
-            summary = " ".join(
-                sentence for sentence in sentences
-                if region_key in bps_tools._norm_region(sentence)
-            )
-            if not summary:
-                continue
-        formatted.append(
-            title + (f" ({item.get('tanggal_rilis')})" if item.get("tanggal_rilis") else "")
-            + (f": {summary}" if summary else "")
+        source = str(item.get("tautan") or "").strip()
+        lines = [f"{title} — tanggal rilis: {date or 'tidak tercantum pada respons API'}"]
+        if summary:
+            lines.append(f"Abstrak/isi yang dikembalikan API: {summary}")
+        lines.append(
+            f"Sumber/PDF: {source}"
+            if source
+            else "Sumber/PDF: tautan tidak tersedia pada respons API."
         )
+        formatted.append("\n".join(lines))
+
     if not formatted:
-        return f"Data untuk {period} tidak ditemukan; data wilayah yang diminta tidak tercantum pada ringkasan BRS."
-    return "\n".join(formatted)
+        return f"Belum ditemukan hasil {label} yang cocok pada WebAPI BPS."
+    answer = "\n\n".join(formatted)
+    if data.get("abstrak_tidak_tersedia"):
+        answer += (
+            "\n\nSebagian abstrak belum dapat dimuat dari API; ringkasan yang tidak tersedia "
+            "tidak saya simpulkan dari PDF."
+        )
+    return answer
 
 
 def _age_group_order_key(row: dict) -> tuple[int, int] | None:
@@ -1203,7 +1625,13 @@ def _format_indicator_fallback(
     data: dict,
     wilayah: Optional[str],
     requested_year: str,
+    include_categories: bool = False,
 ) -> str:
+    source_note = (
+        f"\nSumber: {data.get('sumber') or 'BPS Provinsi Sumatera Selatan'}."
+    )
+    if data.get("last_update_bps"):
+        source_note += f" Pembaruan data: {data['last_update_bps']}."
     if data.get("status_hasil") == "gagal_teknis":
         return "Maaf, data belum dapat diverifikasi saat ini."
     if data.get("input_tidak_valid") and data.get("error"):
@@ -1212,6 +1640,12 @@ def _format_indicator_fallback(
         "Maaf, data agregat Provinsi Sumatera Selatan tidak tersedia untuk indikator ini. "
         "Namun, data per kabupaten/kota berikut tersedia:\n"
         if data.get("wilayah_diminta_tidak_tersedia")
+        else ""
+    )
+    unavailable_regions = data.get("wilayah_tidak_tersedia") or []
+    unavailable_note = (
+        " Data tidak ditemukan untuk: " + ", ".join(map(str, unavailable_regions)) + "."
+        if unavailable_regions
         else ""
     )
     yearly_results = data.get("data_per_tahun")
@@ -1238,7 +1672,7 @@ def _format_indicator_fallback(
                     or wilayah
                     or "Sumatera Selatan"
                 )
-                if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
+                if (include_categories or data.get("wilayah_diminta_tidak_tersedia")) and row.get("kategori"):
                     scope = f"{scope} ({row['kategori']})"
                 unit = str(yearly_result.get("satuan") or data.get("satuan") or "").strip()
                 lines.append(
@@ -1251,6 +1685,7 @@ def _format_indicator_fallback(
                 f"Data {data.get('judul') or 'indikator BPS'} untuk rentang {requested_year} "
                 "belum tercantum pada hasil WebAPI BPS."
                 + (f" Tahun yang tidak tersedia: {', '.join(map(str, missing))}." if missing else "")
+                + unavailable_note
             )
         missing = data.get("tahun_tidak_tersedia") or []
         missing_note = (
@@ -1269,7 +1704,10 @@ def _format_indicator_fallback(
             else " Angka ini merupakan proyeksi." if nature == "proyeksi"
             else ""
         )
-        return subregional_notice + year_notice + f"{title}:\n" + "\n".join(lines) + missing_note + nature_note
+        return (
+            subregional_notice + year_notice + f"{title}:\n" + "\n".join(lines)
+            + missing_note + unavailable_note + nature_note + source_note
+        )
     if data.get("error"):
         years = data.get("tahun_tersedia")
         if requested_year and isinstance(years, list) and years:
@@ -1299,6 +1737,7 @@ def _format_indicator_fallback(
         and row.get("nilai") is not None
         and (
             data.get("wilayah_diminta_tidak_tersedia")
+            or include_categories
             or not row.get("kategori")
             or re.fullmatch(
                 r"(?:jumlah|total|laki-laki\s*\+\s*perempuan)",
@@ -1337,7 +1776,7 @@ def _format_indicator_fallback(
             else:
                 value_text = str(value)
             label = str(row.get("wilayah") or "Wilayah")
-            if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
+            if (include_categories or data.get("wilayah_diminta_tidak_tersedia")) and row.get("kategori"):
                 label += f" ({row['kategori']})"
             lines.append(f"{label}: {value_text}")
         unit = str(data.get("satuan") or "").strip()
@@ -1351,7 +1790,9 @@ def _format_indicator_fallback(
             + f"{year_note}{data.get('judul', 'Indikator BPS')} tahun {data.get('tahun', '')} "
             f"({unit if unit else 'nilai per wilayah'}):\n"
             + "\n".join(lines)
+            + unavailable_note
             + nature_note
+            + source_note
         )
     if not usable:
         title = data.get("judul") or data.get("nama_indikator") or "Indikator BPS"
@@ -1360,11 +1801,11 @@ def _format_indicator_fallback(
         if rows:
             return (
                 f"Hasil {title} untuk {scope} tahun {actual_year} tidak memuat baris total/agregat; "
-                f"kategori yang tersedia tidak dijumlahkan.{nature_note}"
+                f"kategori yang tersedia tidak dijumlahkan.{unavailable_note}{nature_note}"
             )
         return (
             f"WebAPI BPS tidak mengembalikan baris nilai {title} untuk {scope} "
-            f"tahun {actual_year}.{nature_note}"
+            f"tahun {actual_year}.{unavailable_note}{nature_note}"
         )
     if len(usable) > 1:
         title = data.get("judul", "Indikator BPS")
@@ -1381,12 +1822,16 @@ def _format_indicator_fallback(
             else:
                 value_text = str(value)
             label = str(row.get("wilayah") or row.get("kategori") or "Nilai")
+            if include_categories and row.get("kategori"):
+                label += f" ({row['kategori']})"
             lines.append(f"{label}: {value_text}")
         return (
             f"Beberapa baris {title} tersedia untuk {wilayah or 'Provinsi Sumatera Selatan'} "
             f"tahun {actual_year}{' (' + unit + ')' if unit else ''}:\n"
             + "\n".join(lines)
+            + unavailable_note
             + nature_note
+            + source_note
         )
 
     row = usable[0]
@@ -1410,10 +1855,13 @@ def _format_indicator_fallback(
     )
     if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
         scope = f"{scope} ({row['kategori']})"
+    elif include_categories and row.get("kategori"):
+        scope = f"{scope} ({row['kategori']})"
     return (
         subregional_notice
         + f"{year_note}{data.get('judul', 'Indikator BPS')} di {scope} tahun {actual_year}: "
-        f"{value_text}{' ' + unit if unit else ''}.{nature_note}"
+        f"{value_text}{' ' + unit if unit else ''}.{unavailable_note}{nature_note}"
+        + source_note
     )
 
 
@@ -1476,20 +1924,24 @@ def _fetch_candidate_data(
     requested_year: str,
     region: Optional[str],
     year_range: tuple[int, int] | None,
+    kategori: str | None = None,
 ) -> dict:
     variable_id = int(candidate["var_id"])
+    category_args = {"kategori": kategori} if kategori else {}
     if year_range:
         data = bps_tools.ambil_data(
             variable_id,
             wilayah=region,
             tahun_mulai=str(year_range[0]),
             tahun_akhir=str(year_range[1]),
+            **category_args,
         )
     else:
         data = bps_tools.ambil_data(
             variable_id,
             tahun=requested_year or None,
             wilayah=region,
+            **category_args,
         )
 
     if (
@@ -1498,14 +1950,14 @@ def _fetch_candidate_data(
         and data.get("tahun_tersedia")
         and data.get("error")
     ):
-        latest = bps_tools.ambil_data(variable_id, wilayah=region)
+        latest = bps_tools.ambil_data(variable_id, wilayah=region, **category_args)
         if _has_subregional_values_for_province(latest, region):
-            latest = bps_tools.ambil_data(variable_id)
+            latest = bps_tools.ambil_data(variable_id, **category_args)
             if _has_indicator_values(latest):
                 latest["tahun_diminta_tidak_tersedia"] = requested_year
                 latest["wilayah_diminta_tidak_tersedia"] = region
         elif _uses_non_geographic_province_dimension(latest, region):
-            latest = bps_tools.ambil_data(variable_id)
+            latest = bps_tools.ambil_data(variable_id, **category_args)
         if "error" not in latest:
             latest.setdefault("tahun_diminta_tidak_tersedia", requested_year)
             data = latest
@@ -1515,15 +1967,16 @@ def _fetch_candidate_data(
         and not data.get("input_tidak_valid")
         and data.get("tahun_tersedia")
     ):
-        latest = bps_tools.ambil_data(variable_id, wilayah=region)
+        latest = bps_tools.ambil_data(variable_id, wilayah=region, **category_args)
         if _has_subregional_values_for_province(latest, region):
             subregional = bps_tools.ambil_data(
                 variable_id,
                 tahun_mulai=str(year_range[0]),
                 tahun_akhir=str(year_range[1]),
+                **category_args,
             )
             if not _has_indicator_values(subregional):
-                subregional = bps_tools.ambil_data(variable_id)
+                subregional = bps_tools.ambil_data(variable_id, **category_args)
                 if _has_indicator_values(subregional):
                     subregional["tahun_diminta_tidak_tersedia"] = (
                         f"{year_range[0]}-{year_range[1]}"
@@ -1546,15 +1999,20 @@ def _fetch_candidate_data(
         and not _has_indicator_values(data)
         and not _has_subregional_values_for_province(data, region)
     ):
-        latest_for_region = bps_tools.ambil_data(variable_id, wilayah=region)
+        latest_for_region = bps_tools.ambil_data(
+            variable_id,
+            wilayah=region,
+            **category_args,
+        )
         if _has_subregional_values_for_province(latest_for_region, region):
             subregional_data = bps_tools.ambil_data(
                 variable_id,
                 tahun_mulai=str(year_range[0]),
                 tahun_akhir=str(year_range[1]),
+                **category_args,
             )
             if not _has_indicator_values(subregional_data):
-                subregional_data = bps_tools.ambil_data(variable_id)
+                subregional_data = bps_tools.ambil_data(variable_id, **category_args)
                 if _has_indicator_values(subregional_data):
                     subregional_data["tahun_diminta_tidak_tersedia"] = (
                         f"{year_range[0]}-{year_range[1]}"
@@ -1569,9 +2027,14 @@ def _fetch_candidate_data(
                 variable_id,
                 tahun_mulai=str(year_range[0]),
                 tahun_akhir=str(year_range[1]),
+                **category_args,
             )
             if year_range
-            else bps_tools.ambil_data(variable_id, tahun=requested_year or None)
+            else bps_tools.ambil_data(
+                variable_id,
+                tahun=requested_year or None,
+                **category_args,
+            )
         )
         if province_data.get("data") or province_data.get("data_per_tahun"):
             province_data.setdefault("wilayah_cakupan", region)
@@ -1583,11 +2046,13 @@ def _fetch_candidate_data(
                 variable_id,
                 tahun_mulai=str(year_range[0]),
                 tahun_akhir=str(year_range[1]),
+                **category_args,
             )
             if year_range
             else bps_tools.ambil_data(
                 variable_id,
                 tahun=requested_year or None,
+                **category_args,
             )
         )
         if not _has_indicator_values(subregional_data) and requested_year:
@@ -1601,6 +2066,138 @@ def _fetch_candidate_data(
     data["judul"] = data.get("judul") or candidate.get("judul")
     data["var_id"] = variable_id
     return data
+
+
+def _combine_regional_results(
+    regional_results: list[tuple[str, dict]],
+    requested_year: str,
+    year_range: tuple[int, int] | None,
+) -> dict:
+    if not regional_results:
+        return {"status_hasil": "kosong", "data": []}
+
+    combined_rows: list[dict] = []
+    yearly_rows: dict[str, list[dict]] = {}
+    missing_regions: list[str] = []
+    missing_years: set[str] = set()
+    first_data: dict | None = None
+
+    def rows_for_region(rows: object, region: str) -> list[dict]:
+        if not isinstance(rows, list):
+            return []
+        matching = []
+        for row in rows:
+            if not isinstance(row, dict) or row.get("nilai") is None:
+                continue
+            row_region = row.get("wilayah")
+            resolved, _ = bps_tools.resolve_region_from_text(str(row_region or ""))
+            if resolved == region:
+                matching.append(dict(row))
+        return matching
+
+    for region, result in regional_results:
+        if first_data is None and not result.get("error"):
+            first_data = result
+        region_has_data = False
+        if year_range:
+            for yearly_result in result.get("data_per_tahun") or []:
+                if not isinstance(yearly_result, dict):
+                    continue
+                year = str(yearly_result.get("tahun") or "")
+                rows = rows_for_region(yearly_result.get("data"), region)
+                if not year or not rows:
+                    continue
+                region_has_data = True
+                yearly_rows.setdefault(year, []).extend(rows)
+            missing_years.update(map(str, result.get("tahun_tidak_tersedia") or []))
+        else:
+            rows = rows_for_region(result.get("data"), region)
+            if rows:
+                region_has_data = True
+                combined_rows.extend(rows)
+        if not region_has_data:
+            missing_regions.append(region)
+
+    merged = dict(first_data or regional_results[0][1])
+    merged.pop("error", None)
+    merged.pop("wilayah_diminta_tidak_tersedia", None)
+    if year_range:
+        years = sorted(yearly_rows, key=int)
+        merged["data_per_tahun"] = [
+            {
+                "tahun": year,
+                "satuan": merged.get("satuan"),
+                "data": yearly_rows[year],
+            }
+            for year in years
+        ]
+        merged["tahun_mulai"] = str(year_range[0])
+        merged["tahun_akhir"] = str(year_range[1])
+        merged["tahun_tersedia"] = years
+        merged["tahun_tidak_tersedia"] = sorted(missing_years, key=int)
+        merged["status_hasil"] = "ditemukan" if years else "kosong"
+    else:
+        merged["data"] = combined_rows
+        merged["status_hasil"] = "ditemukan" if combined_rows else "kosong"
+    merged["wilayah_tidak_tersedia"] = missing_regions
+    if requested_year:
+        merged["tahun_diminta"] = requested_year
+    return merged
+
+
+def _fetch_canonical_for_regions(
+    indicator_name: str,
+    regions: list[str],
+    requested_year: str,
+    year_range: tuple[int, int] | None,
+    kategori: str | None = None,
+) -> dict:
+    regional_results = []
+    category_args = {"kategori": kategori} if kategori else {}
+    for region in regions:
+        if year_range:
+            data = bps_tools.indikator_utama(
+                indicator_name,
+                wilayah=region,
+                tahun_mulai=str(year_range[0]),
+                tahun_akhir=str(year_range[1]),
+                **category_args,
+            )
+            if (
+                data.get("error")
+                and not data.get("input_tidak_valid")
+                and data.get("tahun_tersedia")
+            ):
+                latest = bps_tools.indikator_utama(
+                    indicator_name,
+                    wilayah=region,
+                    **category_args,
+                )
+                if "error" not in latest:
+                    latest["tahun_diminta_tidak_tersedia"] = f"{year_range[0]}-{year_range[1]}"
+                    data = latest
+        else:
+            data = bps_tools.indikator_utama(
+                indicator_name,
+                tahun=requested_year or None,
+                wilayah=region,
+                **category_args,
+            )
+            if (
+                requested_year
+                and data.get("error")
+                and data.get("tahun_tersedia")
+            ):
+                latest = bps_tools.indikator_utama(
+                    indicator_name,
+                    wilayah=region,
+                    **category_args,
+                )
+                if "error" not in latest:
+                    latest["tahun_diminta_tidak_tersedia"] = requested_year
+                    data = latest
+        regional_results.append((region, data))
+    return _combine_regional_results(regional_results, requested_year, year_range)
 
 
 def _candidate_value_rows(data: dict, keyword: str) -> tuple[list[tuple[str, dict]], list[str]]:
@@ -1862,6 +2459,12 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         reply = "Halo! Ada yang bisa saya bantu terkait statistik BPS Sumatera Selatan?"
         return {"reply": reply, "data": reply, "tools_used": False}
 
+    requested_regions = bps_tools.resolve_regions_from_text(question)
+    include_categories = _requests_category_breakdown(question)
+    requested_category = _explicit_category_hint(question)
+    candidate_category_args = (
+        {"kategori": requested_category} if requested_category else {}
+    )
     prefer_knowledge = _prefer_knowledge_context(question, request.context)
     intent_kind = _classify_question_intent(question)
     if (
@@ -1870,13 +2473,22 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         and _followup_data_intent(question, request.history) is not None
     ):
         intent_kind = "nilai"
-    requires_tool = intent_kind in {"nilai", "rentang_waktu", "brs", "publikasi"}
+    editorial_intent = intent_kind in {"brs", "publikasi", "berita"}
+    requires_tool = intent_kind in {"nilai", "rentang_waktu"} or editorial_intent
     canonical_data: dict | None = None
-    year_range = _year_range_intent(question) if requires_tool else None
-    monthly_intent = _monthly_intent(question) if intent_kind == "brs" else None
+    year_range = _year_range_intent(question) if requires_tool and not editorial_intent else None
+    multi_topic_intents = (
+        _recommended_data_followup(question, request.history)
+        or _multi_topic_candidates(question)
+        if requires_tool
+        and not editorial_intent
+        and not prefer_knowledge
+        else []
+    )
     canonical_intent = (
         _canonical_indicator_intent(question)
-        if requires_tool and intent_kind not in {"brs", "publikasi"} and monthly_intent is None
+        if requires_tool and not editorial_intent
+        and not multi_topic_intents
         else None
     )
     dynamic_intent = None
@@ -1885,10 +2497,10 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     canonical_tool_call: str | None = None
     followup_intent = (
         _followup_data_intent(question, request.history, canonical_intent)
-        if requires_tool
+        if requires_tool and not editorial_intent
         else None
     )
-    if not prefer_knowledge and monthly_intent is None and year_range is None and followup_intent is not None:
+    if not prefer_knowledge and year_range is None and followup_intent is not None:
         intent_kind, followup_value = followup_intent
         if intent_kind == "canonical":
             canonical_intent = followup_value
@@ -1902,9 +2514,9 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     static_table_keyword = (
         _static_table_intent(question)
         if requires_tool
-        and intent_kind not in {"brs", "publikasi"}
-        and monthly_intent is None
+        and not editorial_intent
         and canonical_intent is None
+        and not multi_topic_intents
         and not prefer_knowledge
         else None
     )
@@ -1992,59 +2604,139 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             }
             canonical_tool_call = "cari_variabel(kata_kunci='upah')"
             canonical_fallback = "Maaf, data belum dapat diverifikasi saat ini."
-    if monthly_intent is not None and not prefer_knowledge:
-        topic, month, year = monthly_intent
-        region, _ = bps_tools.resolve_region_from_text(question)
-        if topic == "pengangguran" and region and region != "Provinsi Sumatera Selatan":
-            search_term = "TPT" + (f" {month}" if month else "")
-            simdasi_data = bps_tools.simdasi_cari_data(
-                kata_kunci=search_term,
-                tahun=str(year),
-                wilayah=region,
-            )
-            if simdasi_data.get("status_hasil") == "ditemukan":
-                canonical_data = simdasi_data
-                canonical_tool_call = (
-                    f"simdasi_cari_data(kata_kunci='{search_term}', tahun='{year}', wilayah='{region}')"
-                )
-                canonical_fallback = _format_simdasi_fallback(simdasi_data, region, str(year))
+    if multi_topic_intents:
+        year_match = re.search(r"\b(20\d{2})\b", question)
+        requested_year = year_match.group(1) if year_match else ""
+        displayed_year = (
+            f"{year_range[0]}-{year_range[1]}" if year_range else requested_year
+        )
+        if year_range:
+            requested_year = ""
 
-        if canonical_data is None:
+        if len(requested_regions) > 1:
+            regions = requested_regions
+        else:
+            fallback_intent = _dynamic_variable_intent(question)
+            single_region = requested_regions[0] if requested_regions else (
+                fallback_intent[2] if fallback_intent else "Provinsi Sumatera Selatan"
+            )
+            regions = [single_region]
+
+        results = []
+        for topic in multi_topic_intents:
+            candidate = topic["candidate"]
+            if candidate is None:
+                results.append({
+                    **topic,
+                    "data": topic.get("data") or {"status_hasil": "kosong"},
+                })
+                continue
             try:
-                canonical_data = bps_tools.berita_resmi_statistik(
-                    kata_kunci=topic,
-                    jumlah=5,
-                    tahun=year,
-                    bulan=month,
-                )
-                canonical_tool_call = (
-                    f"berita_resmi_statistik(kata_kunci='{topic}', "
-                    f"bulan='{month or 'semua'}', tahun={year})"
-                )
-                if canonical_data.get("error"):
-                    canonical_fallback = "Maaf, BRS belum dapat diverifikasi saat ini."
-                elif not canonical_data.get("hasil"):
-                    latest = bps_tools.berita_resmi_statistik(kata_kunci=topic, jumlah=5)
-                    if latest.get("error"):
-                        canonical_fallback = "Maaf, BRS belum dapat diverifikasi saat ini."
-                        canonical_data = latest
-                    else:
-                        canonical_data = {
-                            "periode_diminta_tidak_ditemukan": {"bulan": month, "tahun": year},
-                            "hasil_terbaru": latest.get("hasil", []),
-                        }
-                        latest_results = {"hasil": canonical_data["hasil_terbaru"]}
-                        period = f"{month.capitalize()} {year}" if month else f"tahun {year}"
-                        canonical_fallback = (
-                            f"Data untuk {period} tidak ditemukan; berikut BRS terbaru:\n"
-                            + _format_brs_fallback(question, latest_results, month, year)
+                if len(requested_regions) > 1:
+                    regional_results = [
+                        (
+                            region,
+                            _fetch_candidate_data(
+                                candidate,
+                                requested_year,
+                                region,
+                                year_range,
+                                **candidate_category_args,
+                            ),
                         )
-                elif canonical_data.get("hasil"):
-                    canonical_fallback = _format_brs_fallback(question, canonical_data, month, year)
+                        for region in regions
+                    ]
+                    data = _combine_regional_results(
+                        regional_results,
+                        requested_year,
+                        year_range,
+                    )
+                else:
+                    data = _fetch_candidate_data(
+                        candidate,
+                        requested_year,
+                        regions[0],
+                        year_range,
+                        **candidate_category_args,
+                    )
             except Exception:
-                logger.exception("Pencarian BRS periode tertentu gagal")
-                canonical_data = {"error": "Pencarian BRS gagal.", "status_hasil": "gagal_teknis"}
-                canonical_fallback = "Maaf, BRS belum dapat diverifikasi saat ini."
+                logger.exception(
+                    "Pengambilan data multi-topik gagal untuk var_id=%s",
+                    candidate.get("var_id"),
+                )
+                data = {
+                    "judul": candidate.get("judul"),
+                    "status_hasil": "gagal_teknis",
+                }
+            if "status_hasil" not in data:
+                data["status_hasil"] = (
+                    "ditemukan" if _has_indicator_values(data) else "kosong"
+                )
+            bounded_data = _limit_multi_topic_result(data)
+            results.append({
+                "keyword": topic["keyword"],
+                "candidate": candidate,
+                "data": bounded_data,
+            })
+
+        canonical_data = {
+            "hasil": results,
+            "tahun_diminta": displayed_year or "terbaru",
+            "wilayah_diminta": regions,
+            "status_hasil": (
+                "ditemukan"
+                if any(entry["data"].get("status_hasil") == "ditemukan" for entry in results)
+                else (
+                    "gagal_teknis"
+                    if any(entry["data"].get("status_hasil") == "gagal_teknis" for entry in results)
+                    else "kosong"
+                )
+            ),
+        }
+        canonical_tool_call = " + ".join(
+            f"cari_variabel(kata_kunci='{item['keyword']}') -> "
+            f"ambil_data(var_id={item['candidate']['var_id']})"
+            for item in multi_topic_intents
+        )
+        canonical_fallback = _format_multi_topic_fallback(
+            results,
+            regions[0] if len(regions) == 1 else None,
+            displayed_year,
+            include_categories,
+        )
+        force_deterministic_fallback = True
+    if editorial_intent:
+        keyword, editorial_year, editorial_month, editorial_page = (
+            _editorial_request_parameters(question)
+        )
+        editorial_tools = {
+            "brs": (bps_tools.berita_resmi_statistik, "pressrelease", "BRS"),
+            "publikasi": (bps_tools.publikasi_terbaru, "publication", "publikasi"),
+            "berita": (bps_tools.berita_statistik, "news", "berita statistik"),
+        }
+        editorial_tool, model_name, label = editorial_tools[intent_kind]
+        canonical_tool_call = (
+            f"{model_name}(kata_kunci={keyword!r}, tahun={editorial_year!r}, "
+            f"bulan={editorial_month!r}, halaman={editorial_page})"
+        )
+        canonical_data = editorial_tool(
+            kata_kunci=keyword,
+            jumlah=3,
+            tahun=editorial_year,
+            bulan=str(editorial_month) if editorial_month is not None else None,
+            halaman=editorial_page,
+        )
+        if canonical_data.get("status_hasil") == "gagal_teknis":
+            canonical_fallback = (
+                f"Maaf, arsip {label} belum dapat dimuat dari WebAPI BPS saat ini. "
+                "Silakan coba kembali beberapa saat lagi."
+            )
+            force_deterministic_fallback = True
+        elif canonical_data.get("status_hasil") == "kosong":
+            canonical_fallback = _format_editorial_fallback(canonical_data, label)
+            force_deterministic_fallback = True
+        else:
+            canonical_fallback = _format_editorial_fallback(canonical_data, label)
 
     if canonical_intent is not None and not prefer_knowledge:
         indicator_name, requested_year, region = canonical_intent
@@ -2056,6 +2748,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             data_region = None
         if year_range:
             requested_year = ""
+        category_args = {"kategori": requested_category} if requested_category else {}
         try:
             if year_range:
                 canonical_data = bps_tools.indikator_utama(
@@ -2063,6 +2756,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     wilayah=data_region,
                     tahun_mulai=str(year_range[0]),
                     tahun_akhir=str(year_range[1]),
+                    **category_args,
                 )
                 requested_year = f"{year_range[0]}-{year_range[1]}"
                 canonical_tool_call = (
@@ -2075,6 +2769,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     indicator_name,
                     tahun=requested_year or None,
                     wilayah=data_region,
+                    **category_args,
                 )
                 canonical_tool_call = (
                     f"indikator_utama(nama='{indicator_name}', "
@@ -2086,7 +2781,11 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 and not canonical_data.get("input_tidak_valid")
                 and canonical_data.get("tahun_tersedia")
             ):
-                latest = bps_tools.indikator_utama(indicator_name, wilayah=data_region)
+                latest = bps_tools.indikator_utama(
+                    indicator_name,
+                    wilayah=data_region,
+                    **category_args,
+                )
                 if "error" not in latest:
                     latest["tahun_diminta_tidak_tersedia"] = requested_year
                     canonical_data = latest
@@ -2097,6 +2796,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         alternative_id,
                         tahun=requested_year,
                         wilayah=data_region,
+                        **category_args,
                     )
                     if "error" not in alternate:
                         alternate["var_id"] = alternative_id
@@ -2107,7 +2807,11 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         )
                         break
                 if canonical_data.get("tahun_tersedia"):
-                    latest = bps_tools.indikator_utama(indicator_name, wilayah=data_region)
+                    latest = bps_tools.indikator_utama(
+                        indicator_name,
+                        wilayah=data_region,
+                        **category_args,
+                    )
                     if "error" not in latest:
                         canonical_data = latest
                         canonical_data["tahun_diminta_tidak_tersedia"] = requested_year
@@ -2120,6 +2824,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 latest_for_region = bps_tools.indikator_utama(
                     indicator_name,
                     wilayah=region,
+                    **category_args,
                 )
                 if _has_subregional_values_for_province(latest_for_region, region):
                     canonical_data = latest_for_region
@@ -2132,6 +2837,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 latest_for_region = bps_tools.indikator_utama(
                     indicator_name,
                     wilayah=region,
+                    **category_args,
                 )
                 if _has_subregional_values_for_province(latest_for_region, region):
                     canonical_data = latest_for_region
@@ -2142,18 +2848,21 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         wilayah=None,
                         tahun_mulai=str(year_range[0]),
                         tahun_akhir=str(year_range[1]),
+                        **category_args,
                     )
                     if year_range
                     else bps_tools.indikator_utama(
                         indicator_name,
                         tahun=requested_year or None,
                         wilayah=None,
+                        **category_args,
                     )
                 )
                 if not _has_indicator_values(subregional_data) and requested_year:
                     subregional_data = bps_tools.indikator_utama(
                         indicator_name,
                         wilayah=None,
+                        **category_args,
                     )
                     if _has_indicator_values(subregional_data):
                         subregional_data["tahun_diminta_tidak_tersedia"] = requested_year
@@ -2190,6 +2899,57 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     region,
                     requested_year,
                 )
+            if len(requested_regions) > 1:
+                if bps_tools._INDIKATOR_UTAMA.get(indicator_name, {}).get("province_only"):
+                    canonical_data = _fetch_canonical_for_regions(
+                        indicator_name,
+                        ["Provinsi Sumatera Selatan"],
+                        requested_year,
+                        year_range,
+                        kategori=requested_category,
+                    )
+                    region = "Provinsi Sumatera Selatan"
+                    canonical_fallback = (
+                        _format_indicator_fallback(
+                            canonical_data,
+                            region,
+                            requested_year,
+                            include_categories,
+                        )
+                        + " Indikator ini hanya tersedia pada tingkat provinsi, bukan per kabupaten/kota."
+                    )
+                else:
+                    canonical_data = _fetch_canonical_for_regions(
+                        indicator_name,
+                        requested_regions,
+                        requested_year,
+                        year_range,
+                        kategori=requested_category,
+                    )
+                    canonical_tool_call = (
+                        f"indikator_utama(nama='{indicator_name}', wilayah="
+                        + ", ".join(f"'{item}'" for item in requested_regions)
+                        + ")"
+                    )
+                    region = None
+                    canonical_fallback = _format_indicator_fallback(
+                        canonical_data,
+                        region,
+                        requested_year,
+                        include_categories,
+                    )
+                force_deterministic_fallback = True
+            elif include_categories and (
+                isinstance(canonical_data.get("data"), list)
+                or isinstance(canonical_data.get("data_per_tahun"), list)
+            ):
+                canonical_fallback = _format_indicator_fallback(
+                    canonical_data,
+                    region,
+                    requested_year,
+                    include_categories=True,
+                )
+                force_deterministic_fallback = True
         except Exception:
             logger.exception("Pengambilan indikator kanonik gagal")
             canonical_data = {"error": "Pengambilan indikator gagal.", "status_hasil": "gagal_teknis"}
@@ -2198,8 +2958,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     if (
         canonical_data is None
         and requires_tool
-        and intent_kind not in {"brs", "publikasi"}
-        and monthly_intent is None
+        and not editorial_intent
         and canonical_intent is None
         and not prefer_knowledge
         and not _minimum_wage_question(question)
@@ -2207,11 +2966,19 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         dynamic_intent = dynamic_intent or _dynamic_variable_intent(question)
         if dynamic_intent is not None:
             keyword, requested_year, region = dynamic_intent
+            if len(requested_regions) > 1:
+                region = None
             try:
                 search_result = bps_tools.cari_variabel(keyword)
+                school_levels = re.findall(
+                    r"\b(?:sd|smp|sma|smk|tk)\b",
+                    question,
+                    re.IGNORECASE,
+                )
+                ranking_keyword = " ".join((keyword, *school_levels))
                 candidate_options = _rank_variable_candidate_options(
                     search_result,
-                    keyword,
+                    ranking_keyword,
                     region,
                     prefer_latest=not requested_year and year_range is None,
                 )
@@ -2246,7 +3013,13 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     else:
                         candidate_options = candidate_options[:5]
                         candidate_data = [
-                            _fetch_candidate_data(item, requested_year, region, year_range)
+                            _fetch_candidate_data(
+                                item,
+                                requested_year,
+                                region,
+                                year_range,
+                                **candidate_category_args,
+                            )
                             for item in candidate_options
                         ]
                         canonical_data = {
@@ -2274,18 +3047,51 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         force_deterministic_fallback = True
                 elif variable is not None:
                     variable_id = int(variable["var_id"])
-                    canonical_data = _fetch_candidate_data(
-                        variable,
-                        requested_year,
-                        region,
-                        year_range,
-                    )
+                    if include_categories:
+                        force_deterministic_fallback = True
+                    if len(requested_regions) > 1:
+                        regional_results = [
+                            (
+                                requested_region,
+                                _fetch_candidate_data(
+                                    variable,
+                                    requested_year,
+                                    requested_region,
+                                    year_range,
+                                    **candidate_category_args,
+                                ),
+                            )
+                            for requested_region in requested_regions
+                        ]
+                        canonical_data = _combine_regional_results(
+                            regional_results,
+                            requested_year,
+                            year_range,
+                        )
+                        region = None
+                        force_deterministic_fallback = True
+                    else:
+                        canonical_data = _fetch_candidate_data(
+                            variable,
+                            requested_year,
+                            region,
+                            year_range,
+                            **candidate_category_args,
+                        )
                     if year_range:
                         requested_year = f"{year_range[0]}-{year_range[1]}"
-                    canonical_tool_call = (
-                        f"cari_variabel(kata_kunci='{keyword}') -> "
-                        f"ambil_data(var_id={variable_id}, tahun='{requested_year or 'terbaru'}', wilayah='{region}')"
-                    )
+                    if len(requested_regions) > 1:
+                        canonical_tool_call = (
+                            f"cari_variabel(kata_kunci='{keyword}') -> "
+                            f"ambil_data(var_id={variable_id}, wilayah="
+                            + ", ".join(f"'{item}'" for item in requested_regions)
+                            + ")"
+                        )
+                    else:
+                        canonical_tool_call = (
+                            f"cari_variabel(kata_kunci='{keyword}') -> "
+                            f"ambil_data(var_id={variable_id}, tahun='{requested_year or 'terbaru'}', wilayah='{region}')"
+                        )
                     approximate = (
                         int(variable.get("skor_kemiripan") or 0) < 80
                         or variable.get("jenis_kecocokan") == "related"
@@ -2315,6 +3121,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             canonical_data,
                             region,
                             requested_year,
+                            include_categories,
                         )
                 else:
                     if not static_table_checked:
@@ -2405,13 +3212,17 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     if continuation_instruction:
         user_text = f"{continuation_instruction}\n\n{user_text}"
     if canonical_data is not None:
-        fallback_instruction = (
-            "Jika hasil memuat periode_diminta_tidak_ditemukan, sampaikan periode yang tidak ditemukan "
-            "lalu bedakan dengan jelas dari rilis terbaru. Untuk pertanyaan wilayah, gunakan hanya kalimat "
-            "ringkasan yang menyebut wilayah tersebut."
-            if monthly_intent is not None
-            else "Jika baris data tidak menjawab pertanyaan, nyatakan bahwa data yang cocok belum ditemukan."
-        )
+        if canonical_data.get("jenis_konten"):
+            fallback_instruction = (
+                "Ini adalah konten editorial dari endpoint list/detail BPS. Ringkas hanya abstrak atau isi "
+                "yang tersedia di data; jangan mengaku telah membaca atau menyimpulkan isi PDF. Cantumkan "
+                "judul, tanggal rilis, dan tautan sumber/PDF, atau nyatakan bila tautan tidak tersedia. "
+                "Jika abstrak tidak tersedia, jangan mengarang ringkasan."
+            )
+        else:
+            fallback_instruction = (
+                "Jika baris data tidak menjawab pertanyaan, nyatakan bahwa data yang cocok belum ditemukan."
+            )
         subregional_fallback = bool(
             canonical_data.get("wilayah_diminta_tidak_tersedia")
         ) or any(

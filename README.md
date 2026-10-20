@@ -49,7 +49,7 @@ and metadata. Laravel loads it through `config/bps_indicators.php`; the Python
 service reads the JSON directly. Keep changes in the JSON source, not in
 language-specific copies.
 
-Use Laravel's stored WebAPI BPS credential to run the live golden checks and
+Set `BPS_API_KEY` in the server environment to run the live golden checks and
 coverage check:
 
 ```powershell
@@ -67,28 +67,47 @@ after checking the published API value when BPS releases a newer period.
 The canonical unemployment variable (var_id 334) remains province-only; when a
 regional value is requested, the chatbot can use a matching SIMDASI table instead.
 
-## Dynamic BPS catalog
+## CSV-backed BPS catalog
 
-The Python chatbot also searches `katalog_variabel_1600.csv` and
-`katalog_subjek_1600.csv` in the project root. Keep both files alongside
-`bps_tools.py` when deploying the service. Their indicator names, IDs, subjects,
-units, and year coverage expand variable and subject searches; the year coverage
-is catalog metadata, not an observation. Numeric answers must still be fetched
-and verified through WebAPI BPS. Regenerate the CSV files from the BPS API with
-`python dump_bps_catalog.py --tahun`.
+The Python chatbot reads `tabel_bps_sumsel.csv` from the project root (or from
+`BPS_CATALOG_CSV`). The file must contain `kategori_subjek`, `subjek`,
+`id_subjek`, `judul`, `id_tabel`, `jenis_tabel`, `tahun`, and `link_json`.
+Rows with an empty link or `TAHUN_TIDAK_TERSEDIA` are ignored. The catalog is
+reloaded when its file signature changes, so a refreshed weekly CSV can be used
+without restarting the service.
 
-SIMDASI is a separate WebAPI source from the model-variable CSV catalogs. The
-Python chatbot loads the Sumatera Selatan table-title catalog from the SIMDASI
-area endpoint, caches it in memory for 24 hours, and fetches a selected table by
-its table ID, year, and area. `simdasi_daftar_tabel` can list or search titles;
-`simdasi_cari_data` retrieves matching values, including regional rows such as
-kabupaten/kota data. This covers tables returned by that Sumatera Selatan
-SIMDASI endpoint and does not claim to index every BPS source or other provinces.
-All successful WebAPI GET responses are also cached on demand by endpoint and
-parameters: observations and releases for 30 minutes, period lists for one hour,
-and variable/table catalogs for 24 hours. Credentials are hashed into cache keys,
-not stored as part of them. This cache is process-local memory; it is cleared when
-the Python service restarts and is not shared between multiple workers.
+Numerical data requests use the selected row's `link_json`; the API key is
+appended from `BPS_API_KEY` at request time and is never included in logs or
+answers. Dynamic rows are selected by table ID and year, static tables use the
+single catalog row, and SIMDASI rows are selected by table ID and year. Python
+and Laravel share persistent storage in the active Laravel database connection
+(MySQL in this deployment). Python reads the `DB_*` settings from the same
+environment as Laravel. The Laravel fallback uses the same CSV for numerical tables and reads the credential from
+`BPS_API_KEY`, not from application-database settings. The CSV is the only
+runtime catalog for numerical statistical tables. BRS
+releases, publications, and statistical news are editorial records and are
+queried separately from the BPS `pressrelease`, `publication`, and `news`
+list/detail models when those intents are detected. These requests also use
+`BPS_API_KEY`, include requested keyword/year/month/page filters, retrieve
+detail abstracts for up to three results. Filtered lists are cached for one
+hour and details for up to 24 hours, while unfiltered/latest lists are fetched
+from WebAPI on each request. Answers
+use only API-returned abstract/article text and include the release date and
+source/PDF link when available; they do not claim to summarize unread PDFs.
+
+The shared MySQL database stores raw table responses in `data_tabel`, dynamic-table
+metadata in `tabel_meta`, and parsed values in `nilai_data`. Dynamic values are
+decoded by matching every dimension-ID combination against `datacontent`
+keys, then filtered with SQL before being sent to the language model. Static
+tables and SIMDASI records remain raw JSON. Dynamic tables refresh every
+seven days for the current or previous year and every 90 days for older years;
+static tables refresh every 30 days. If refresh fails, an existing older table
+response may be returned with an explicit staleness note. Editorial response
+metadata is stored separately in MySQL. Run the Laravel migration after
+deploying to create the BPS storage tables.
+
+The CSV-generation utility is separate from chatbot runtime lookup and may be
+used by the catalog-maintenance workflow to refresh the CSV.
 
 Unresolved data requests are emitted by the Python service as structured
 `BPS_QUERY_UNRESOLVED` warning log events. The logged question is length-limited

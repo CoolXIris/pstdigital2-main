@@ -88,6 +88,7 @@
 @endsection
 
 @section('scripts')
+<script src="{{ asset('zanex/js/marked.min.js') }}"></script>
 <script src="{{ asset('chat-markdown.js') }}"></script>
 <script>
     (() => {

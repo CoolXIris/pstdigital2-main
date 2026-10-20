@@ -2,10 +2,8 @@
 
 namespace App\Services;
 
-use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -17,11 +15,11 @@ class BpsWebApiService
 
     private const VARIABLE_INDEX_CACHE_PREFIX = 'bps-webapi:variables:index:';
 
-    private const SETTING_KEY = 'bps_webapi_key';
-
     public function hasApiKey(): bool
     {
-        return DB::table('chatbot_settings')->where('key', self::SETTING_KEY)->exists();
+        $configuredKey = config('services.bps.api_key');
+
+        return is_string($configuredKey) && trim($configuredKey) !== '';
     }
 
     public function checkCanonicalCoverage(array $indicatorNames = []): array
@@ -193,68 +191,19 @@ class BpsWebApiService
         return $results;
     }
 
-    public function saveApiKey(string $apiKey): void
-    {
-        DB::table('chatbot_settings')->updateOrInsert(
-            ['key' => self::SETTING_KEY],
-            ['value' => Crypt::encryptString(trim($apiKey)), 'updated_at' => now(), 'created_at' => now()]
-        );
-    }
-
-    public function clearApiKey(): void
-    {
-        DB::table('chatbot_settings')->where('key', self::SETTING_KEY)->delete();
-    }
-
     public function refreshVariableIndex(): array
     {
-        $apiKey = $this->apiKey();
-        if ($apiKey === null) {
-            throw new RuntimeException('API key WebAPI BPS belum dikonfigurasi.');
-        }
-
-        $subjects = $this->listModelItems('subject', '1600', $apiKey);
-        if ($subjects === []) {
-            throw new RuntimeException('WebAPI BPS tidak mengembalikan daftar subjek untuk domain 1600.');
-        }
-
-        $variables = [];
-        foreach ($subjects as $subject) {
-            if (! is_array($subject)) {
-                continue;
-            }
-            $subjectId = $subject['sub_id'] ?? $subject['subject_id'] ?? null;
-            if (! is_scalar($subjectId)) {
-                continue;
-            }
-
-            $subjectName = $subject['sub_name'] ?? $subject['subject'] ?? $subject['name'] ?? '';
-            foreach ($this->listModelItems('var', '1600', $apiKey, (string) $subjectId) as $variable) {
-                if (! is_array($variable)) {
-                    continue;
-                }
-                $variableId = $variable['var_id'] ?? null;
-                $title = $variable['title'] ?? $variable['var_name'] ?? null;
-                if (! is_scalar($variableId) || ! is_string($title) || trim($title) === '') {
-                    continue;
-                }
-
-                $vertical = $variable['vertical'] ?? null;
-                $unit = $variable['unit'] ?? $variable['unit_name'] ?? $variable['satuan'] ?? null;
-                $variables[] = [
-                    'var_id' => (string) $variableId,
-                    'title' => trim($title),
-                    'subject_id' => (string) $subjectId,
-                    'subject' => is_scalar($subjectName) ? trim((string) $subjectName) : '',
-                    'unit' => is_scalar($unit) ? trim((string) $unit) : null,
-                    'vertical' => is_scalar($vertical) ? trim((string) $vertical) : null,
-                    'level' => $this->explicitVariableLevel($title),
-                ];
-            }
-        }
+        $catalog = $this->localCatalogIndex();
+        $variables = array_map(
+            fn (array $variable) => $variable + [
+                'vertical' => null,
+                'level' => $this->explicitVariableLevel((string) $variable['title']),
+            ],
+            $catalog['variables']
+        );
 
         if ($variables === []) {
-            throw new RuntimeException('WebAPI BPS tidak mengembalikan variabel untuk subjek domain 1600.');
+            throw new RuntimeException('Katalog CSV BPS tidak memuat tabel dinamis.');
         }
 
         $verticalEvidence = [];
@@ -419,6 +368,10 @@ class BpsWebApiService
                 }
             }
 
+            if ($dynamicContext !== null) {
+                return $dynamicContext;
+            }
+
             if ($this->isDataQuestion($question) && $this->isCurrentPeriodRequest($question)) {
                 return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk periode terbaru/tahun berjalan belum ditemukan. Jangan gunakan periode lama atau variabel yang kurang relevan sebagai pengganti.';
             }
@@ -480,7 +433,7 @@ class BpsWebApiService
 
         $apiKey = $this->apiKey();
         if ($apiKey === null) {
-            return 'Maaf, '.$catalog['label'].' belum dapat ditampilkan karena API key WebAPI BPS belum dikonfigurasi.';
+            return 'Maaf, API key WebAPI BPS belum dikonfigurasi sehingga arsip belum dapat dimuat.';
         }
 
         try {
@@ -494,12 +447,18 @@ class BpsWebApiService
         }
 
         if ($result['items'] === []) {
-            return 'WebAPI BPS tidak mengembalikan entri untuk '.$catalog['label'].'.';
+            if (in_array($catalog['model'], ['pressrelease', 'publication', 'news'], true)) {
+                return 'WebAPI BPS tidak menemukan hasil untuk '.$catalog['label'].' yang diminta.';
+            }
+
+            return 'Katalog CSV BPS tidak menemukan entri untuk '.$catalog['label'].'.';
         }
 
         $label = ucfirst($catalog['label']);
         $shown = count($result['items']);
-        $answer = "Berikut {$label} BPS Sumatera Selatan yang tercatat di WebAPI BPS (menampilkan {$shown} dari {$result['total']} entri):";
+        $isEditorial = in_array($catalog['model'], ['pressrelease', 'publication', 'news'], true);
+        $sourceLabel = $isEditorial ? 'WebAPI BPS' : 'katalog CSV';
+        $answer = "Berikut {$label} BPS Sumatera Selatan dari {$sourceLabel} (menampilkan {$shown} dari {$result['total']} entri):";
         foreach ($result['items'] as $index => $item) {
             $title = $item['judul'] ?? 'Judul tidak tersedia pada respons API';
             $details = [];
@@ -508,6 +467,7 @@ class BpsWebApiService
                 'subjek' => 'subjek',
                 'jumlah_tabel' => 'jumlah tabel',
                 'tautan' => 'tautan',
+                'ringkasan' => 'abstrak/isi API',
             ] as $key => $detailLabel) {
                 if (isset($item[$key])) {
                     $details[] = $detailLabel.': '.$item[$key];
@@ -515,9 +475,15 @@ class BpsWebApiService
             }
 
             $answer .= "\n".($index + 1).'. '.$title.($details === [] ? '' : ' ('.implode('; ', $details).')');
+            if ($isEditorial && ! isset($item['tautan'])) {
+                $answer .= ' (tautan sumber/PDF tidak tersedia pada respons API)';
+            }
+            if ($isEditorial && ! isset($item['ringkasan'])) {
+                $answer .= ' (abstrak/isi tidak tersedia pada respons API)';
+            }
         }
         if ($shown < $result['total']) {
-            $answer .= "\nDaftar di atas merupakan entri terbaru yang ditampilkan API, bukan seluruh katalog.";
+            $answer .= "\nDaftar di atas hanya menampilkan sebagian entri katalog.";
         }
 
         return $answer;
@@ -530,6 +496,12 @@ class BpsWebApiService
         $closing = $config['closing'];
 
         $apiKey = $this->apiKey();
+        $catalog = $this->catalogIntent($question);
+        if ($catalog !== null
+            && in_array($catalog['model'], ['pressrelease', 'publication', 'news'], true)) {
+            return $this->catalogAnswerFor($question)
+                ?? $notice."\n\nArsip editorial belum dapat dimuat dari WebAPI BPS.\n\n".$closing;
+        }
         if ($apiKey !== null && $this->isStaticWageQuestion($question)) {
             $tableContext = $this->staticTableContext($this->keywords($question), '1600', $apiKey);
             if ($tableContext !== null) {
@@ -600,9 +572,7 @@ class BpsWebApiService
                 return $notice."\n\n".$details."\n\nDitampilkan pada ".now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.'."\n\n".$closing;
             }
 
-            if ($region === null) {
-                return $notice."\n\nData WebAPI BPS yang cocok untuk {$label} belum ditemukan atau belum dapat diverifikasi.\n\n".$closing;
-            }
+            return $notice."\n\nData statistik yang diminta belum ditemukan atau belum tersedia dalam katalog CSV BPS untuk {$label}.\n\n".$closing;
         }
 
         if ($apiKey === null) {
@@ -628,7 +598,7 @@ class BpsWebApiService
 
     private function catalogVariableFallback(string $question, array $region, string $apiKey): ?string
     {
-        $terms = array_values(array_diff($this->keywords($question), self::GENERIC_TERMS));
+        $terms = $this->requiredVariableTerms($question);
         if ($terms === []) {
             return null;
         }
@@ -664,7 +634,8 @@ class BpsWebApiService
             foreach ($terms as $term) {
                 $termScore = $this->titleTermScore($searchText, $term);
                 if ($termScore <= 0) {
-                    continue;
+                    $score = 0;
+                    break;
                 }
                 $isExact = $this->titleHasExactTerm($searchText, $term);
                 $hasExactMatch = $hasExactMatch || $isExact;
@@ -1347,18 +1318,24 @@ class BpsWebApiService
 
     private function catalogIntent(string $question): ?array
     {
-        if (preg_match('/\b(berita\s+(?:resmi\s+)?statistik|brs|rilis\s+resmi)\b/i', $question)) {
+        if (preg_match('/\b(berita\s+resmi\s+statistik|brs|rilis(?:an)?|siaran\s+pers)\b/i', $question)) {
             return [
                 'model' => 'pressrelease',
                 'label' => 'Berita Resmi Statistik terbaru',
-                'limit' => 5,
+                'limit' => 3,
                 'pages' => 1,
                 'dated' => true,
                 'latest' => preg_match('/\b(terbaru|terkini|terakhir)\b/i', $question) === 1,
             ];
         }
-        if (preg_match('/\b(publikasi|terbitan|buku\s+statistik)\b/i', $question)) {
-            return ['model' => 'publication', 'label' => 'publikasi terbaru', 'limit' => 5, 'pages' => 1, 'dated' => true];
+        if (preg_match('/\b(publikasi|terbitan|buku\s+statistik|laporan|dalam\s+angka)\b/i', $question)) {
+            return ['model' => 'publication', 'label' => 'publikasi terbaru', 'limit' => 3, 'pages' => 1, 'dated' => true];
+        }
+        $explicitNews = preg_match('/\b(berita|kegiatan)\b/i', $question) === 1;
+        $explicitValue = preg_match('/\b(berapa|jumlah|nilai|angka|data|persen\w*|persentase|tingkat|laju)\b/i', $question) === 1;
+        if (preg_match('/\b(berita|kegiatan|sensus|survei|survey)\b/i', $question)
+            && ! ($explicitValue && ! $explicitNews && $this->isDataQuestion($question))) {
+            return ['model' => 'news', 'label' => 'berita statistik terbaru', 'limit' => 3, 'pages' => 1, 'dated' => true];
         }
         if (preg_match('/\b(tabel\s+statis|tabel\s+statistik\s+statis|daftar\s+tabel)\b/i', $question)) {
             return ['model' => 'statictable', 'label' => 'daftar tabel statis', 'limit' => 100, 'pages' => 10, 'dated' => false];
@@ -1373,17 +1350,19 @@ class BpsWebApiService
     private function catalogContext(array $catalog, string $domain, string $apiKey): string
     {
         $result = $this->fetchCatalogForQuestion($catalog, '', $domain, $apiKey);
+        $isEditorial = in_array($catalog['model'], ['pressrelease', 'publication', 'news'], true);
+        $source = $isEditorial ? 'WebAPI BPS' : 'katalog CSV BPS';
         if (isset($result['error'])) {
-            return '[WebAPI BPS] Data '.$catalog['label'].' tidak berhasil diperoleh dari API. Beri tahu pengguna bahwa data belum dapat diverifikasi dan jangan mengarang daftar atau jumlah.';
+            return '['.$source.'] Data '.$catalog['label'].' belum dapat dibaca. Beri tahu pengguna bahwa data belum dapat diverifikasi dan jangan mengarang daftar atau jumlah.';
         }
 
-        $prefix = '[Sumber: WebAPI BPS Sumatera Selatan; katalog '.$catalog['label'].'; total menurut API: '.$result['total'];
+        $prefix = '[Sumber: '.$source.'; '.$catalog['label'].'; jumlah hasil: '.$result['total'];
         if (count($result['items']) < $result['total']) {
             $prefix .= '; ditampilkan: '.count($result['items']);
         }
         $prefix .= ']';
         if ($result['items'] === []) {
-            return $prefix.' Tidak ada entri yang dikembalikan API. Jangan menyimpulkan jumlah atau membuat daftar sendiri.';
+            return $prefix.' Tidak ada entri yang cocok. Jangan menyimpulkan jumlah atau membuat daftar sendiri.';
         }
 
         $lines = [$prefix];
@@ -1397,33 +1376,19 @@ class BpsWebApiService
     private function fetchCatalogForQuestion(array $catalog, string $question, string $domain, string $apiKey): array
     {
         $filters = $this->catalogFilters($catalog, $question);
-        if ($catalog['model'] !== 'pressrelease' || ! ($catalog['latest'] ?? false) || isset($filters['year']) || isset($filters['month'])) {
-            return $this->fetchCatalog($catalog, $domain, $apiKey, $filters);
-        }
-
-        $date = now('Asia/Jakarta');
-        for ($monthsBack = 0; $monthsBack <= 2; $monthsBack++) {
-            $monthDate = $date->copy()->subMonthsNoOverflow($monthsBack);
-            $monthFilters = $filters;
-            $monthFilters['year'] = $monthDate->year;
-            $monthFilters['month'] = $monthDate->month;
-            $result = $this->fetchCatalog($catalog, $domain, $apiKey, $monthFilters);
-            if (isset($result['error']) || $result['items'] !== []) {
-                return $result;
-            }
-        }
-
-        return $result;
+        return $this->fetchCatalog($catalog, $domain, $apiKey, $filters);
     }
 
     private function catalogFilters(array $catalog, string $question): array
     {
         $filters = [];
-        if (preg_match('/\byear\/(20\d{2})\b/i', $question, $match) || preg_match('/\btahun\s+(20\d{2})\b/i', $question, $match)) {
+        if (preg_match('/\byear(?:\/|\s+)(20\d{2})\b/i', $question, $match)
+            || preg_match('/\btahun\s+(20\d{2})\b/i', $question, $match)
+            || preg_match('/\b(20\d{2})\b/i', $question, $match)) {
             $filters['year'] = (int) $match[1];
         }
 
-        if (preg_match('/\bmonth\/(1[0-2]|[1-9])\b/i', $question, $match)) {
+        if (preg_match('/\bmonth(?:\/|\s+)(1[0-2]|[1-9])\b/i', $question, $match)) {
             $filters['month'] = (int) $match[1];
         } elseif (preg_match('/\bbulan\s+(1[0-2]|[1-9])\b/i', $question, $match)) {
             $filters['month'] = (int) $match[1];
@@ -1441,78 +1406,275 @@ class BpsWebApiService
             }
         }
 
-        if (preg_match('/\bpage\/([1-9]\d*)\b/i', $question, $match) || preg_match('/\bhalaman\s+([1-9]\d*)\b/i', $question, $match)) {
+        if (preg_match('/\bpage(?:\/|\s+)([1-9]\d*)\b/i', $question, $match)
+            || preg_match('/\b(?:halaman|hal)\s+([1-9]\d*)\b/i', $question, $match)) {
             $filters['page'] = (int) $match[1];
         }
 
         if (preg_match('/\bkeyword\/([\pL\pN_-]+(?:%20[\pL\pN_-]+)*)/iu', $question, $match)) {
             $filters['keyword'] = str_replace('%20', ' ', $match[1]);
         } else {
-            $keywordQuestion = preg_replace('/\b(berita|resmi|statistik|brs|rilis|publikasi|terbitan|buku|tabel|statis|daftar|subjek|subject|topik|data|terbaru|terkini|terakhir|tahun|bulan|halaman|year|month|page|keyword|bps|sumsel|sumatera|selatan|apa|saja|dari|untuk|pada|yang|dan|tentang|mengenai|ini|januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/iu', ' ', $question) ?? '';
+            $keywordQuestion = preg_replace('/\b(berita|resmi|statistik|brs|rilis|publikasi|terbitan|buku|laporan|dalam|angka|tabel|statis|daftar|subjek|subject|topik|data|terbaru|terkini|terakhir|tahun|bulan|halaman|hal|year|month|page|keyword|bps|sumsel|sumatera|selatan|apa|saja|dari|untuk|pada|yang|dan|tentang|mengenai|ini|januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/iu', ' ', $question) ?? '';
             $keywordQuestion = preg_replace('/\b(20\d{2}|1[0-2]|[1-9])\b/u', ' ', $keywordQuestion) ?? '';
             $keywordQuestion = trim(preg_replace('/\s+/u', ' ', $keywordQuestion) ?? '');
             if (mb_strlen($keywordQuestion) >= 3) {
                 $filters['keyword'] = $keywordQuestion;
             }
         }
-        if (isset($filters['month']) && ! isset($filters['year'])) {
-            $filters['year'] = now('Asia/Jakarta')->year;
-        }
-
         return $filters;
     }
 
     private function fetchCatalog(array $catalog, string $domain, string $apiKey, array $filters = []): array
     {
-        $results = [];
-        $metadata = [];
-        $firstPage = (int) ($filters['page'] ?? 1);
-        $pagesToFetch = isset($filters['page']) ? $firstPage : (int) $catalog['pages'];
-
-        for ($page = $firstPage; $page <= $pagesToFetch && count($results) < (int) $catalog['limit']; $page++) {
-            $url = "https://webapi.bps.go.id/v1/api/list/model/{$catalog['model']}/domain/{$domain}/";
-            foreach (['year', 'month'] as $filter) {
-                if (isset($filters[$filter])) {
-                    $url .= $filter.'/'.rawurlencode((string) $filters[$filter]).'/';
-                }
-            }
-            if ($catalog['model'] !== 'pressrelease' || isset($filters['page']) || $page > 1) {
-                $url .= 'page/'.$page.'/';
-            }
-            if (isset($filters['keyword'])) {
-                $url .= 'keyword/'.str_replace('%20', '+', rawurlencode($filters['keyword'])).'/';
-            }
-            $url .= "key/{$apiKey}/";
-            $response = Http::timeout(8)->get($url);
-            $status = $response->json('status');
-            $pageMetadata = $response->json('data.0');
-            $pageResults = $response->json('data.1');
-
-            if (! $response->successful() || $status !== 'OK' || ! is_array($pageResults)) {
-                return ['error' => true];
-            }
-
-            if (is_array($pageMetadata)) {
-                $metadata = $pageMetadata;
-            }
-            $results = array_merge($results, $pageResults);
-            $pagesToFetch = min($pagesToFetch, max(1, (int) ($pageMetadata['pages'] ?? 1)));
+        if (in_array($catalog['model'], ['pressrelease', 'publication', 'news'], true)) {
+            return $this->fetchEditorialCatalog($catalog, $domain, $apiKey, $filters);
         }
 
-        $total = is_numeric($metadata['total'] ?? null) ? (int) $metadata['total'] : count($results);
-        $visibleResults = array_slice($results, 0, (int) $catalog['limit']);
-        $items = [];
-        foreach ($visibleResults as $item) {
-            if (! is_array($item)) {
-                continue;
+        unset($apiKey);
+        $rows = match ($catalog['model']) {
+            'statictable' => array_values(array_filter(
+                $this->csvCatalogRows(),
+                fn (array $row) => ($row['jenis_tabel'] ?? '') === 'Tabel Statis'
+                    && str_contains((string) ($row['link_json'] ?? ''), '/domain/'.$domain.'/')
+            )),
+            'subject' => $this->catalogSubjects($domain),
+            default => [],
+        };
+
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $rows = array_values(array_filter(
+                $rows,
+                fn (array $row) => $this->titleTermScore(
+                    implode(' ', [
+                        $row['judul'] ?? '',
+                        $row['subjek'] ?? '',
+                        $row['kategori_subjek'] ?? '',
+                    ]),
+                    $keyword
+                ) > 0
+            ));
+        }
+
+        $total = count($rows);
+        $limit = max(1, (int) $catalog['limit']);
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $items = array_map(
+            fn (array $row) => $this->formatCatalogItem([
+                'title' => $row['judul'] ?? $row['subjek'] ?? '',
+                'subject' => $row['subjek'] ?? '',
+                'subcat' => $row['kategori_subjek'] ?? '',
+                'table_id' => $row['id_tabel'] ?? '',
+            ], (bool) $catalog['dated']),
+            array_slice($rows, ($page - 1) * $limit, $limit)
+        );
+
+        return ['total' => $total, 'items' => array_values(array_filter($items))];
+    }
+
+    private function fetchEditorialCatalog(array $catalog, string $domain, string $apiKey, array $filters): array
+    {
+        $model = (string) $catalog['model'];
+        $page = max(1, min(1000, (int) ($filters['page'] ?? 1)));
+        $limit = max(1, min(3, (int) ($catalog['limit'] ?? 3)));
+        $segments = ['list', 'model', $model, 'lang', 'ind', 'domain', $domain];
+        foreach (['year', 'month'] as $filter) {
+            if (isset($filters[$filter])) {
+                $segments[] = $filter;
+                $segments[] = (string) (int) $filters[$filter];
             }
-            $formatted = $this->formatCatalogItem($item, (bool) $catalog['dated']);
+        }
+        $segments[] = 'page';
+        $segments[] = (string) $page;
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $segments[] = 'keyword';
+            $segments[] = str_replace('%20', '+', rawurlencode($keyword));
+        }
+        $segments[] = 'key';
+        $segments[] = rawurlencode($apiKey);
+        $listUrl = 'https://webapi.bps.go.id/v1/api/'.implode('/', $segments).'/';
+        try {
+            $payload = $this->fetchEditorialPayload($listUrl);
+        } catch (RuntimeException $exception) {
+            return ['error' => $exception->getMessage(), 'total' => 0, 'items' => []];
+        }
+        $data = $payload['data'] ?? [];
+        if (! is_array($data)) {
+            return ['error' => 'Format arsip WebAPI BPS tidak dikenali.', 'total' => 0, 'items' => []];
+        }
+        $rawItems = is_array($data[1] ?? null)
+            ? $data[1]
+            : array_values(array_filter(
+                $data,
+                fn ($item) => is_array($item) && (
+                    isset($item['title']) || isset($item['judul'])
+                    || isset($item['br_id']) || isset($item['pub_id'])
+                    || isset($item['news_id'])
+                )
+            ));
+        $hasMetadata = is_array($data[0] ?? null)
+            && (isset($data[0]['pages']) || isset($data[0]['total']));
+        if ($data !== [] && $rawItems === [] && ! $hasMetadata) {
+            return ['error' => 'Format arsip WebAPI BPS tidak dikenali.', 'total' => 0, 'items' => []];
+        }
+        $rawItems = array_values(array_filter($rawItems, 'is_array'));
+        usort($rawItems, function (array $left, array $right): int {
+            $leftDate = $left['rl_date'] ?? $left['release_date'] ?? $left['pub_date'] ?? $left['date'] ?? '';
+            $rightDate = $right['rl_date'] ?? $right['release_date'] ?? $right['pub_date'] ?? $right['date'] ?? '';
+
+            return (strtotime((string) $rightDate) ?: 0) <=> (strtotime((string) $leftDate) ?: 0);
+        });
+        $meta = is_array($data[0] ?? null) ? $data[0] : [];
+        $total = max(0, (int) ($meta['total'] ?? count($rawItems)));
+        $items = [];
+        foreach (array_slice($rawItems, 0, $limit) as $row) {
+            $id = $row['br_id'] ?? $row['pub_id'] ?? $row['news_id'] ?? $row['id'] ?? null;
+            $detail = [];
+            if (is_scalar($id) && trim((string) $id) !== '') {
+                $detailUrl = 'https://webapi.bps.go.id/v1/api/view/model/'.$model
+                    .'/lang/ind/id/'.rawurlencode((string) $id).'/key/'.rawurlencode($apiKey).'/';
+                try {
+                    $detailPayload = $this->fetchEditorialPayload($detailUrl);
+                    $detailData = $detailPayload['data'] ?? [];
+                    if (is_array($detailData[1] ?? null)) {
+                        $detail = $detailData[1][0] ?? [];
+                    } elseif (is_array($detailData)) {
+                        foreach ($detailData as $candidate) {
+                            if (is_array($candidate) && (
+                                isset($candidate['abstract']) || isset($candidate['title'])
+                                || isset($candidate['br_id']) || isset($candidate['pub_id'])
+                                || isset($candidate['news_id'])
+                            )) {
+                                $detail = $candidate;
+                                break;
+                            }
+                        }
+                    }
+                } catch (ConnectionException|RuntimeException) {
+                    $row['abstrak_tidak_tersedia'] = true;
+                }
+            } else {
+                $row['abstrak_tidak_tersedia'] = true;
+            }
+
+            $formatted = $this->formatCatalogItem(array_merge($row, $detail), true);
+            if ($id !== null) {
+                $formatted['id'] = (string) $id;
+            }
+            if (($row['abstrak_tidak_tersedia'] ?? false) === true) {
+                $formatted['abstrak_tidak_tersedia'] = true;
+            } elseif (! isset($formatted['ringkasan'])) {
+                $formatted['abstrak_tidak_tersedia'] = true;
+            }
             if ($formatted !== []) {
                 $items[] = $formatted;
             }
         }
 
-        return ['total' => $total, 'items' => $items];
+        return [
+            'total' => $total,
+            'items' => $items,
+            ...(! empty($payload['_catatan']) ? ['catatan_data' => $payload['_catatan']] : []),
+        ];
+    }
+
+    private function fetchEditorialPayload(string $url): array
+    {
+        $ttl = $this->editorialFreshnessSeconds($url);
+        $database = $this->bpsDatabase();
+        $cacheIdentity = preg_replace('~/key/[^/]+/?$~', '/key/', $url) ?? $url;
+        $cacheKey = hash('sha256', $cacheIdentity);
+        $cachedPayload = null;
+        if ($ttl > 0) {
+            $cached = $database->table('editorial_cache')
+                ->where('cache_key', $cacheKey)
+                ->first();
+            if ($cached !== null) {
+                $decoded = json_decode((string) $cached->isi_json, true);
+                if (is_array($decoded)) {
+                    $cachedPayload = $decoded;
+                    if (time() - (float) $cached->diambil_pada < $ttl) {
+                        return $cachedPayload;
+                    }
+                }
+            }
+        }
+
+        try {
+            try {
+                $response = Http::timeout(8)->get($url);
+            } catch (ConnectionException) {
+                throw new RuntimeException('WebAPI BPS tidak dapat diakses untuk memuat arsip saat ini.');
+            }
+            $payload = $response->json();
+            if (strtolower((string) $response->header('data-availability')) === 'list-not-available') {
+                $payload = ['status' => 'OK', 'data' => [['pages' => 1, 'total' => 0], []]];
+            } elseif ($response->status() === 401 || $response->status() === 403) {
+                throw new RuntimeException('API key BPS tidak diterima.');
+            } elseif (! $response->successful()
+                || ! is_array($payload)
+                || ($payload['status'] ?? null) !== 'OK'
+                || ! is_array($payload['data'] ?? null)) {
+                throw new RuntimeException('WebAPI BPS tidak dapat memuat arsip yang diminta.');
+            }
+        } catch (ConnectionException|RuntimeException $exception) {
+            if ($cachedPayload === null) {
+                throw $exception;
+            }
+            $cachedPayload['_catatan'] = (
+                'Arsip berasal dari penyimpanan sebelumnya karena WebAPI BPS belum dapat '
+                .'memperbaruinya.'
+            );
+
+            return $cachedPayload;
+        }
+
+        if ($ttl > 0) {
+            $database->table('editorial_cache')->upsert([[
+            'cache_key' => $cacheKey,
+            'isi_json' => json_encode(
+                $payload,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            ),
+            'diambil_pada' => time(),
+            ]], ['cache_key'], ['isi_json', 'diambil_pada']);
+        }
+
+        return $payload;
+    }
+
+    private function editorialFreshnessSeconds(string $url): int
+    {
+        $path = (string) (parse_url($url, PHP_URL_PATH) ?: '');
+        if (str_contains($path, '/view/model/')) {
+            return 24 * 3600;
+        }
+        if (! str_contains($path, '/list/model/')) {
+            return 0;
+        }
+        $pathBeforeKey = explode('/key/', $path, 2)[0];
+        if (preg_match('~/(keyword|year|month)/~', $pathBeforeKey) === 1) {
+            return 3600;
+        }
+
+        return 0;
+    }
+
+    private function catalogSubjects(string $domain): array
+    {
+        if ($domain !== '1600') {
+            return [];
+        }
+        $subjects = [];
+        foreach ($this->csvCatalogRows() as $row) {
+            $id = (string) ($row['id_subjek'] ?? '');
+            if ($id !== '') {
+                $subjects[$id] ??= $row;
+            }
+        }
+
+        return array_values($subjects);
     }
 
     private function formatCatalogItem(array $item, bool $dated): array
@@ -1523,14 +1685,14 @@ class BpsWebApiService
             'tanggal' => $dated ? ['rl_date', 'release_date', 'pub_date', 'date', 'updt_date'] : [],
             'subjek' => ['sub_name', 'subject', 'subcat'],
             'jumlah_tabel' => ['ntable', 'ntabel'],
-            'tautan' => ['url', 'link'],
-            'ringkasan' => ['abstract', 'description'],
+            'tautan' => ['pdf', 'pdf_url', 'url_pdf', 'url', 'link', 'permalink'],
+            'ringkasan' => ['abstract', 'abstrak', 'description', 'content', 'isi'],
         ] as $label => $fields) {
             foreach ($fields as $field) {
                 if (isset($item[$field]) && is_scalar($item[$field]) && trim((string) $item[$field]) !== '') {
                     $formatted[$label] = $label === 'jumlah_tabel' && is_numeric($item[$field])
                         ? (int) $item[$field]
-                        : Str::limit(trim((string) $item[$field]), $label === 'ringkasan' ? 500 : 300);
+                        : Str::limit(trim((string) $item[$field]), $label === 'ringkasan' ? 900 : 300);
                     break;
                 }
             }
@@ -1551,6 +1713,7 @@ class BpsWebApiService
         $synonyms = ['laju' => 'pertumbuhan', 'ekonomi' => 'pdrb', 'kemiskinan' => 'miskin'];
         $terms = array_values(array_unique(array_map(fn (string $term) => $synonyms[$term] ?? $term, $terms)));
         $terms = array_slice($terms, 0, 10);
+        $requiredTerms = $this->requiredVariableTerms($question);
         if ($terms === []) {
             return $this->isRegionalDataQuestion($question)
                 ? '[WebAPI BPS][DATA_BELUM_TERSEDIA][INDIKATOR_TIDAK_DITEMUKAN] Indikator yang diminta belum ditemukan di indeks WebAPI BPS.'
@@ -1569,6 +1732,16 @@ class BpsWebApiService
             if (! is_scalar($variableId) || ! is_string($title)) {
                 continue;
             }
+            $matchesAllTerms = true;
+            foreach ($requiredTerms as $term) {
+                if ($this->titleTermScore($this->variableSearchText($variable), $term) === 0.0) {
+                    $matchesAllTerms = false;
+                    break;
+                }
+            }
+            if (! $matchesAllTerms) {
+                continue;
+            }
             $key = (string) $variableId;
             if (isset($variablesById[$key])) {
                 $score = max((float) ($variablesById[$key]['_score'] ?? 0), (float) ($variable['_score'] ?? 0));
@@ -1585,7 +1758,7 @@ class BpsWebApiService
 
         $requestedYear = preg_match('/\b(20\d{2})\b/', $question, $yearMatch)
             ? $yearMatch[1]
-            : ($this->isCurrentPeriodRequest($question) ? (string) now('Asia/Jakarta')->year : null);
+            : null;
         $requestedQuarter = $this->requestedQuarter($question);
         $region = $this->regionMentioned($question);
         $compatibleVariables = [];
@@ -1611,7 +1784,6 @@ class BpsWebApiService
                 continue;
             }
             $periods = $this->periodsForVariable($variableId, $domain, $apiKey);
-            $periods = $this->periodsForVariable($variableId, $domain, $apiKey);
             $periods = array_values(array_filter(
                 $periods,
                 fn (array $period) => (int) ($period['th'] ?? 0) <= now('Asia/Jakarta')->year
@@ -1629,39 +1801,23 @@ class BpsWebApiService
         usort($candidates, fn (array $left, array $right) => ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0)
             ?: ($right['_latest_year'] ?? 0) <=> ($left['_latest_year'] ?? 0));
         $candidatesWithRequestedPeriod = array_values(array_filter($candidates, fn (array $candidate) => $candidate['_periods'] !== []));
-        $yearFallbackNotice = null;
-        if ($requestedYear !== null) {
-            if ($candidatesWithRequestedPeriod === []) {
-                $withLatestYear = array_values(array_filter($candidates, fn (array $candidate) => $candidate['_all_periods'] !== []));
-                if ($withLatestYear === []) {
-                    return '[WebAPI BPS][DATA_BELUM_TERSEDIA][TAHUN_TIDAK_TERSEDIA] Variabel ditemukan, tetapi WebAPI BPS belum menyediakan daftar tahun untuk indikator tersebut.';
+        if ($requestedYear !== null && $candidatesWithRequestedPeriod === []) {
+            $availableYears = [];
+            foreach ($candidates as $candidate) {
+                foreach ($candidate['_all_periods'] as $period) {
+                    $year = (string) ($period['th'] ?? '');
+                    if (ctype_digit($year)) {
+                        $availableYears[] = (int) $year;
+                    }
                 }
-                foreach ($withLatestYear as &$candidate) {
-                    $ceilingYear = (int) $requestedYear < now('Asia/Jakarta')->year
-                        ? (int) $requestedYear
-                        : now('Asia/Jakarta')->year;
-                    $eligiblePeriods = array_values(array_filter(
-                        $candidate['_all_periods'],
-                        fn (array $period) => (int) ($period['th'] ?? 0) <= $ceilingYear
-                    ));
-                    $candidate['_periods'] = array_slice($eligiblePeriods, 0, 1);
-                    $candidate['_selected_year'] = (int) ($candidate['_periods'][0]['th'] ?? 0);
-                    $candidate['_latest_year'] = $candidate['_selected_year'];
-                }
-                unset($candidate);
-                $withLatestYear = array_values(array_filter($withLatestYear, fn (array $candidate) => $candidate['_periods'] !== []));
-                if ($withLatestYear === []) {
-                    return '[WebAPI BPS][DATA_BELUM_TERSEDIA][TAHUN_TIDAK_TERSEDIA] Data untuk tahun '.$requestedYear.' belum tersedia dan tidak ada tahun sebelumnya yang dapat digunakan.';
-                }
-                usort($withLatestYear, fn (array $left, array $right) => ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0)
-                    ?: ($right['_latest_year'] ?? 0) <=> ($left['_latest_year'] ?? 0));
-                $candidatesWithRequestedPeriod = $withLatestYear;
-                $yearFallbackNotice = 'Data untuk tahun '.$requestedYear.' belum dirilis; berikut nilai dari tahun terakhir yang tersedia.';
             }
-            $candidates = $candidatesWithRequestedPeriod;
-        } else {
-            $candidates = $candidatesWithRequestedPeriod;
+            $availableYears = array_values(array_unique($availableYears));
+            rsort($availableYears);
+            $availableYearsText = $availableYears === [] ? 'belum tersedia' : implode(', ', $availableYears);
+
+            return '[WebAPI BPS][DATA_BELUM_TERSEDIA][TAHUN_TIDAK_TERSEDIA] Data untuk tahun '.$requestedYear.' tidak tersedia. Tahun yang tersedia pada katalog: '.$availableYearsText.'.';
         }
+        $candidates = $candidatesWithRequestedPeriod;
         if ($candidates === []) {
             if ($requestedYear === null && $region === null) {
                 return null;
@@ -1739,9 +1895,7 @@ class BpsWebApiService
 
             $context = $this->formatDynamicContext($variable, $response, (string) $period['th'], $quarter['turth'] ?? null, $regionRow, $values);
 
-            return $yearFallbackNotice === null
-                ? $context
-                : '[WebAPI BPS][TAHUN_FALLBACK] '.$yearFallbackNotice.' Tahun data: '.$period['th'].'. '.$context;
+            return $context;
         }
 
         if ($regionMissing && $region !== null) {
@@ -1809,7 +1963,16 @@ class BpsWebApiService
     ): string {
         $lines = [$notice, '', $intro];
         foreach ($items as $index => $item) {
-            $lines[] = ($index + 1).'. '.$item['judul'].(isset($item['tanggal']) ? ' (rilis: '.$item['tanggal'].')' : '');
+            $lines[] = ($index + 1).'. '.$item['judul']
+                .(isset($item['tanggal']) ? ' (rilis: '.$item['tanggal'].')' : '');
+            if (isset($item['ringkasan'])) {
+                $lines[] = '   Abstrak/isi yang dikembalikan API: '.$item['ringkasan'];
+            } elseif ($item['abstrak_tidak_tersedia'] ?? false) {
+                $lines[] = '   Abstrak/isi tidak tersedia pada respons detail API.';
+            }
+            $lines[] = isset($item['tautan'])
+                ? '   Sumber/PDF: '.$item['tautan']
+                : '   Tautan sumber/PDF tidak tersedia pada respons API.';
         }
         if ($regionLabel !== null) {
             $lines[] = '';
@@ -2316,6 +2479,7 @@ class BpsWebApiService
         if ($mainKeyword === null) {
             return [];
         }
+        $requiredTerms = $this->requiredVariableTerms($question);
 
         $variables = [];
         $hasApiMatch = false;
@@ -2343,6 +2507,16 @@ class BpsWebApiService
             }
 
             $normalizedTitle = Str::lower($title);
+            $matchesAllTerms = true;
+            foreach ($requiredTerms as $term) {
+                if ($this->titleTermScore($this->variableSearchText($variable), $term) === 0.0) {
+                    $matchesAllTerms = false;
+                    break;
+                }
+            }
+            if (! $matchesAllTerms) {
+                continue;
+            }
             if ($this->titleTermScore($normalizedTitle, $mainKeyword) === 0.0) {
                 continue;
             }
@@ -2438,6 +2612,10 @@ class BpsWebApiService
 
     private function curatedVariables(array $terms): array
     {
+        $catalogVariables = [];
+        foreach ($this->localCatalogIndex()['variables'] as $catalogVariable) {
+            $catalogVariables[(string) $catalogVariable['var_id']] = $catalogVariable;
+        }
         $variables = [];
         foreach (config('bps_indicators.groups', []) as $group) {
             $matchedGroupTerms = array_values(array_intersect($terms, $group['terms'] ?? []));
@@ -2449,9 +2627,17 @@ class BpsWebApiService
             }
 
             foreach ($group['variables'] ?? [] as $variable) {
+                $catalogVariable = $catalogVariables[(string) ($variable['var_id'] ?? '')] ?? null;
+                if (! is_array($catalogVariable)) {
+                    continue;
+                }
                 if (array_intersect($terms, $variable['excludes'] ?? []) !== []) {
                     continue;
                 }
+                $variable['title'] = $catalogVariable['title'];
+                $variable['subject'] = $catalogVariable['subject'];
+                $variable['category'] = $catalogVariable['category'];
+                $variable['aliases'] = $catalogVariable['aliases'];
                 $score = 0;
                 foreach ($terms as $term) {
                     if (in_array($term, $variable['terms'] ?? [], true)) {
@@ -2483,144 +2669,94 @@ class BpsWebApiService
         return null;
     }
 
-    private function listModelItems(string $model, string $domain, string $apiKey, ?string $subjectId = null): array
-    {
-        $items = [];
-        $pages = 1;
-        for ($page = 1; $page <= $pages; $page++) {
-            $url = "https://webapi.bps.go.id/v1/api/list/model/{$model}/domain/{$domain}/";
-            if ($subjectId !== null) {
-                $url .= 'subject/'.rawurlencode($subjectId).'/';
-            }
-            $url .= "page/{$page}/key/{$apiKey}/";
-            $response = Http::timeout(8)->get($url);
-            if (! $response->successful() || $response->json('status') !== 'OK') {
-                throw new RuntimeException("WebAPI BPS gagal mengambil model {$model} pada domain {$domain} (HTTP {$response->status()}).");
-            }
-
-            $pageItems = $response->json('data.1');
-            if (! is_array($pageItems)) {
-                throw new RuntimeException("WebAPI BPS mengembalikan daftar model {$model} yang tidak valid pada domain {$domain}.");
-            }
-            $items = array_merge($items, $pageItems);
-            $pages = max(1, (int) $response->json('data.0.pages', 1));
-            if ($pages > 200) {
-                throw new RuntimeException("WebAPI BPS melaporkan jumlah halaman model {$model} yang tidak wajar.");
-            }
-        }
-
-        return $items;
-    }
-
     private function variablesForKeyword(string $keyword, string $domain, string $apiKey): array
     {
-        $index = Cache::get(self::VARIABLE_INDEX_CACHE_PREFIX.$domain);
-        $indexedVariables = [];
-        foreach ($index['variables'] ?? [] as $variable) {
-            if (is_array($variable) && isset($variable['var_id'])) {
-                $indexedVariables[(string) $variable['var_id']] = $variable;
-            }
-        }
-        $localVariables = [];
-        foreach ($this->localCatalogIndex()['variables'] as $variable) {
-            $id = (string) $variable['var_id'];
-            $localVariables[$id] = array_merge($variable, $indexedVariables[$id] ?? []);
-        }
+        unset($apiKey);
+        $variables = $this->localCatalogIndex()['variables'];
 
-        $matching = function (array $variables) use ($keyword): array {
-            $matches = array_values(array_filter(
-                $variables,
-                fn (array $variable) => $this->titleTermScore(
-                    $this->variableSearchText($variable),
-                    $keyword
-                ) > 0
-            ));
-            usort($matches, fn (array $left, array $right) => $this->titleTermScore(
-                $this->variableSearchText($right),
+        $matches = array_values(array_filter(
+            $variables,
+            fn (array $variable) => $this->titleTermScore(
+                $this->variableSearchText($variable),
                 $keyword
-            ) <=> $this->titleTermScore($this->variableSearchText($left), $keyword));
+            ) > 0
+        ));
+        usort($matches, fn (array $left, array $right) => $this->titleTermScore(
+            $this->variableSearchText($right),
+            $keyword
+        ) <=> $this->titleTermScore($this->variableSearchText($left), $keyword));
 
-            return $matches;
-        };
-        $indexedMatches = $matching(array_values($indexedVariables));
-        if ($indexedMatches !== []) {
-            return $indexedMatches;
-        }
-
-        $localMatches = $matching(array_values($localVariables));
-        if ($indexedVariables !== []) {
-            return array_map(fn (array $variable) => $variable + ['_local_catalog_fallback' => true], $localMatches);
-        }
-
-        $apiMatches = Cache::remember('bps-webapi:variables:'.$domain.':'.sha1($keyword), now()->addHours(6), function () use ($keyword, $domain, $apiKey) {
-            $variables = [];
-            for ($page = 1; $page <= 8; $page++) {
-                $keywordPath = str_replace('%20', '+', rawurlencode($keyword));
-                $url = "https://webapi.bps.go.id/v1/api/list/model/var/domain/{$domain}/keyword/{$keywordPath}/page/{$page}/key/{$apiKey}/";
-                $response = Http::timeout(8)->get($url);
-                if (! $response->successful() || $response->json('status') !== 'OK') {
-                    break;
-                }
-
-                $variables = array_merge($variables, $response->json('data.1') ?? []);
-                if ($page >= (int) $response->json('data.0.pages', 1)) {
-                    break;
-                }
-            }
-
-            return $variables;
-        });
-
-        return $apiMatches !== []
-            ? $matching($apiMatches)
-            : array_map(fn (array $variable) => $variable + ['_local_catalog_fallback' => true], $localMatches);
+        return $matches;
     }
 
     private function localCatalogIndex(): array
     {
-        return Cache::remember('bps-webapi:variables:local-catalog:1600', now()->addHours(26), function (): array {
-            $subjects = $this->readCatalogCsv('katalog_subjek_1600.csv', [
-                'subcat_id', 'kategori', 'sub_id', 'subjek', 'jumlah_tabel',
-            ]);
-            $subjectsById = [];
-            foreach ($subjects as $subject) {
-                $subjectsById[(string) $subject['sub_id']] = $subject;
-            }
+        $path = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+        $signature = is_file($path)
+            ? (string) filemtime($path).':'.(string) filesize($path)
+            : 'missing';
 
-            $variables = [];
-            foreach ($this->readCatalogCsv('katalog_variabel_1600.csv', [
-                'kategori', 'sub_id', 'subjek', 'var_id', 'judul', 'satuan',
-                'tahun_terbaru', 'jumlah_tahun',
-            ]) as $row) {
-                $variableId = trim((string) $row['var_id']);
-                $title = trim((string) $row['judul']);
-                if (! ctype_digit($variableId) || $title === '') {
-                    continue;
+        return Cache::remember(
+            'bps-webapi:variables:local-catalog:'.sha1($path.':'.$signature),
+            now()->addHours(26),
+            function (): array {
+                $catalogRows = $this->csvCatalogRows();
+                $subjectsById = [];
+                $variablesById = [];
+                foreach ($catalogRows as $row) {
+                    $subjectId = (string) ($row['id_subjek'] ?? '');
+                    if ($subjectId !== '') {
+                        $subjectsById[$subjectId] ??= [
+                            'subcat_id' => '',
+                            'kategori' => $row['kategori_subjek'] ?? '',
+                            'sub_id' => $subjectId,
+                            'subjek' => $row['subjek'] ?? '',
+                            'jumlah_tabel' => null,
+                        ];
+                    }
+                    if (($row['jenis_tabel'] ?? '') !== 'Tabel Dinamis') {
+                        continue;
+                    }
+                    $variableId = trim((string) ($row['id_tabel'] ?? ''));
+                    $title = trim((string) ($row['judul'] ?? ''));
+                    if (! ctype_digit($variableId) || $title === '') {
+                        continue;
+                    }
+                    $variablesById[$variableId] ??= [
+                        'var_id' => $variableId,
+                        'title' => $title,
+                        'unit' => null,
+                        'subject_id' => $subjectId,
+                        'subject' => $row['subjek'] ?? '',
+                        'category' => $row['kategori_subjek'] ?? '',
+                        'category_id' => null,
+                        'latest_year' => null,
+                        'year_count' => 0,
+                        'years' => [],
+                        'aliases' => $this->variableAliases($title),
+                    ];
+                    $year = (string) ($row['tahun'] ?? '');
+                    if (ctype_digit($year)) {
+                        $variablesById[$variableId]['years'][] = (int) $year;
+                    }
                 }
-                $subject = $subjectsById[(string) $row['sub_id']] ?? [];
-                $latestYear = trim((string) $row['tahun_terbaru']);
-                $yearCount = trim((string) $row['jumlah_tahun']);
-                $variables[] = [
-                    'var_id' => $variableId,
-                    'title' => $title,
-                    'unit' => trim((string) $row['satuan']) ?: null,
-                    'subject_id' => trim((string) $row['sub_id']),
-                    'subject' => trim((string) $row['subjek']) ?: ($subject['subjek'] ?? ''),
-                    'category' => trim((string) $row['kategori']) ?: ($subject['kategori'] ?? ''),
-                    'category_id' => $subject['subcat_id'] ?? null,
-                    'latest_year' => ctype_digit($latestYear) ? (int) $latestYear : null,
-                    'year_count' => ctype_digit($yearCount) ? (int) $yearCount : null,
-                    'aliases' => $this->variableAliases($title),
-                ];
-            }
+                $variables = array_values($variablesById);
+                foreach ($variables as &$variable) {
+                    $variable['years'] = array_values(array_unique($variable['years']));
+                    rsort($variable['years']);
+                    $variable['latest_year'] = $variable['years'][0] ?? null;
+                    $variable['year_count'] = count($variable['years']);
+                }
+                unset($variable);
 
-            return ['subjects' => $subjects, 'variables' => $variables];
-        });
+                return ['subjects' => array_values($subjectsById), 'variables' => $variables];
+            }
+        );
     }
 
     private function readCatalogCsv(string $filename, array $requiredColumns): array
     {
-        $path = base_path($filename);
+        $path = is_file($filename) ? $filename : base_path($filename);
         if (! is_file($path)) {
             return [];
         }
@@ -2693,19 +2829,21 @@ class BpsWebApiService
 
     private function catalogVariableMatches(string $question): bool
     {
-        $terms = array_values(array_diff($this->keywords($question), self::GENERIC_TERMS));
+        $terms = $this->requiredVariableTerms($question);
         if ($terms === []) {
             return false;
         }
         foreach ($this->localCatalogIndex()['variables'] as $variable) {
-            $titleAndAliases = implode(' ', [
-                (string) ($variable['title'] ?? ''),
-                implode(' ', $variable['aliases'] ?? []),
-            ]);
+            $titleAndAliases = $this->variableSearchText($variable);
+            $matchesAllTerms = true;
             foreach ($terms as $term) {
-                if ($this->titleHasExactTerm($titleAndAliases, $term)) {
-                    return true;
+                if ($this->titleTermScore($titleAndAliases, $term) === 0.0) {
+                    $matchesAllTerms = false;
+                    break;
                 }
+            }
+            if ($matchesAllTerms) {
+                return true;
             }
         }
 
@@ -2908,65 +3046,36 @@ class BpsWebApiService
 
     private function periodsForVariable(int $variableId, string $domain, string $apiKey): array
     {
-        return Cache::remember("bps-webapi:periods:{$domain}:{$variableId}", now()->addHour(), function () use ($variableId, $domain, $apiKey) {
-            $url = "https://webapi.bps.go.id/v1/api/list/model/th/domain/{$domain}/var/{$variableId}/key/{$apiKey}/";
-            $response = Http::timeout(8)->get($url);
-
-            if (! $response->successful() || $response->json('status') !== 'OK') {
-                return [];
+        unset($apiKey);
+        $periods = [];
+        foreach ($this->csvCatalogRows() as $row) {
+            if (($row['jenis_tabel'] ?? '') !== 'Tabel Dinamis'
+                || (string) ($row['id_tabel'] ?? '') !== (string) $variableId
+                || ! str_contains((string) ($row['link_json'] ?? ''), '/domain/'.$domain.'/')
+                || ! preg_match('~/th/(\d+)/~', (string) ($row['link_json'] ?? ''), $match)
+                || ! ctype_digit((string) ($row['tahun'] ?? ''))) {
+                continue;
             }
-
-            $periods = $response->json('data.1') ?? [];
-            usort($periods, fn (array $left, array $right) => (int) ($right['th'] ?? 0) <=> (int) ($left['th'] ?? 0));
-
-            return $periods;
-        });
-    }
-
-    private function canonicalPeriods(int $variableId, string $apiKey): array
-    {
-        try {
-            $response = Http::timeout(8)->get(
-                "https://webapi.bps.go.id/v1/api/list/model/th/domain/1600/var/{$variableId}/key/{$apiKey}/"
-            );
-        } catch (ConnectionException) {
-            throw new RuntimeException("WebAPI BPS gagal diakses saat memeriksa var_id {$variableId}.");
+            $periods[] = ['th_id' => $match[1], 'th' => $row['tahun']];
         }
-
-        if (strtolower((string) $response->header('data-availability')) === 'list-not-available') {
-            return [];
-        }
-        if (! $response->successful() || $response->json('status') !== 'OK') {
-            throw new RuntimeException("WebAPI BPS gagal memeriksa periode var_id {$variableId}.");
-        }
-
-        $periods = $response->json('data.1');
-        if (! is_array($periods)) {
-            throw new RuntimeException("Format periode var_id {$variableId} tidak dikenali.");
-        }
-        usort($periods, fn (array $left, array $right) => (int) ($right['th'] ?? 0) <=> (int) ($left['th'] ?? 0));
+        usort($periods, fn (array $left, array $right) => (int) $right['th'] <=> (int) $left['th']);
 
         return $periods;
     }
 
+    private function canonicalPeriods(int $variableId, string $apiKey): array
+    {
+        return $this->periodsForVariable($variableId, '1600', $apiKey);
+    }
+
     private function canonicalDataForPeriod(int $variableId, int $periodId, string $apiKey): ?\Illuminate\Http\Client\Response
     {
-        try {
-            $response = Http::timeout(8)->get(
-                "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/{$variableId}/th/{$periodId}/key/{$apiKey}/"
-            );
-        } catch (ConnectionException) {
-            throw new RuntimeException("WebAPI BPS gagal diakses saat memeriksa var_id {$variableId} tahun {$periodId}.");
-        }
-
-        if (strtolower((string) $response->header('data-availability')) === 'list-not-available') {
+        $row = $this->catalogRowForPeriod($variableId, $periodId, '1600');
+        if ($row === null) {
             return null;
         }
-        if (! $response->successful() || $response->json('status') !== 'OK') {
-            throw new RuntimeException("WebAPI BPS gagal memeriksa var_id {$variableId} tahun {$periodId}.");
-        }
 
-        return $response;
+        return $this->catalogResponse($row, $apiKey);
     }
 
     private function domainFor(string $question): string
@@ -2976,24 +3085,16 @@ class BpsWebApiService
 
     private function derivedPeriodsForVariable(int $variableId, string $domain, string $apiKey): array
     {
-        $url = "https://webapi.bps.go.id/v1/api/list/model/turth/domain/{$domain}/var/{$variableId}/key/{$apiKey}/";
-        $response = Http::timeout(8)->get($url);
+        unset($variableId, $domain, $apiKey);
 
-        return $response->successful() && $response->json('status') === 'OK'
-            ? ($response->json('data.1') ?? [])
-            : [];
+        return [];
     }
 
     private function dynamicData(int $variableId, int $periodId, mixed $derivedPeriodId, string $domain, string $apiKey): ?\Illuminate\Http\Client\Response
     {
-        $url = "https://webapi.bps.go.id/v1/api/list/model/data/domain/{$domain}/var/{$variableId}/th/{$periodId}/";
-        if ($derivedPeriodId !== null) {
-            $url .= 'turth/'.rawurlencode((string) $derivedPeriodId).'/';
-        }
-        $url .= "key/{$apiKey}/";
-        $response = Http::timeout(8)->get($url);
-
-        return $response->successful() && $response->json('status') === 'OK' ? $response : null;
+        unset($derivedPeriodId);
+        $row = $this->catalogRowForPeriod($variableId, $periodId, $domain);
+        return $row === null ? null : $this->catalogResponse($row, $apiKey);
     }
 
     private function formatDynamicContext(
@@ -3018,6 +3119,7 @@ class BpsWebApiService
             'kategori' => $response->json('turvar'),
             'vervar_label' => $variable['vervar_label'] ?? null,
             'wilayah_cakupan' => $variable['wilayah_cakupan'] ?? null,
+            'catatan_data' => $response->json('_catatan'),
             'tahun' => $year,
             'periode' => $quarter ?? 'Tahunan',
             'var_id' => $response->json('var.0.val', $variable['var_id']),
@@ -3060,30 +3162,316 @@ class BpsWebApiService
 
     private function apiKey(): ?string
     {
-        $encrypted = DB::table('chatbot_settings')->where('key', self::SETTING_KEY)->value('value');
-        if (! is_string($encrypted) || $encrypted === '') {
-            return null;
+        $configuredKey = config('services.bps.api_key');
+
+        return is_string($configuredKey) && trim($configuredKey) !== ''
+            ? trim($configuredKey)
+            : null;
+    }
+
+    private function csvCatalogRows(): array
+    {
+        $path = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+        if (! is_file($path)) {
+            throw new RuntimeException('File katalog CSV BPS tidak ditemukan.');
+        }
+        $signature = (string) filemtime($path).':'.(string) filesize($path);
+        $cacheKey = 'bps-csv-catalog:'.sha1($path.':'.$signature);
+
+        return Cache::remember($cacheKey, now()->addMinutes(10), function () use ($path): array {
+            $rows = $this->readCatalogCsv($path, [
+                'kategori_subjek', 'subjek', 'id_subjek', 'judul', 'id_tabel',
+                'jenis_tabel', 'tahun', 'link_json',
+            ]);
+
+            $rows = array_map(
+                static fn (array $row) => array_map(
+                    static fn ($value) => trim((string) ($value ?? '')),
+                    $row
+                ),
+                $rows
+            );
+
+            return array_values(array_filter(
+                $rows,
+                static fn (array $row) => ($row['judul'] ?? '') !== ''
+                    && ($row['link_json'] ?? '') !== ''
+                    && ($row['link_json'] ?? '') !== 'TAHUN_TIDAK_TERSEDIA'
+            ));
+        });
+    }
+
+    private function catalogRowForTable(
+        int|string $tableId,
+        ?string $year = null,
+        string $type = 'Tabel Dinamis',
+        string $domain = '1600'
+    ): ?array {
+        foreach ($this->csvCatalogRows() as $row) {
+            if ((string) ($row['id_tabel'] ?? '') !== (string) $tableId
+                || ($row['jenis_tabel'] ?? '') !== $type) {
+                continue;
+            }
+            if ($year !== null && (string) ($row['tahun'] ?? '') !== $year) {
+                continue;
+            }
+            if ($type !== 'SIMDASI'
+                && ! str_contains((string) ($row['link_json'] ?? ''), '/domain/'.$domain.'/')) {
+                continue;
+            }
+
+            return $row;
+        }
+
+        return null;
+    }
+
+    private function catalogRowForPeriod(int $variableId, int $periodId, string $domain): ?array
+    {
+        foreach ($this->csvCatalogRows() as $row) {
+            if (($row['jenis_tabel'] ?? '') !== 'Tabel Dinamis'
+                || (string) ($row['id_tabel'] ?? '') !== (string) $variableId
+                || ! str_contains((string) ($row['link_json'] ?? ''), '/domain/'.$domain.'/')
+                || ! preg_match('~/th/(\d+)/~', (string) ($row['link_json'] ?? ''), $match)
+                || (int) $match[1] !== $periodId) {
+                continue;
+            }
+
+            return $row;
+        }
+
+        return null;
+    }
+
+    private function catalogResponse(array $row, string $apiKey): \Illuminate\Http\Client\Response
+    {
+        $link = trim((string) ($row['link_json'] ?? ''));
+        $parts = parse_url($link);
+        $path = is_array($parts) ? (string) ($parts['path'] ?? '') : '';
+        if (! is_array($parts)
+            || ($parts['scheme'] ?? null) !== 'https'
+            || ($parts['host'] ?? null) !== 'webapi.bps.go.id'
+            || ! str_starts_with($path, '/v1/api/')
+            || ! str_ends_with(rtrim($path, '/'), '/key')
+            || isset($parts['query'])
+            || isset($parts['fragment'])) {
+            throw new RuntimeException('Format tautan pada katalog CSV BPS tidak valid.');
+        }
+
+        $tableId = trim((string) ($row['id_tabel'] ?? ''));
+        $year = trim((string) ($row['tahun'] ?? ''));
+        if ($tableId === '') {
+            throw new RuntimeException('ID tabel pada katalog CSV BPS tidak valid.');
+        }
+        $database = $this->bpsDatabase();
+        $cached = $database->table('data_tabel')
+            ->where('id_tabel', $tableId)
+            ->where('tahun', $year)
+            ->first();
+        $cachedPayload = null;
+        if ($cached !== null) {
+            $decoded = json_decode((string) $cached->isi_json, true);
+            if (is_array($decoded)) {
+                $cachedPayload = $decoded;
+                if (time() - (float) $cached->diambil_pada < $this->tableFreshnessSeconds($row)) {
+                    return $this->jsonResponseFromPayload($cachedPayload);
+                }
+            }
         }
 
         try {
-            return Crypt::decryptString($encrypted);
-        } catch (DecryptException) {
-            return null;
+            if (trim($apiKey) === '') {
+                throw new RuntimeException('API key BPS belum dikonfigurasi.');
+            }
+            $url = rtrim($link, '/').'/'.rawurlencode($apiKey).'/';
+            try {
+                $response = Http::timeout(8)->get($url);
+            } catch (ConnectionException) {
+                throw new RuntimeException('WebAPI BPS tidak dapat diakses saat ini.');
+            }
+            $json = $response->json();
+            if (strtolower((string) $response->header('data-availability')) === 'list-not-available') {
+                $payload = ['status' => 'OK', 'data' => [['pages' => 1], []]];
+            } elseif ($response->status() === 401 || $response->status() === 403) {
+                throw new RuntimeException('API key BPS tidak diterima.');
+            } elseif (! $response->successful() || ! is_array($json) || ($json['status'] ?? null) !== 'OK') {
+                throw new RuntimeException('WebAPI BPS tidak dapat mengambil data pada tautan katalog.');
+            } else {
+                $payload = $json;
+            }
+        } catch (ConnectionException|RuntimeException $exception) {
+            if ($cachedPayload === null) {
+                throw $exception;
+            }
+            error_log('BPS MySQL stale fallback for table '.$tableId.' year '.$year.': '.get_class($exception));
+            $cachedPayload['_catatan'] = (
+                'Data berasal dari penyimpanan sebelumnya karena WebAPI BPS belum dapat '
+                .'memperbaruinya; data mungkin bukan yang terbaru.'
+            );
+
+            return $this->jsonResponseFromPayload($cachedPayload);
+        }
+
+        $database->transaction(function () use ($database, $row, $tableId, $year, $link, $payload): void {
+            $database->table('data_tabel')->upsert([[
+                'id_tabel' => $tableId,
+                'jenis_tabel' => (string) ($row['jenis_tabel'] ?? ''),
+                'tahun' => $year,
+                'judul' => (string) ($row['judul'] ?? ''),
+                'link_json' => $link,
+                'isi_json' => json_encode(
+                    $payload,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+                ),
+                'diambil_pada' => time(),
+            ]], ['id_tabel', 'tahun'], [
+                'jenis_tabel', 'judul', 'link_json', 'isi_json', 'diambil_pada',
+            ]);
+            if (($row['jenis_tabel'] ?? '') === 'Tabel Dinamis') {
+                $this->storeDynamicTableValues($database, $payload, $tableId);
+            }
+        });
+
+        return $this->jsonResponseFromPayload($payload);
+    }
+
+    private function jsonResponseFromPayload(array $payload): \Illuminate\Http\Client\Response
+    {
+        return new \Illuminate\Http\Client\Response(
+            new \GuzzleHttp\Psr7\Response(
+                200,
+                ['Content-Type' => 'application/json'],
+                json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+            )
+        );
+    }
+
+    private function bpsDatabase(): \Illuminate\Database\Connection
+    {
+        return DB::connection();
+    }
+
+    private function tableFreshnessSeconds(array $row): int
+    {
+        if (($row['jenis_tabel'] ?? '') === 'Tabel Statis') {
+            return 30 * 86400;
+        }
+        $year = (int) substr((string) ($row['tahun'] ?? ''), 0, 4);
+        $currentYear = now('Asia/Jakarta')->year;
+
+        return $year >= $currentYear - 1 ? 7 * 86400 : 90 * 86400;
+    }
+
+    private function storeDynamicTableValues(
+        \Illuminate\Database\Connection $database,
+        array $payload,
+        string $tableId
+    ): void
+    {
+        $variable = $payload['var'][0] ?? null;
+        $content = $payload['datacontent'] ?? null;
+        if (! is_array($variable) || ! isset($variable['val']) || ! is_array($content)) {
+            error_log('Dynamic BPS table '.$tableId.' has an unsupported response structure.');
+
+            return;
+        }
+
+        $dimensions = static function ($items, string $defaultLabel = ''): array {
+            if (! is_array($items) || $items === []) {
+                return [['val' => '0', 'label' => $defaultLabel]];
+            }
+            $rows = [];
+            foreach ($items as $item) {
+                if (is_array($item) && array_key_exists('val', $item)) {
+                    $rows[] = [
+                        'val' => (string) $item['val'],
+                        'label' => trim((string) ($item['label'] ?? '')),
+                    ];
+                }
+            }
+
+            return $rows !== [] ? $rows : [['val' => '0', 'label' => $defaultLabel]];
+        };
+        $regions = $dimensions($payload['vervar'] ?? null);
+        $categories = $dimensions($payload['turvar'] ?? null);
+        $years = $dimensions($payload['tahun'] ?? null);
+        $subyears = $dimensions($payload['turtahun'] ?? $payload['turth'] ?? null);
+        $keyMatches = [];
+        foreach ($regions as $region) {
+            foreach ($categories as $category) {
+                foreach ($years as $year) {
+                    foreach ($subyears as $subyear) {
+                        $key = $region['val'].$tableId.$category['val'].$year['val'].$subyear['val'];
+                        $keyMatches[$key][] = [$region, $category, $year, $subyear];
+                    }
+                }
+            }
+        }
+
+        $note = html_entity_decode(strip_tags((string) ($variable['note'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $database->table('tabel_meta')->upsert([[
+            'id_tabel' => $tableId,
+            'judul' => (string) ($variable['label'] ?? $variable['title'] ?? ''),
+            'satuan' => (string) ($variable['unit'] ?? ''),
+            'subjek' => (string) ($variable['subj'] ?? ''),
+            'label_wilayah' => (string) ($payload['labelvervar'] ?? ''),
+            'catatan' => trim(preg_replace('/\s+/', ' ', $note) ?? ''),
+            'last_update_bps' => (string) ($payload['last_update'] ?? ''),
+            'diambil_pada' => time(),
+        ]], ['id_tabel'], [
+            'judul', 'satuan', 'subjek', 'label_wilayah', 'catatan', 'last_update_bps', 'diambil_pada',
+        ]);
+        $values = [];
+        $decodedKeys = [];
+        foreach ($content as $key => $value) {
+            $matches = $keyMatches[(string) $key] ?? [];
+            if (count($matches) !== 1) {
+                continue;
+            }
+            [$region, $category, $year, $subyear] = $matches[0];
+            $values[] = [
+                'id_tabel' => $tableId,
+                'wilayah_id' => $region['val'],
+                'wilayah' => $region['label'],
+                'turvar_id' => $category['val'],
+                'turvar' => $category['label'],
+                'tahun' => $year['label'] !== '' ? $year['label'] : $year['val'],
+                'turtahun' => $subyear['label'] !== '' ? $subyear['label'] : $subyear['val'],
+                'nilai' => is_numeric($value) ? (float) $value : null,
+            ];
+            $decodedKeys[(string) $key] = true;
+        }
+        if ($values !== []) {
+            $database->table('nilai_data')->upsert(
+                $values,
+                ['id_tabel', 'wilayah_id', 'turvar_id', 'tahun', 'turtahun'],
+                ['wilayah', 'turvar', 'nilai']
+            );
+        }
+        $unreadable = count($content) - count($decodedKeys);
+        if ($unreadable > 0) {
+            error_log('Dynamic BPS table '.$tableId.' has '.$unreadable.' unreadable datacontent key(s).');
         }
     }
 
     private function searchTables(string $keyword, string $domain, string $apiKey): array
     {
-        $keywordPath = str_replace('%20', '+', rawurlencode($keyword));
-        $url = "https://webapi.bps.go.id/v1/api/list/model/statictable/domain/{$domain}/keyword/{$keywordPath}/key/{$apiKey}/";
-        $response = Http::timeout(8)->get($url);
-        if (! $response->successful() || $response->json('status') !== 'OK') {
-            return [];
-        }
+        $rows = array_filter(
+            $this->csvCatalogRows(),
+            fn (array $row) => ($row['jenis_tabel'] ?? '') === 'Tabel Statis'
+                && str_contains((string) ($row['link_json'] ?? ''), '/domain/'.$domain.'/')
+                && $this->titleTermScore((string) ($row['judul'] ?? ''), $keyword) > 0
+        );
 
-        $tables = $response->json('data.1');
-
-        return is_array($tables) ? $tables : [];
+        return array_map(
+            fn (array $row) => [
+                'table_id' => $row['id_tabel'],
+                'title' => $row['judul'],
+                'subject' => $row['subjek'],
+                'link_json' => $row['link_json'],
+            ],
+            array_values($rows)
+        );
     }
 
     private function matchingTables(array $keywords, string $domain, string $apiKey): array
@@ -3180,11 +3568,11 @@ class BpsWebApiService
 
     private function tableDetail(string $tableId, string $domain, string $apiKey): ?string
     {
-        $url = "https://webapi.bps.go.id/v1/api/view/model/statictable/domain/{$domain}/lang/ind/id/".rawurlencode($tableId)."/key/{$apiKey}/";
-        $response = Http::timeout(8)->get($url);
-        if (! $response->successful() || $response->json('status') !== 'OK') {
+        $row = $this->catalogRowForTable($tableId, null, 'Tabel Statis', $domain);
+        if ($row === null) {
             return null;
         }
+        $response = $this->catalogResponse($row, $apiKey);
 
         $table = $response->json('data.table');
         if (! is_string($table) || trim($table) === '') {
@@ -3196,6 +3584,11 @@ class BpsWebApiService
         $text = strip_tags($text);
         $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $text = trim(preg_replace('/\s+/u', ' ', strip_tags($text)) ?? '');
+
+        $stalenessNote = $response->json('_catatan');
+        if (is_string($stalenessNote) && trim($stalenessNote) !== '') {
+            $text .= ' '.$stalenessNote;
+        }
 
         return Str::limit($text, 5000, '...');
     }
@@ -3220,7 +3613,7 @@ class BpsWebApiService
             ) ?? $normalizedQuestion;
         }
         preg_match_all('/[\pL\pN]{3,}/u', $normalizedQuestion, $matches);
-        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
+        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
         $region = $this->regionMentioned($question);
         if ($region !== null) {
             $regionWords = ['kabupaten', 'kab', 'kota'];
@@ -3260,5 +3653,70 @@ class BpsWebApiService
         }
 
         return array_values(array_unique($expanded));
+    }
+
+    private function requiredVariableTerms(string $question): array
+    {
+        $normalizedQuestion = Str::lower(Str::ascii($question));
+        foreach ([
+            'rumah sakit umum' => 'fasilitas kesehatan',
+            'rumah sakit' => 'fasilitas kesehatan',
+            'rsud' => 'fasilitas kesehatan',
+            'faskes' => 'fasilitas kesehatan',
+            'gender' => 'jenis kelamin',
+            'sex' => 'jenis kelamin',
+        ] as $alias => $canonical) {
+            $normalizedQuestion = preg_replace(
+                '/(?<![a-z0-9])'.preg_quote($alias, '/').'(?![a-z0-9])/u',
+                $canonical,
+                $normalizedQuestion
+            ) ?? $normalizedQuestion;
+        }
+        foreach ([
+            'total' => 'jumlah',
+            'masyarakat' => 'penduduk',
+            'rakyat' => 'penduduk',
+            'laju' => 'pertumbuhan',
+            'kemiskinan' => 'miskin',
+            'ekonomi' => 'pdrb',
+            'ipm' => 'indeks pembangunan manusia',
+            'laki' => 'kelamin',
+            'pria' => 'kelamin',
+            'lelaki' => 'kelamin',
+            'cowok' => 'kelamin',
+            'perempuan' => 'kelamin',
+            'wanita' => 'kelamin',
+            'cewek' => 'kelamin',
+        ] as $alias => $canonical) {
+            $normalizedQuestion = preg_replace(
+                '/(?<![a-z0-9])'.preg_quote($alias, '/').'(?![a-z0-9])/u',
+                $canonical,
+                $normalizedQuestion
+            ) ?? $normalizedQuestion;
+        }
+        foreach ($this->regionsMentionedIn($question) as $region) {
+            foreach ($region['aliases'] as $alias) {
+                $normalizedQuestion = preg_replace(
+                    '/(?<![a-z0-9])'.preg_quote(Str::lower(Str::ascii($alias)), '/').'(?![a-z0-9])/u',
+                    ' ',
+                    $normalizedQuestion
+                ) ?? $normalizedQuestion;
+            }
+        }
+
+        preg_match_all('/[\pL\pN]{3,}/u', $normalizedQuestion, $matches);
+        $stopWords = [
+            'yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah',
+            'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong',
+            'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi',
+            'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada',
+            'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih', 'kabupaten', 'kab',
+            'kota',
+        ];
+
+        return array_values(array_unique(array_filter(
+            $matches[0] ?? [],
+            fn (string $term) => ! in_array($term, $stopWords, true) && ! ctype_digit($term)
+        )));
     }
 }

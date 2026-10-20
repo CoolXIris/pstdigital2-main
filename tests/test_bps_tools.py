@@ -4,23 +4,25 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
-
 import bps_tools
+import bps_data_store
+from mysql_test_adapter import MySQLStorageTestConnection
 
 
 class BpsToolsTests(unittest.TestCase):
     def setUp(self):
-        with bps_tools._cache_lock:
-            bps_tools._cache.clear()
-
-    def _response(self, status_code, payload, headers=None):
-        return httpx.Response(
-            status_code,
-            headers=headers,
-            content=json.dumps(payload).encode(),
-            request=httpx.Request("GET", "https://webapi.bps.go.id/test"),
+        self._database_directory = tempfile.TemporaryDirectory()
+        database_path = str(Path(self._database_directory.name) / "bps_test.db")
+        self._database_patch = patch.object(
+            bps_data_store,
+            "init_db",
+            side_effect=lambda: MySQLStorageTestConnection(database_path),
         )
+        self._database_patch.start()
+
+    def tearDown(self):
+        self._database_patch.stop()
+        self._database_directory.cleanup()
 
     def test_province_prefix_resolves_to_sumsel(self):
         self.assertEqual(
@@ -28,122 +30,24 @@ class BpsToolsTests(unittest.TestCase):
             ("Provinsi Sumatera Selatan", []),
         )
 
-    def test_list_not_available_is_a_valid_empty_response(self):
-        response = self._response(
-            404,
-            {"status": "ERROR"},
-            {"data-availability": "list-not-available"},
-        )
-        with (
-            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
-            patch.object(bps_tools._http, "get", return_value=response),
-        ):
-            payload = bps_tools._get("list/model/var")
-
-        self.assertEqual(payload["status"], "OK")
-        self.assertEqual(payload["data"], [{"pages": 1}, []])
-        self.assertEqual(payload["data_availability"], "list-not-available")
-
-    def test_valid_non_ok_json_is_treated_as_empty(self):
-        response = self._response(400, {"status": "ERROR", "message": "not found"})
-        with (
-            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
-            patch.object(bps_tools._http, "get", return_value=response),
-        ):
-            payload = bps_tools._get("list/model/var")
-
-        self.assertEqual(payload["status"], "OK")
-        self.assertEqual(payload["data"], [{"pages": 1}, []])
-
-    def test_successful_api_responses_are_cached_by_path_and_credential(self):
-        response = self._response(200, {"status": "OK", "data": [{"value": 12}]})
-        with (
-            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
-            patch.object(bps_tools._http, "get", return_value=response) as request,
-        ):
-            first = bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
-            second = bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
-            with patch.dict("os.environ", {"BPS_API_KEY": "another-key"}):
-                third = bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
-
-        self.assertEqual(first, second)
-        self.assertEqual(second, third)
-        self.assertEqual(request.call_count, 2)
-        self.assertTrue(all("test-key" not in key and "another-key" not in key for key in bps_tools._cache))
-
-    def test_failed_api_responses_are_not_cached(self):
-        response = self._response(400, {"status": "ERROR"})
-        with (
-            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
-            patch.object(bps_tools._http, "get", return_value=response) as request,
-        ):
-            bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
-            bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
-
-        self.assertEqual(request.call_count, 2)
-
-    def test_api_cache_uses_longer_ttl_for_catalogs_than_observations(self):
-        self.assertGreater(
-            bps_tools._api_response_ttl("interoperabilitas/datasource/simdasi/id/23/wilayah/1600000"),
-            bps_tools._api_response_ttl("list/model/data/domain/1600/var/1/th/2025"),
-        )
-        self.assertGreater(
-            bps_tools._api_response_ttl("list/model/var/domain/1600/keyword/penduduk"),
-            bps_tools._api_response_ttl("list/model/th/domain/1600/var/1"),
-        )
-
-    def test_invalid_json_and_server_error_raise_bps_error(self):
-        invalid_json = httpx.Response(
-            200,
-            content=b"not-json",
-            request=httpx.Request("GET", "https://webapi.bps.go.id/test"),
-        )
-        server_error = self._response(503, {"status": "ERROR"})
-        with patch.dict("os.environ", {"BPS_API_KEY": "test-key"}):
-            with patch.object(bps_tools._http, "get", return_value=invalid_json):
-                with self.assertRaises(bps_tools.BpsError):
-                    bps_tools._get("list/model/var")
-            with patch.object(bps_tools._http, "get", return_value=server_error):
-                with self.assertRaises(bps_tools.BpsError):
-                    bps_tools._get("list/model/var")
-
-    def test_network_error_raises_bps_error(self):
-        request = httpx.Request("GET", "https://webapi.bps.go.id/test")
-        with (
-            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
-            patch.object(
-                bps_tools._http,
-                "get",
-                side_effect=httpx.ConnectError("connection failed", request=request),
-            ),
-        ):
-            with self.assertRaises(bps_tools.BpsError):
-                bps_tools._get("list/model/var")
-
     def test_simdasi_catalog_lists_titles_and_available_years(self):
-        response = {
-            "data": [
-                {"page": 1, "pages": 1},
-                {
-                    "status": "OK",
-                    "data": [{
-                        "id_tabel": "table-id",
-                        "judul": "Tingkat Pengangguran Terbuka (TPT) Menurut Kabupaten/Kota",
-                        "subject": "Ketenagakerjaan",
-                        "bab": "Penduduk dan Ketenagakerjaan",
-                        "ketersediaan_tahun": [2024, 2025],
-                    }],
-                },
-            ]
-        }
-        with (
-            patch.object(bps_tools, "_cached", side_effect=lambda _key, _ttl, loader: loader()),
-            patch.object(bps_tools, "_get", return_value=response),
-        ):
+        rows = [
+            {
+                "id_tabel": "table-id",
+                "judul": "Tingkat Pengangguran Terbuka (TPT) Menurut Kabupaten/Kota",
+                "jenis_tabel": "SIMDASI",
+                "subjek": "Ketenagakerjaan",
+                "kategori_subjek": "Penduduk dan Ketenagakerjaan",
+                "tahun": str(year),
+                "link_json": f"https://webapi.bps.go.id/v1/api/interoperabilitas/datasource/simdasi/id/25/wilayah/1600000/tahun/{year}/id_tabel/table-id/key/",
+            }
+            for year in (2024, 2025)
+        ]
+        with patch.object(bps_tools, "_catalog_rows", return_value=rows):
             result = bps_tools.simdasi_daftar_tabel("daftar tabel SIMDASI")
 
         self.assertEqual(result["jumlah_ditemukan"], 1)
-        self.assertEqual(result["hasil"][0]["judul"], response["data"][1]["data"][0]["judul"])
+        self.assertEqual(result["hasil"][0]["judul"], rows[0]["judul"])
         self.assertEqual(result["hasil"][0]["id_tabel"], "table-id")
         self.assertEqual(result["hasil"][0]["tahun_tersedia"], [2024, 2025])
 
@@ -154,9 +58,18 @@ class BpsToolsTests(unittest.TestCase):
             "subject": "Ketenagakerjaan",
             "ketersediaan_tahun": [2024, 2025],
         }
-        catalog = {
-            "data": [{"pages": 1}, {"status": "OK", "data": [table]}],
-        }
+        catalog_rows = [
+            {
+                "id_tabel": table["id_tabel"],
+                "judul": table["judul"],
+                "jenis_tabel": "SIMDASI",
+                "subjek": table["subject"],
+                "kategori_subjek": "",
+                "tahun": str(year),
+                "link_json": f"https://webapi.bps.go.id/v1/api/interoperabilitas/datasource/simdasi/id/25/wilayah/1600000/tahun/{year}/id_tabel/table-id/key/",
+            }
+            for year in table["ketersediaan_tahun"]
+        ]
         detail = {
             "data": [{
                 "page": 1,
@@ -190,15 +103,9 @@ class BpsToolsTests(unittest.TestCase):
                 ],
             }],
         }
-        requests = []
-
-        def fake_get(path):
-            requests.append(path)
-            return catalog if "/id/23/" in path else detail
-
         with (
-            patch.object(bps_tools, "_cached", side_effect=lambda _key, _ttl, loader: loader()),
-            patch.object(bps_tools, "_get", side_effect=fake_get),
+            patch.object(bps_tools, "_catalog_rows", return_value=catalog_rows),
+            patch.object(bps_tools, "_fetch_catalog_row", return_value=detail) as fetch,
         ):
             result = bps_tools.simdasi_cari_data("TPT Agustus", "2025", "Lahat")
 
@@ -210,7 +117,7 @@ class BpsToolsTests(unittest.TestCase):
             "variabel": "Tingkat Pengangguran Terbuka (TPT) - Agustus",
             "nilai": "2,84",
         }])
-        self.assertIn("/id/25/tahun/2025/id_tabel/table-id/wilayah/1600000", requests[1])
+        fetch.assert_called_once_with(catalog_rows[1])
 
     def test_variable_search_strips_region_and_uses_synonym_fallback(self):
         with (
@@ -219,8 +126,8 @@ class BpsToolsTests(unittest.TestCase):
                 "_variable_index",
                 return_value={
                     "variables": [
-                        {"var_id": "10", "title": "Jumlah Penduduk Miskin", "unit": "Orang"},
-                        {"var_id": "11", "title": "Jumlah Penduduk", "unit": "Orang"},
+                        {"var_id": "10", "title": "Jumlah Penduduk Miskin", "unit": "Orang", "latest_year": "2025"},
+                        {"var_id": "11", "title": "Jumlah Penduduk", "unit": "Orang", "latest_year": "2025"},
                     ]
                 },
             ),
@@ -243,6 +150,7 @@ class BpsToolsTests(unittest.TestCase):
                             "var_id": "20",
                             "title": "Tingkat Pengangguran Terbuka",
                             "unit": "Persen",
+                            "latest_year": "2025",
                         }
                     ]
                 },
@@ -306,24 +214,18 @@ class BpsToolsTests(unittest.TestCase):
         self.assertFalse(bps_tools.catalog_variable_matches("zebra cross Sumsel"))
 
     def test_catalog_csv_loads_variable_metadata_subjects_and_rls_alias(self):
-        with tempfile.TemporaryDirectory() as directory:
-            subject_path = Path(directory) / "subjects.csv"
-            variable_path = Path(directory) / "variables.csv"
-            subject_path.write_text(
-                "\ufeffsubcat_id,kategori,sub_id,subjek,jumlah_tabel\n"
-                "1,Sosial dan Kependudukan,28,Pendidikan,\n",
-                encoding="utf-8",
-            )
-            variable_path.write_text(
-                "\ufeffkategori,sub_id,subjek,var_id,judul,satuan,tahun_terbaru,jumlah_tahun\n"
-                "Sosial dan Kependudukan,28,Pendidikan,308,Rata-Rata Lama Sekolah,Tahun,2024,10\n",
-                encoding="utf-8",
-            )
-            with (
-                patch.object(bps_tools, "_SUBJECT_CATALOG_PATH", subject_path),
-                patch.object(bps_tools, "_VARIABLE_CATALOG_PATH", variable_path),
-            ):
-                catalog = bps_tools._load_catalog_index()
+        rows = [{
+            "kategori_subjek": "Sosial dan Kependudukan",
+            "subjek": "Pendidikan",
+            "id_subjek": "28",
+            "judul": "Rata-Rata Lama Sekolah",
+            "id_tabel": "308",
+            "jenis_tabel": "Tabel Dinamis",
+            "tahun": "2024",
+            "link_json": "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/308/th/124/key/",
+        }]
+        with patch.object(bps_tools, "_catalog_rows", return_value=rows):
+            catalog = bps_tools._load_catalog_index()
 
         variable = catalog["variables"][0]
         self.assertEqual(variable["var_id"], "308")
@@ -435,7 +337,7 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(female["status_hasil"], "ditemukan")
         self.assertTrue(any("perempuan" in item["judul"].casefold() for item in female["hasil"]))
         self.assertTrue(any("jenis kelamin" in item["judul"].casefold() for item in both["hasil"]))
-        self.assertEqual(hospitals["hasil"][0]["judul"], "Jumlah Fasilitas Kesehatan")
+        self.assertEqual(hospitals["hasil"][0]["judul"], "Jumlah Fasilitas Kesehatan. (Unit)")
         self.assertTrue(bps_tools.catalog_variable_matches("pria dan wanita"))
         self.assertTrue(bps_tools.catalog_variable_matches("rumah sakit"))
 
@@ -456,8 +358,12 @@ class BpsToolsTests(unittest.TestCase):
 
         with (
             patch.object(bps_tools, "_periods", return_value=periods),
-            patch.object(bps_tools, "_cached", side_effect=lambda *args: args[2]()),
-            patch.object(bps_tools, "_get", return_value={"status": "OK"}),
+            patch.object(
+                bps_tools,
+                "_dynamic_table_row",
+                side_effect=lambda _var_id, year: {"tahun": year},
+            ),
+            patch.object(bps_tools, "_fetch_catalog_row", return_value={"status": "OK"}),
             patch.object(bps_tools, "_format_data", side_effect=fake_format),
         ):
             result = bps_tools.ambil_data(
@@ -499,8 +405,12 @@ class BpsToolsTests(unittest.TestCase):
 
         with (
             patch.object(bps_tools, "_periods", return_value=periods),
-            patch.object(bps_tools, "_cached", side_effect=lambda *args: args[2]()),
-            patch.object(bps_tools, "_get", return_value={"status": "OK"}),
+            patch.object(
+                bps_tools,
+                "_dynamic_table_row",
+                side_effect=lambda _var_id, year: {"tahun": year},
+            ),
+            patch.object(bps_tools, "_fetch_catalog_row", return_value={"status": "OK"}),
             patch.object(bps_tools, "_format_data", side_effect=fake_format),
         ):
             result = bps_tools.ambil_data(
@@ -512,104 +422,168 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(result["tahun_tersedia"], ["2024", "2025"])
         self.assertEqual(result["tahun_tidak_tersedia"], ["2023", "2026"])
 
-    def test_brs_year_search_reads_historical_release_months(self):
-        def fake_brs_month(year, month):
-            if (year, month) == (2024, 4):
-                return [{
-                    "title": "Perkembangan Inflasi Sumatera Selatan Maret 2024",
-                    "rl_date": "2024-04-01",
-                    "abstract": "Inflasi tercatat.",
-                }]
-            if (year, month) == (2025, 1):
-                return [{
-                    "title": "Perkembangan Inflasi Sumatera Selatan Desember 2024",
-                    "rl_date": "2025-01-02",
-                    "abstract": "Inflasi tahunan tercatat.",
-                }]
-            return []
+    def test_editorial_search_sorts_results_fetches_details_and_limits_to_three(self):
+        calls = []
 
-        with patch.object(bps_tools, "_brs_month", side_effect=fake_brs_month) as load:
-            result = bps_tools.berita_resmi_statistik("inflasi", tahun=2024)
+        def fake_fetch(model, **kwargs):
+            calls.append((model, kwargs))
+            if kwargs.get("identifier"):
+                item_id = kwargs["identifier"]
+                return {
+                    "status": "OK",
+                    "data": [{
+                        "br_id": item_id,
+                        "abstract": f"<p>Abstrak {item_id}</p>",
+                    }],
+                }
+            return {
+                "status": "OK",
+                "data": [{
+                    "pages": 1,
+                }, [
+                    {
+                        "br_id": "older",
+                        "title": "Inflasi 2024",
+                        "rl_date": "2024-01-10",
+                        "pdf": "https://bps.go.id/older.pdf",
+                    },
+                    {
+                        "br_id": "newer",
+                        "title": "Inflasi 2025",
+                        "rl_date": "2025-02-10",
+                        "pdf": "https://bps.go.id/newer.pdf",
+                    },
+                    {
+                        "br_id": "newest",
+                        "title": "Inflasi Terkini",
+                        "rl_date": "2025-03-10",
+                        "pdf": "https://bps.go.id/newest.pdf",
+                    },
+                    {
+                        "br_id": "middle",
+                        "title": "Inflasi Tengah",
+                        "rl_date": "2025-02-20",
+                    },
+                ]],
+            }
 
-        self.assertEqual(len(result["hasil"]), 2)
-        self.assertTrue(any("Maret 2024" in item["judul"] for item in result["hasil"]))
-        self.assertTrue(any("Desember 2024" in item["judul"] for item in result["hasil"]))
-        self.assertTrue(any(call.args == (2025, 1) for call in load.call_args_list))
+        with patch.object(bps_tools.bps_csv_catalog, "fetch_editorial_json", side_effect=fake_fetch):
+            result = bps_tools.berita_resmi_statistik(
+                "inflasi",
+                jumlah=5,
+                tahun=2025,
+                bulan="3",
+                halaman=2,
+            )
 
-    def test_refresh_variable_index_loads_all_subjects_and_pages_without_notes(self):
-        def fake_get(path):
-            if path == "list/model/subject/domain/1600":
-                return {
-                    "status": "OK",
-                    "data": [{"pages": 2}, [{"sub_id": "1", "sub_name": "Penduduk"}]],
-                }
-            if path == "list/model/subject/domain/1600/page/2":
-                return {
-                    "status": "OK",
-                    "data": [{"pages": 2}, [
-                        {"sub_id": "2", "sub_name": "Tenaga Kerja"},
-                        {"sub_id": "3", "sub_name": "Subjek tanpa variabel"},
-                    ]],
-                }
-            if path == "list/model/var/domain/1600/subject/3":
-                return {"status": "OK", "data": ""}
-            if path == "list/model/var/domain/1600/subject/1":
-                return {
-                    "status": "OK",
-                    "data": [{"pages": 2}, [{
-                        "var_id": "101",
-                        "title": "Jumlah Penduduk",
-                        "unit": "Jiwa",
-                        "notes": "<p>encoded note</p>",
-                    }]],
-                }
-            if path == "list/model/var/domain/1600/subject/1/page/2":
-                return {
-                    "status": "OK",
-                    "data": [{"pages": 2}, [{"var_id": "102", "title": "Kepadatan Penduduk"}]],
-                }
-            if path == "list/model/var/domain/1600/subject/2":
-                return {
-                    "status": "OK",
-                    "data": [{"pages": 1}, [{"var_id": "201", "title": "Upah Buruh"}]],
-                }
-            self.fail(f"Unexpected BPS path: {path}")
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(
+            [item["id"] for item in result["hasil"]],
+            ["newest", "middle", "newer"],
+        )
+        self.assertEqual(result["hasil"][0]["ringkasan"], "Abstrak newest")
+        self.assertEqual(result["hasil"][0]["tautan"], "https://bps.go.id/newest.pdf")
+        list_call = calls[0]
+        self.assertEqual(list_call[0], "pressrelease")
+        self.assertEqual(list_call[1]["keyword"], "inflasi")
+        self.assertEqual(list_call[1]["year"], 2025)
+        self.assertEqual(list_call[1]["month"], 3)
+        self.assertEqual(list_call[1]["page"], 2)
+        self.assertEqual(len(calls), 4)
 
-        with (
-            patch.object(bps_tools, "_get", side_effect=fake_get),
-            patch.object(bps_tools, "_load_catalog_index", return_value={"variables": [], "subjects": []}),
+    def test_publication_and_news_use_their_own_models_and_friendly_errors(self):
+        with patch.object(
+            bps_tools.bps_csv_catalog,
+            "fetch_editorial_json",
+            return_value={"status": "OK", "data": [{"pages": 1}, []]},
+        ) as fetch:
+            publication = bps_tools.publikasi_terbaru("pertanian", tahun=2024)
+            news = bps_tools.berita_statistik("sensus")
+
+        self.assertEqual(publication["jenis_konten"], "publication")
+        self.assertEqual(news["jenis_konten"], "news")
+        self.assertEqual(publication["status_hasil"], "kosong")
+        self.assertEqual(fetch.call_args_list[0].args[0], "publication")
+        self.assertEqual(fetch.call_args_list[1].args[0], "news")
+
+        with patch.object(
+            bps_tools.bps_csv_catalog,
+            "fetch_editorial_json",
+            side_effect=bps_tools.bps_csv_catalog.CatalogError("API key BPS tidak diterima."),
         ):
+            failed = bps_tools.berita_statistik()
+        self.assertEqual(failed["status_hasil"], "gagal_teknis")
+        self.assertNotIn("key/", failed.get("error", ""))
+
+        with patch.object(
+            bps_tools.bps_csv_catalog,
+            "fetch_editorial_json",
+            return_value={"status": "OK", "data": {"unexpected": "shape"}},
+        ):
+            malformed = bps_tools.berita_statistik()
+        self.assertEqual(malformed["status_hasil"], "gagal_teknis")
+        self.assertIn("Format detail arsip", malformed["error"])
+
+    def test_refresh_variable_index_is_derived_from_csv(self):
+        rows = [
+            {
+                "kategori_subjek": "Sosial",
+                "subjek": "Penduduk",
+                "id_subjek": "1",
+                "judul": "Jumlah Penduduk",
+                "id_tabel": "101",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+                "link_json": "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/101/th/125/key/",
+            },
+            {
+                "kategori_subjek": "Sosial",
+                "subjek": "Penduduk",
+                "id_subjek": "1",
+                "judul": "Kepadatan Penduduk",
+                "id_tabel": "102",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2024",
+                "link_json": "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/102/th/124/key/",
+            },
+            {
+                "kategori_subjek": "Ekonomi",
+                "subjek": "Tenaga Kerja",
+                "id_subjek": "2",
+                "judul": "Upah Buruh",
+                "id_tabel": "201",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+                "link_json": "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/201/th/125/key/",
+            },
+        ]
+        with patch.object(bps_tools, "_catalog_rows", return_value=rows):
             index = bps_tools.refresh_variable_index()
-        with bps_tools._cache_lock:
-            bps_tools._cache.pop(bps_tools._variable_index_key(), None)
 
         self.assertEqual({row["var_id"] for row in index["variables"]}, {"101", "102", "201"})
-        self.assertNotIn("notes", index["variables"][0])
 
     def test_static_table_search_reads_and_cleans_table_html(self):
-        def fake_get(path):
-            if "list/model/statictable/" in path and "/keyword/upah" in path:
-                return {
-                    "status": "OK",
-                    "data": [{"pages": 1}, [{
-                        "table_id": "42",
-                        "title": "Upah Minimum Provinsi Sumatera Selatan",
-                        "notes": "<p>long encoded notes</p>",
-                    }]],
-                }
-            if "list/model/statictable/" in path:
-                return {"status": "OK", "data": [{"pages": 1}, []]}
-            if "view/model/statictable/" in path:
-                return {
-                    "status": "OK",
-                    "data": {
-                        "table": "<table><tr><th>Tahun</th><th>Upah</th></tr><tr><td>2025</td><td>3.500</td></tr></table>",
-                        "notes": "<p>long encoded notes</p>",
-                    },
-                }
-            self.fail(f"Unexpected BPS path: {path}")
-
-        with patch.object(bps_tools, "_get", side_effect=fake_get):
+        catalog_row = {
+            "kategori_subjek": "Ketenagakerjaan",
+            "subjek": "Upah dan Gaji",
+            "id_subjek": "3",
+            "judul": "Upah Minimum Provinsi Sumatera Selatan",
+            "id_tabel": "42",
+            "jenis_tabel": "Tabel Statis",
+            "tahun": "",
+            "link_json": "https://webapi.bps.go.id/v1/api/view/model/statictable/domain/1600/id/42/lang/ind/key/",
+        }
+        payload = {
+            "status": "OK",
+            "data": {
+                "table": "<table><tr><th>Tahun</th><th>Upah</th></tr><tr><td>2025</td><td>3.500</td></tr></table>",
+                "notes": "<p>long encoded notes</p>",
+            },
+        }
+        with (
+            patch.object(bps_tools, "_catalog_rows", return_value=[catalog_row]),
+            patch.object(bps_tools, "_fetch_catalog_row", return_value=payload),
+        ):
             result = bps_tools.tabel_statis("upah minimum", jumlah=1)
 
         self.assertEqual(result["status_hasil"], "ditemukan")

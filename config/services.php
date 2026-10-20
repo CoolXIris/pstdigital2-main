@@ -43,5 +43,9 @@ return [
         'chat_url' => env('GEMINI_CHAT_API_URL', 'http://127.0.0.1:8001/api/chat'),
         'chat_token' => env('GEMINI_CHAT_API_TOKEN'),
     ],
+    'bps' => [
+        'api_key' => env('BPS_API_KEY'),
+        'catalog_csv' => env('BPS_CATALOG_CSV', base_path('tabel_bps_sumsel.csv')),
+    ],
 
 ];

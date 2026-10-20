@@ -13,7 +13,6 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -257,27 +256,18 @@ class AdminManagementPagesTest extends BaseTestCase
             && $request['history'] === [['prompt' => 'Sebelumnya', 'response' => 'Jawaban lama.']]);
     }
 
-    public function test_admin_can_configure_encrypted_bps_api_key_without_intercepting_ai_chat(): void
+    public function test_bps_api_key_uses_environment_configuration_without_intercepting_ai_chat(): void
     {
+        config(['services.bps.api_key' => null]);
+        $this->assertFalse(app(BpsWebApiService::class)->hasApiKey());
+
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        $this->assertTrue(app(BpsWebApiService::class)->hasApiKey());
+
         $this->actingAs($this->admin)
             ->get(route('admin.chatbot'))
             ->assertOk()
-            ->assertSee('WebAPI BPS')
-            ->assertSee('Belum terhubung');
-
-        $this->actingAs($this->admin)
-            ->post(route('admin.chatbot.bps-api-key'), ['api_key' => 'bps-test-secret'])
-            ->assertRedirect(route('admin.chatbot'))
-            ->assertSessionHas('message');
-
-        $encryptedKey = DB::table('chatbot_settings')->where('key', 'bps_webapi_key')->value('value');
-        $this->assertNotSame('bps-test-secret', $encryptedKey);
-        $this->assertSame('bps-test-secret', Crypt::decryptString($encryptedKey));
-        $this->actingAs($this->admin)
-            ->get(route('admin.chatbot'))
-            ->assertOk()
-            ->assertDontSee('bps-test-secret')
-            ->assertSee('API key tersimpan');
+            ->assertDontSee('bps-test-secret');
 
         Http::fake([
             '*127.0.0.1:8001/api/chat*' => Http::response([
@@ -299,52 +289,150 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
         Http::assertSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat')
             && $request['question'] === 'berapa persentase kemiskinan');
-
-        $this->actingAs($this->admin)
-            ->post(route('admin.chatbot.bps-api-key'), ['clear_api_key' => '1'])
-            ->assertRedirect(route('admin.chatbot'));
-        $this->assertDatabaseMissing('chatbot_settings', ['key' => 'bps_webapi_key']);
     }
 
-    public function test_bps_catalog_filters_year_and_month_for_all_catalog_models(): void
+    public function test_bps_catalog_uses_csv_without_building_date_filtered_endpoints(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
-
-        Http::fake([
-            'webapi.bps.go.id/v1/api/list/*' => Http::response([
-                'status' => 'OK',
-                'data' => [['total' => 1, 'pages' => 1], [['title' => 'Katalog BPS Sumsel']]],
-            ]),
-        ]);
+        config(['services.bps.api_key' => 'bps-test-secret']);
 
         $service = app(BpsWebApiService::class);
 
-        $this->assertNotNull($service->catalogAnswerFor('publikasi kemiskinan tahun 2024 bulan maret'));
         $this->assertNotNull($service->catalogAnswerFor('daftar tabel statis kemiskinan tahun 2025 bulan oktober'));
         $this->assertNotNull($service->catalogAnswerFor('subjek data tahun 2026 bulan 2'));
-
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/publication/domain/1600/year/2024/month/3/'));
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/statictable/domain/1600/year/2025/month/10/'));
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/subject/domain/1600/year/2026/month/2/'));
+        Http::assertNothingSent();
     }
 
-    public function test_bps_catalog_recognizes_berita_statistik_without_resmi(): void
+    public function test_bps_catalog_persists_dynamic_values_and_reuses_fresh_database_data(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
-        Http::fake(['webapi.bps.go.id/*' => Http::response([
-            'status' => 'OK',
-            'data' => [['total' => 1], [['title' => 'Berita Statistik Terbaru']]],
-        ])]);
+        $requests = 0;
+        Http::fake(function () use (&$requests) {
+            $requests++;
 
-        $answer = app(BpsWebApiService::class)->catalogAnswerFor('berita statistik');
+            return Http::response([
+                'status' => 'OK',
+                'var' => [[
+                    'val' => 362,
+                    'label' => 'Jumlah Guru',
+                    'unit' => 'Orang',
+                    'subj' => 'Pendidikan',
+                    'note' => '<p>Catatan <strong>guru</strong></p>',
+                ]],
+                'vervar' => [['val' => 1604, 'label' => 'Lahat']],
+                'turvar' => [['val' => 190, 'label' => 'SD']],
+                'tahun' => [['val' => 125, 'label' => '2025']],
+                'datacontent' => ['16043621901250' => 4024],
+                'labelvervar' => 'Kabupaten/Kota',
+                'last_update' => '2026-10-01',
+            ]);
+        });
+        $service = app(BpsWebApiService::class);
+        $catalogResponse = new \ReflectionMethod(BpsWebApiService::class, 'catalogResponse');
+        $catalogResponse->setAccessible(true);
+        $row = [
+            'id_tabel' => '362',
+            'jenis_tabel' => 'Tabel Dinamis',
+            'tahun' => '2025',
+            'judul' => 'Jumlah Guru Menurut Jenjang Pendidikan',
+            'link_json' => 'https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/362/th/125/key/',
+        ];
 
-        $this->assertStringContainsString('Berita Statistik Terbaru', $answer);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/'));
+        $catalogResponse->invoke($service, $row, 'bps-test-secret');
+        $catalogResponse->invoke($service, $row, 'bps-test-secret');
+
+        $storedTable = DB::table('data_tabel')
+            ->where('id_tabel', '362')
+            ->where('tahun', '2025')
+            ->value('link_json');
+        $storedValue = DB::table('nilai_data')
+            ->where('id_tabel', '362')
+            ->where('wilayah', 'Lahat')
+            ->where('turvar', 'SD')
+            ->value('nilai');
+        $storedNote = DB::table('tabel_meta')
+            ->where('id_tabel', '362')
+            ->value('catatan');
+
+        $this->assertSame(1, $requests);
+        $this->assertSame($row['link_json'], $storedTable);
+        $this->assertStringNotContainsString('bps-test-secret', $storedTable);
+        $this->assertEquals(4024, $storedValue);
+        $this->assertSame('Catatan guru', $storedNote);
+    }
+
+    public function test_bps_catalog_fetches_editorial_lists_and_details_from_webapi(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Cache::flush();
+        $models = [
+            'pressrelease' => [
+                'question' => 'BRS inflasi tahun 2024',
+                'keyword' => 'inflasi',
+                'id_field' => 'br_id',
+                'id' => 'brs-1',
+                'title' => 'Inflasi Sumatera Selatan',
+            ],
+            'publication' => [
+                'question' => 'publikasi pertanian 2024',
+                'keyword' => 'pertanian',
+                'id_field' => 'pub_id',
+                'id' => 'publication-1',
+                'title' => 'Statistik Pertanian Sumatera Selatan',
+            ],
+            'news' => [
+                'question' => 'berita sensus tahun 2024',
+                'keyword' => 'sensus',
+                'id_field' => 'news_id',
+                'id' => 'news-1',
+                'title' => 'Kegiatan Sensus Pertanian',
+            ],
+        ];
+        Http::fake(function ($request) use ($models) {
+            foreach ($models as $model => $record) {
+                if (str_contains($request->url(), '/list/model/'.$model.'/')) {
+                    return Http::response([
+                        'status' => 'OK',
+                        'data' => [['total' => 1, 'pages' => 1], [[
+                            $record['id_field'] => $record['id'],
+                            'title' => $record['title'],
+                            'rl_date' => '2024-03-10',
+                            'pdf' => 'https://bps.go.id/'.$record['id'].'.pdf',
+                        ]]],
+                    ]);
+                }
+                if (str_contains($request->url(), '/view/model/'.$model.'/')) {
+                    return Http::response([
+                        'status' => 'OK',
+                        'data' => [[
+                            $record['id_field'] => $record['id'],
+                            'abstract' => 'Abstrak API '.$record['title'].'.',
+                        ]],
+                    ]);
+                }
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $service = app(BpsWebApiService::class);
+        foreach ($models as $model => $record) {
+            $answer = $service->catalogAnswerFor($record['question']);
+            $fallbackAnswer = $service->fallbackAnswerFor($record['question']);
+            $this->assertStringContainsString($record['title'], $answer);
+            $this->assertStringContainsString($record['title'], $fallbackAnswer);
+            $this->assertStringContainsString('2024-03-10', $answer);
+            $this->assertStringContainsString('Abstrak API '.$record['title'].'.', $answer);
+            $this->assertStringContainsString('https://bps.go.id/'.$record['id'].'.pdf', $answer);
+            $this->assertStringNotContainsString('bps-test-secret', $answer);
+            Http::assertSent(fn ($request) => str_contains($request->url(), '/list/model/'.$model.'/')
+                && str_contains($request->url(), '/year/2024/')
+                && str_contains($request->url(), '/keyword/'.$record['keyword'].'/'));
+            Http::assertSent(fn ($request) => str_contains($request->url(), '/view/model/'.$model.'/lang/ind/id/'.$record['id'].'/'));
+        }
     }
 
     public function test_dynamic_bps_context_prefers_the_candidate_with_the_requested_year(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -375,17 +463,16 @@ class AdminManagementPagesTest extends BaseTestCase
             return Http::response(['status' => 'ERROR'], 404);
         });
 
-        $context = app(BpsWebApiService::class)->contextFor('berapa jumlah produksi ikan tahun 2024');
+        $context = app(BpsWebApiService::class)->contextFor('jumlah penduduk menurut kabupaten kota tahun 2024');
 
-        $this->assertStringContainsString('Produksi Ikan Budidaya', $context);
         $this->assertStringContainsString('"tahun":"2024"', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/12/th/2024/'));
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/11/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/124/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/126/'));
     }
 
     public function test_dynamic_bps_context_asks_for_clarification_when_candidates_remain_tied(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -407,26 +494,21 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $context = app(BpsWebApiService::class)->contextFor('berapa jumlah produksi ikan tahun 2026');
 
-        $this->assertStringContainsString('[INDIKATOR_AMBIGU]', $context);
-        $this->assertStringContainsString('Produksi Ikan Tangkap', $context);
-        $this->assertStringContainsString('Produksi Ikan Budidaya', $context);
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
+        $this->assertStringContainsString('[DATA_BELUM_TERSEDIA]', $context);
+        $this->assertStringNotContainsString('Produksi Daging', $context);
+        Http::assertNothingSent();
     }
 
     public function test_dynamic_bps_context_uses_latest_period_and_caches_period_list(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
-        $periodRequests = 0;
-        $periodFixture = json_decode(file_get_contents(base_path('tests/Fixtures/bps-periods-var-608.json')), true);
-        Http::fake(function ($request) use (&$periodRequests, $periodFixture) {
+        $dataRequests = 0;
+        Http::fake(function ($request) use (&$dataRequests) {
             $url = $request->url();
-            if (str_contains($url, '/model/th/domain/1600/var/608/')) {
-                $periodRequests++;
-
-                return Http::response($periodFixture);
-            }
             if (str_contains($url, '/model/data/')) {
+                $dataRequests++;
+
                 return Http::response(['status' => 'OK', 'datacontent' => ['1600' => 123]]);
             }
 
@@ -434,18 +516,18 @@ class AdminManagementPagesTest extends BaseTestCase
         });
 
         $service = app(BpsWebApiService::class);
-        $firstContext = $service->contextFor('kemiskinan');
-        $secondContext = $service->contextFor('kemiskinan');
+        $firstContext = $service->contextFor('jumlah penduduk menurut kabupaten kota');
+        $secondContext = $service->contextFor('jumlah penduduk menurut kabupaten kota');
 
         $this->assertStringContainsString('2026', $firstContext);
         $this->assertStringContainsString('2026', $secondContext);
-        $this->assertSame(1, $periodRequests);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/608/th/126/'));
+        $this->assertSame(1, $dataRequests);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/126/'));
     }
 
     public function test_variable_index_uses_titles_and_prefers_regional_indicators(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         $title = 'Persentase Penduduk Miskin Menurut Kabupaten/Kota';
         Http::fake(function ($request) use ($title) {
@@ -528,7 +610,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_curated_ipm_variable_uses_verified_var_id(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -546,7 +628,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $context = app(BpsWebApiService::class)->contextFor('IPM terbaru');
 
         $this->assertStringContainsString('Indeks Pembangunan Manusia', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/125/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/var/'));
         Carbon::setTestNow();
     }
@@ -572,7 +654,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_canonical_coverage_checks_live_api_values_by_vervar_and_flags_missing_regions(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -626,7 +708,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_latest_bps_indicator_uses_latest_available_period_when_current_period_is_missing(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -647,16 +729,16 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $context = app(BpsWebApiService::class)->contextFor('IPM terbaru');
 
-        $this->assertStringContainsString('[TAHUN_FALLBACK]', $context);
+        $this->assertStringNotContainsString('[TAHUN_FALLBACK]', $context);
         $this->assertStringContainsString('"tahun":"2025"', $context);
         $this->assertStringContainsString('75.5', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/125/'));
         Carbon::setTestNow();
     }
 
     public function test_curated_population_variable_uses_verified_estimate_var_id(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -689,7 +771,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_explicit_population_projection_uses_the_projection_series(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -720,7 +802,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_returns_population_total_for_a_requested_district_and_province(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -757,9 +839,9 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/domain/1612/'));
     }
 
-    public function test_fallback_returns_dynamic_indicator_value_for_a_requested_city(): void
+    public function test_fallback_does_not_substitute_an_unrelated_catalog_indicator(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -787,14 +869,14 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $reply = app(BpsWebApiService::class)->fallbackAnswerFor('berapa produksi ikan Palembang');
 
-        $this->assertStringContainsString('Produksi Ikan di Kota Palembang tahun 2025', $reply);
-        $this->assertStringContainsString('Nilai: 123 Ton', $reply);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/42/'));
+        $this->assertStringContainsString('belum ditemukan atau belum tersedia dalam katalog CSV BPS', $reply);
+        $this->assertStringNotContainsString('Produksi Daging', $reply);
+        Http::assertNothingSent();
     }
 
     public function test_fallback_searches_local_catalog_and_returns_latest_marital_status_series(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         $titles = [
             794 => 'Penduduk Laki-Laki Berumur 10 Tahun Ke Atas Menurut Status Perkawinan',
@@ -843,7 +925,7 @@ class AdminManagementPagesTest extends BaseTestCase
     public function test_catalog_fallback_shows_all_subregions_when_province_aggregate_is_missing(): void
     {
         $apiKey = 'bps-test-secret';
-        app(BpsWebApiService::class)->saveApiKey($apiKey);
+        config(['services.bps.api_key' => $apiKey]);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -911,7 +993,7 @@ class AdminManagementPagesTest extends BaseTestCase
     public function test_provincial_series_with_an_explicit_aggregate_row_is_not_treated_as_missing(): void
     {
         $apiKey = 'bps-test-secret';
-        app(BpsWebApiService::class)->saveApiKey($apiKey);
+        config(['services.bps.api_key' => $apiKey]);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -972,7 +1054,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_uses_a_configured_topic_for_a_requested_city(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1008,7 +1090,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_answers_multiple_topics_and_regions_with_latest_available_year(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -1073,7 +1155,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_returns_ambiguous_poverty_indicators_for_each_compared_city(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1128,7 +1210,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_returns_each_requested_indicator_for_each_compared_city(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1186,7 +1268,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_diagnostic_command_reports_topics_variables_years_and_vervar(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             if (str_contains($request->url(), '/model/th/domain/1600/var/604/')) {
@@ -1217,7 +1299,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_population_projection_is_not_used_for_disaggregated_population_questions(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -1248,7 +1330,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_poverty_count_does_not_use_the_verified_poverty_percentage_variable(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -1278,7 +1360,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_historical_monthly_indicator_uses_dated_bps_press_release(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(['webapi.bps.go.id/*' => Http::response([
             'status' => 'OK',
@@ -1300,7 +1382,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_monthly_latest_request_does_not_fall_back_when_brs_has_no_dated_release(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(['webapi.bps.go.id/*' => Http::response([
@@ -1345,7 +1427,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_explicit_historical_ipm_year_remains_available(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1362,12 +1444,26 @@ class AdminManagementPagesTest extends BaseTestCase
         $context = app(BpsWebApiService::class)->contextFor('IPM tahun 2025');
 
         $this->assertStringContainsString('"tahun":"2025"', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/2025/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/125/'));
+    }
+
+    public function test_explicit_year_missing_from_csv_reports_available_years_without_fallback(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Cache::flush();
+        Http::fake();
+
+        $context = app(BpsWebApiService::class)->contextFor('IPM tahun 2026');
+
+        $this->assertStringContainsString('[TAHUN_TIDAK_TERSEDIA]', $context);
+        $this->assertStringContainsString('2025', $context);
+        $this->assertStringContainsString('2024', $context);
+        Http::assertNothingSent();
     }
 
     public function test_static_tables_without_main_keyword_are_rejected(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1401,7 +1497,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_upah_uses_a_static_table_before_monthly_releases(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1432,7 +1528,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_dynamic_bps_context_prefers_annual_variable_for_per_tahun_question(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -1458,28 +1554,19 @@ class AdminManagementPagesTest extends BaseTestCase
         $context = app(BpsWebApiService::class)->contextFor('pertumbuhan pdrb per tahun');
 
         $this->assertStringContainsString('Laju Pertumbuhan Produk Domestik Regional Bruto (PDRB) Tahunan', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/862/th/2025/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/862/th/125/'));
     }
 
     public function test_dynamic_bps_context_rejects_data_without_the_requested_region_label(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/var/')) {
-                return Http::response([
-                    'status' => 'OK',
-                    'data' => [['pages' => 1], [['var_id' => 41, 'title' => 'Produksi Ikan']]],
-                ]);
-            }
-            if (str_contains($url, '/model/th/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
-            }
             if (str_contains($url, '/model/data/')) {
                 return Http::response([
                     'status' => 'OK',
-                    'datacontent' => ['1671' => 123],
+                    'datacontent' => ['1604608126' => 123],
                     'vervar' => [['label' => 'Kabupaten Lahat']],
                 ]);
             }
@@ -1487,32 +1574,23 @@ class AdminManagementPagesTest extends BaseTestCase
             return Http::response(['status' => 'ERROR'], 404);
         });
 
-        $context = app(BpsWebApiService::class)->contextFor('berapa jumlah produksi ikan Palembang');
+        $context = app(BpsWebApiService::class)->contextFor('persentase penduduk miskin maret Palembang');
 
         $this->assertStringContainsString('[WILAYAH_TIDAK_TERSEDIA]', $context);
-        $this->assertStringContainsString('tidak tersedia pada indikator Produksi Ikan', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/domain/1600/'));
+        $this->assertStringContainsString('tidak tersedia pada indikator Persentase Penduduk Miskin', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/608/'));
     }
 
     public function test_dynamic_bps_context_matches_multiword_region_alias_and_removes_it_from_search_terms(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/var/')) {
+            if (str_contains($url, '/model/data/')) {
                 return Http::response([
                     'status' => 'OK',
-                    'data' => [['pages' => 1], [['var_id' => 42, 'title' => 'Produksi Ikan']]],
-                ]);
-            }
-            if (str_contains($url, '/model/th/domain/1600/var/42/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
-            }
-            if (str_contains($url, '/model/data/domain/1600/var/42/')) {
-                return Http::response([
-                    'status' => 'OK',
-                    'datacontent' => ['16084220250' => 123],
+                    'datacontent' => ['1608608126' => 123],
                     'vervar' => [['val' => 1608, 'label' => 'Kabupaten Ogan Komering Ulu Selatan']],
                 ]);
             }
@@ -1520,36 +1598,23 @@ class AdminManagementPagesTest extends BaseTestCase
             return Http::response(['status' => 'ERROR'], 404);
         });
 
-        $context = app(BpsWebApiService::class)->contextFor('berapa produksi ikan OKU Selatan');
+        $context = app(BpsWebApiService::class)->contextFor('persentase penduduk miskin maret OKU Selatan');
 
-        $this->assertStringContainsString('Produksi Ikan', $context);
-        $this->assertStringContainsString('"nilai":{"16084220250":123}', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/var/')
-            && str_contains($request->url(), '/keyword/produksi/')
-            && ! str_contains($request->url(), 'oku')
-            && ! str_contains($request->url(), 'selatan'));
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/42/'));
+        $this->assertStringContainsString('Persentase Penduduk Miskin', $context);
+        $this->assertStringContainsString('"nilai":{"1608608126":123}', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/608/'));
     }
 
     public function test_dynamic_bps_context_does_not_match_a_region_name_by_prefix(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
-            if (str_contains($url, '/model/var/')) {
+            if (str_contains($url, '/model/data/')) {
                 return Http::response([
                     'status' => 'OK',
-                    'data' => [['pages' => 1], [['var_id' => 43, 'title' => 'Produksi Ikan']]],
-                ]);
-            }
-            if (str_contains($url, '/model/th/domain/1600/var/43/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
-            }
-            if (str_contains($url, '/model/data/domain/1600/var/43/')) {
-                return Http::response([
-                    'status' => 'OK',
-                    'datacontent' => ['1600' => 123],
+                    'datacontent' => ['1608608126' => 123],
                     'vervar' => [['label' => 'Kabupaten Ogan Komering Ulu Selatan']],
                 ]);
             }
@@ -1557,11 +1622,11 @@ class AdminManagementPagesTest extends BaseTestCase
             return Http::response(['status' => 'ERROR'], 404);
         });
 
-        $context = app(BpsWebApiService::class)->contextFor('berapa produksi ikan Ogan Komering Ulu');
+        $context = app(BpsWebApiService::class)->contextFor('persentase penduduk miskin maret Ogan Komering Ulu');
 
         $this->assertStringContainsString('[WILAYAH_TIDAK_TERSEDIA]', $context);
-        $this->assertStringContainsString('tidak tersedia pada indikator Produksi Ikan', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/') && str_contains($request->url(), '/var/43/'));
+        $this->assertStringContainsString('tidak tersedia pada indikator Persentase Penduduk Miskin', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/608/'));
     }
 
     public function test_admin_can_confirm_assign_and_complete_a_consultation(): void
@@ -2063,7 +2128,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_gini_fallback_returns_the_matching_brs_without_poverty_candidates(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(['webapi.bps.go.id/*' => Http::response([
             'status' => 'OK',
@@ -2083,7 +2148,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_gender_ratio_query_uses_bps_variable_793_for_lahat(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -2124,7 +2189,7 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         $aiReply = 'Indikator Gini dan kemiskinan yang dimaksud belum dapat dipastikan.';
         Http::fake(function ($request) use ($aiReply) {
@@ -2158,7 +2223,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_uses_general_brs_intro_when_no_topic_matches(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(['webapi.bps.go.id/*' => Http::response([
@@ -2181,7 +2246,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_regional_fallback_uses_the_district_press_release_domain_after_dynamic_data_misses(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -2218,7 +2283,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_regional_fallback_uses_a_provincial_release_that_mentions_the_requested_city(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -2258,7 +2323,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_regional_fallback_uses_provincial_topic_releases_with_a_region_note_as_last_resort(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
         Http::fake(function ($request) {
@@ -2342,7 +2407,7 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             if (str_contains($request->url(), '127.0.0.1:8001/api/chat')) {
@@ -2435,7 +2500,7 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         $aiReply = 'Maaf, data rinci belum dapatdiverifikasi dari indikator tersebut.';
         $categories = [
@@ -2496,7 +2561,7 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         $aiRequests = 0;
         $question = 'Tingkat pengangguran Sumatera Selatan terbaru?';
@@ -2560,7 +2625,7 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         $aiReply = 'Data 2026 belum dirilis. Data terbaru Provinsi Sumatera Selatan (2025): '
             .'Tingkat Pengangguran sebesar 3,69 Persen.';
@@ -2585,7 +2650,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_inflation_for_current_month_uses_bps_press_release_context(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Http::fake(['webapi.bps.go.id/*' => Http::response([
             'status' => 'OK',
             'data' => [['total' => 1, 'pages' => 1], [[
@@ -2605,7 +2670,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_ump_fallback_rejects_substring_table_matches_and_decodes_html_table_text(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -2655,7 +2720,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_uses_regional_canonical_pdrb_series_for_the_requested_year(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -2698,7 +2763,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_uses_the_total_category_for_provincial_unemployment(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -2740,7 +2805,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_fallback_uses_adhk_pdrb_when_requested_for_a_city(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             $url = $request->url();
@@ -2782,7 +2847,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_regional_inflation_context_falls_back_to_province_with_scope_notice(): void
     {
-        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
         Http::fake(function ($request) {
             if (str_contains($request->url(), '/model/pressrelease/domain/1612/')) {
