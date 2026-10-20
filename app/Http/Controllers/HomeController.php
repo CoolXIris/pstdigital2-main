@@ -38,9 +38,10 @@ class HomeController extends Controller
             $reviewsQuery->where('rating', $ratingFilter);
         }
         $reviews = $reviewsQuery
-            ->orderBy($reviewSort === 'baru' ? 'id' : 'tanggal', $reviewSort === 'baru' ? 'desc' : 'asc')
-            ->limit(6)
-            ->get();
+            ->orderBy('tanggal', $reviewSort === 'baru' ? 'desc' : 'asc')
+            ->orderBy('id', $reviewSort === 'baru' ? 'desc' : 'asc')
+            ->paginate(6)
+            ->withQueryString();
 
         $topicRows = (clone $baseMeetings)->selectRaw('name, COUNT(*) as total')->groupBy('name')->orderByDesc('total')->limit(5)->get();
         $jobRows = User::query()->whereNotNull('pekerjaan')->where('pekerjaan', '!=', '')

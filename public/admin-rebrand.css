@@ -571,3 +571,62 @@ html[data-theme="dark"] .consultation-chat-header small, html[data-theme="dark"]
 .consultation-chat-unread-dot[hidden] { display:none !important; }
 .consultation-read-receipt { margin-left:7px; font-weight:600; }
 html[data-theme="dark"] .consultation-chat-unread-dot { border-color:#303b45; }
+
+/* Dashboard reviews: clearer summaries, review cards, and pagination. */
+.admin-dashboard-reviews { overflow: hidden; border-radius: 9px; }
+.admin-dashboard-reviews .admin-review-heading { gap: 18px; padding: 20px 20px 16px; background: linear-gradient(115deg, #fbfdff 0%, #f4f8fc 100%); border-bottom: 1px solid #e5edf5; }
+.admin-review-heading-main { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.admin-review-heading-icon { display: grid; flex: 0 0 38px; place-items: center; width: 38px; height: 38px; color: var(--bps-blue); background: #e7f0fa; border: 1px solid #dbe7f3; border-radius: 10px; font-size: 17px; }
+.admin-dashboard-reviews .admin-panel-title { margin: 0; color: #183b60; font-size: 16px; font-weight: 600; }
+.admin-review-heading-description { margin: 4px 0 0; color: #6b7f94; font-size: 11px; line-height: 1.5; }
+.admin-dashboard-rating { flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.admin-review-score-star { color: #e2a51f; font-size: 16px; line-height: 1; }
+.admin-dashboard-rating strong { color: #203e5f; font-size: 19px; line-height: 1; }
+.admin-dashboard-rating small { color: #6c8095; }
+.admin-review-sort .form-select { min-height: 38px; border-radius: 7px; font-size: 11px; }
+.admin-review-tabs { gap: 6px; padding: 0 0 12px; }
+.admin-review-tabs a { padding: 7px 11px; background: #f5f8fb; border: 1px solid transparent; border-radius: 999px; font-size: 10px; transition: color .16s ease, background .16s ease, border-color .16s ease, transform .16s ease; }
+.admin-review-tabs a:hover { border-color: #cfdeed; transform: translateY(-1px); }
+.admin-review-tabs a.is-active { color: #fff; background: var(--bps-blue); border-color: var(--bps-blue); box-shadow: 0 2px 6px rgba(4, 50, 119, .16); }
+.admin-review-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 13px; }
+.admin-review-list .admin-review { min-width: 0; min-height: 104px; margin: 0; padding: 14px 15px !important; background: #fff; border: 1px solid #e1e9f1; border-radius: 8px; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.admin-review-list .admin-review:hover { border-color: #bfd1e3; box-shadow: 0 4px 12px rgba(26, 55, 86, .07); transform: translateY(-1px); }
+.admin-review-list .admin-review:last-child { border-bottom: 1px solid #e1e9f1; }
+.admin-review-meta { align-items: flex-start; }
+.admin-review-author { display: grid; gap: 3px; min-width: 0; }
+.admin-review-author strong { overflow: hidden; color: #304d69; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.admin-review-author time { color: #8292a3; font-size: 10px; }
+.admin-review-list .admin-review .admin-stars { flex: 0 0 auto; padding: 3px 7px; background: #fff8e8; border-radius: 999px; font-size: 11px; letter-spacing: 1px; white-space: nowrap; }
+.admin-review-list .admin-review p { margin: 10px 0 0; color: #405970; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
+.admin-review-pagination { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 15px; padding-top: 13px; border-top: 1px solid #e7edf4; }
+.admin-review-count { margin: 0; color: #6d8095; font-size: 11px; }
+.admin-review-count strong { color: #3e5770; font-weight: 600; }
+.admin-review-pagination .pagination { gap: 4px; margin: 0; }
+.admin-review-pagination .page-link { display: grid; min-width: 32px; min-height: 32px; place-items: center; padding: 4px 8px; color: #315b87; border-color: #dce6ef; border-radius: 6px; font-size: 11px; text-decoration: none; }
+.admin-review-pagination .page-item:not(.active, .disabled) .page-link:hover { background: #edf4fb; border-color: #b9cee2; }
+.admin-review-pagination .page-item.active .page-link { color: #fff; background: var(--bps-blue); border-color: var(--bps-blue); }
+.admin-review-pagination .page-item.disabled .page-link { color: #a9b6c3; background: #f7f9fb; }
+html[data-theme="dark"] .admin-dashboard-reviews .admin-review-heading { background: linear-gradient(115deg, #293744 0%, #2b3946 100%); border-bottom-color: #3b4a59; }
+html[data-theme="dark"] .admin-review-heading-icon { color: #b8d9f2; background: #344a61; border-color: #46596c; }
+html[data-theme="dark"] .admin-dashboard-reviews .admin-panel-title, html[data-theme="dark"] .admin-dashboard-rating strong { color: #e7eef4; }
+html[data-theme="dark"] .admin-review-heading-description, html[data-theme="dark"] .admin-dashboard-rating small { color: #bac7d2; }
+html[data-theme="dark"] .admin-review-tabs a { background: #303b45; }
+html[data-theme="dark"] .admin-review-tabs a:hover { border-color: #596d80; }
+html[data-theme="dark"] .admin-review-tabs a.is-active { color: #fff; background: #14529a; border-color: #397ab8; }
+html[data-theme="dark"] .admin-review-list .admin-review, html[data-theme="dark"] .admin-review-list .admin-review:last-child { background: #252f39; border-color: #3b4a59; }
+html[data-theme="dark"] .admin-review-list .admin-review:hover { border-color: #60778b; }
+html[data-theme="dark"] .admin-review-author strong, html[data-theme="dark"] .admin-review-list .admin-review p { color: #d4dee7; }
+html[data-theme="dark"] .admin-review-author time, html[data-theme="dark"] .admin-review-count { color: #aebdca; }
+html[data-theme="dark"] .admin-review-list .admin-review .admin-stars { background: #51472c; }
+html[data-theme="dark"] .admin-review-pagination { border-top-color: #3b4a59; }
+html[data-theme="dark"] .admin-review-count strong { color: #dce5ed; }
+html[data-theme="dark"] .admin-review-pagination .page-link { color: #c8def3; background: #303b45; border-color: #536372; }
+html[data-theme="dark"] .admin-review-pagination .page-item.active .page-link { color: #fff; background: var(--bps-blue); border-color: #3c7bc0; }
+html[data-theme="dark"] .admin-review-pagination .page-item.disabled .page-link { color: #8191a0; background: #252f39; }
+
+@media (max-width: 767.98px) {
+    .admin-review-heading-main { align-items: flex-start; }
+    .admin-review-heading-description { max-width: 42ch; }
+    .admin-review-list { grid-template-columns: 1fr; }
+    .admin-review-pagination { align-items: flex-start; flex-direction: column; }
+}
