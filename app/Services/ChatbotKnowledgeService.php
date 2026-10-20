@@ -70,7 +70,7 @@ class ChatbotKnowledgeService
             ->limit(500)
             ->get()
             ->map(function (ChatbotKnowledgeChunk $chunk) use ($terms) {
-                $text = Str::lower($chunk->content);
+                $text = Str::lower(($chunk->source?->title ?? '').' '.$chunk->content);
                 $score = 0;
                 foreach ($terms as $term) {
                     $score += substr_count($text, $term) * min(Str::length($term), 8);
@@ -190,6 +190,8 @@ class ChatbotKnowledgeService
             'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong',
             'perbedaan', 'beda', 'pengertian', 'definisi', 'arti', 'maksud', 'konsep',
             'cara', 'membaca', 'menafsirkan', 'menghitung', 'rumus', 'jelaskan',
+            'jumlah', 'nilai', 'angka', 'statistik', 'terbaru', 'terkini', 'terakhir',
+            'tahun', 'bulan', 'sekarang', 'saat', 'ini', 'file', 'dokumen', 'sumber',
         ];
 
         return array_values(array_diff($matches[0] ?? [], $stopWords));

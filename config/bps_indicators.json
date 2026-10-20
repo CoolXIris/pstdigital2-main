@@ -148,6 +148,18 @@
           "vervar_label": "Gini Ratio"
         }
       ]
+    },
+    {
+      "terms": ["rasio", "jenis", "kelamin", "gender"],
+      "variables": [
+        {
+          "name": "rasio_jenis_kelamin",
+          "var_id": 793,
+          "title": "Rasio Jenis Kelamin Menurut Kabupaten/Kota",
+          "terms": ["rasio", "jenis", "kelamin", "gender"],
+          "excludes": ["gini", "pengeluaran"]
+        }
+      ]
     }
   ]
 }

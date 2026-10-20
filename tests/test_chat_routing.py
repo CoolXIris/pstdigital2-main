@@ -17,6 +17,7 @@ class ChatRoutingTests(unittest.TestCase):
             ("penduduk PALI 2023-2026", "rentang_waktu"),
             ("BRS terbaru", "brs"),
             ("publikasi terbaru", "publikasi"),
+            ("Daftar tabel SIMDASI", "nilai"),
             ("apa itu PDRB ADHB", "definisi"),
             ("Apa perbedaan PDRB ADHB dan ADHK?", "definisi"),
             ("Bagaimana membaca PDRB ADHB?", "definisi"),
@@ -66,6 +67,20 @@ class ChatRoutingTests(unittest.TestCase):
             main._reply_numbers_are_verified(
                 "Jumlah penduduk sekitar 9 juta jiwa.",
                 [{"result": {"data": [{"nilai": 9_017_142}]}}],
+            )
+        )
+        self.assertTrue(
+            main._reply_numbers_are_verified(
+                "Garis kemiskinan Rp12,5 ribu.",
+                [],
+                "Garis kemiskinan tercatat Rp12,5 ribu.",
+            )
+        )
+        self.assertFalse(
+            main._reply_numbers_are_verified(
+                "Garis kemiskinan Rp18,5 ribu.",
+                [],
+                "Garis kemiskinan tercatat Rp12,5 ribu.",
             )
         )
 
@@ -964,6 +979,206 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("83,27", result["reply"])
         self.assertNotIn("81,22", result["reply"])
         self.assertTrue(result["tools_used"])
+
+    def test_regional_tpt_year_query_uses_simdasi_before_provincial_release(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="TPT Lahat tahun 2025 sebesar 99,99 persen.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type(
+                "FakeModels",
+                (),
+                {"generate_content": lambda *_args, **_kwargs: response},
+            )()},
+        )()
+        simdasi_data = {
+            "judul": "TPT Kabupaten/Kota Sumatera Selatan",
+            "tahun": 2025,
+            "wilayah_ditafsirkan": "Kabupaten Lahat",
+            "data": [{
+                "wilayah": "Lahat",
+                "variabel": "Tingkat Pengangguran Terbuka (TPT) - Agustus",
+                "nilai": "2,84",
+            }],
+            "status_hasil": "ditemukan",
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "simdasi_cari_data", return_value=simdasi_data) as simdasi,
+            patch.object(main.bps_tools, "berita_resmi_statistik") as press_release,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="berapa TPT di Lahat tahun 2025?")
+            )
+
+        simdasi.assert_called_once_with(
+            kata_kunci="TPT",
+            tahun="2025",
+            wilayah="Kabupaten Lahat",
+        )
+        press_release.assert_not_called()
+        self.assertIn("2,84", result["reply"])
+        self.assertNotIn("99,99", result["reply"])
+
+    def test_regional_tpt_latest_query_falls_back_to_simdasi(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="TPT Lahat sebesar 99,99 persen.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type(
+                "FakeModels",
+                (),
+                {"generate_content": lambda *_args, **_kwargs: response},
+            )()},
+        )()
+        simdasi_data = {
+            "judul": "TPT Kabupaten/Kota Sumatera Selatan",
+            "tahun": 2025,
+            "wilayah_ditafsirkan": "Kabupaten Lahat",
+            "data": [{
+                "wilayah": "Lahat",
+                "variabel": "Tingkat Pengangguran Terbuka (TPT) - Agustus",
+                "nilai": "2,84",
+            }],
+            "status_hasil": "ditemukan",
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(
+                main.bps_tools,
+                "indikator_utama",
+                return_value={"error": "Variabel ini hanya tersedia untuk provinsi."},
+            ),
+            patch.object(main.bps_tools, "simdasi_cari_data", return_value=simdasi_data) as simdasi,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(main.ChatRequest(question="berapa TPT di Lahat?"))
+
+        simdasi.assert_called_once_with(
+            kata_kunci="TPT",
+            tahun=None,
+            wilayah="Kabupaten Lahat",
+        )
+        self.assertIn("2,84", result["reply"])
+        self.assertNotIn("99,99", result["reply"])
+
+    def test_relevant_knowledge_context_preempts_webapi_for_non_latest_request(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="Dalam dokumen, garis kemiskinan tercatat Rp12,5 ribu.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type(
+                "FakeModels",
+                (),
+                {"generate_content": lambda *_args, **_kwargs: response},
+            )()},
+        )()
+        context = "[Sumber: Pedoman Kemiskinan 2024] Garis kemiskinan tercatat Rp12,5 ribu."
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "indikator_utama") as canonical,
+            patch.object(main.bps_tools, "cari_variabel") as search,
+            patch.object(main.bps_tools, "tabel_statis") as static_tables,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="berapa garis kemiskinan?", context=context)
+            )
+
+        canonical.assert_not_called()
+        search.assert_not_called()
+        static_tables.assert_not_called()
+        self.assertIn("12,5", result["reply"])
+
+    def test_latest_request_uses_webapi_even_when_knowledge_has_old_data(self):
+        response = main.types.GenerateContentResponse(
+            candidates=[
+                main.types.Candidate(
+                    content=main.types.Content(
+                        role="model",
+                        parts=[main.types.Part(text="IPM Sumatera Selatan tahun 2025 sebesar 75,5.")],
+                    )
+                )
+            ]
+        )
+        fake_client = type(
+            "FakeClient",
+            (),
+            {"models": type(
+                "FakeModels",
+                (),
+                {"generate_content": lambda *_args, **_kwargs: response},
+            )()},
+        )()
+        context = "[Sumber: Ringkasan IPM] IPM Sumatera Selatan tahun 2022 sebesar 70,0."
+        api_data = {
+            "judul": "Indeks Pembangunan Manusia",
+            "tahun": "2025",
+            "data": [{"wilayah": "Sumatera Selatan", "nilai": 75.5}],
+            "status_hasil": "ditemukan",
+        }
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(main, "get_client", return_value=fake_client),
+            patch.object(main.bps_tools, "indikator_utama", return_value=api_data) as canonical,
+            patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
+        ):
+            result = main.chat_endpoint(
+                main.ChatRequest(question="berapa IPM terbaru?", context=context)
+            )
+
+        canonical.assert_called_once()
+        self.assertIn("75,5", result["reply"])
+        self.assertNotIn("70,0", result["reply"])
+
+    def test_requested_year_missing_from_knowledge_routes_to_webapi(self):
+        self.assertFalse(
+            main._prefer_knowledge_context(
+                "berapa IPM tahun 2025?",
+                "[Sumber: Ringkasan IPM] IPM tahun 2022 sebesar 70,0.",
+            )
+        )
+        self.assertTrue(
+            main._prefer_knowledge_context(
+                "berapa IPM tahun 2022?",
+                "[Sumber: Ringkasan IPM] IPM tahun 2022 sebesar 70,0.",
+            )
+        )
 
     def test_canonical_indicator_uses_region_and_requested_level(self):
         self.assertEqual(

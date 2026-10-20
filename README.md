@@ -64,6 +64,8 @@ series, and warns when the latest data is more than one year behind. Golden
 questions and optional expected year/value snapshots are maintained in
 `tests/Fixtures/bps-golden-questions.json`. Update the snapshot deliberately
 after checking the published API value when BPS releases a newer period.
+The canonical unemployment variable (var_id 334) remains province-only; when a
+regional value is requested, the chatbot can use a matching SIMDASI table instead.
 
 ## Dynamic BPS catalog
 
@@ -74,6 +76,19 @@ units, and year coverage expand variable and subject searches; the year coverage
 is catalog metadata, not an observation. Numeric answers must still be fetched
 and verified through WebAPI BPS. Regenerate the CSV files from the BPS API with
 `python dump_bps_catalog.py --tahun`.
+
+SIMDASI is a separate WebAPI source from the model-variable CSV catalogs. The
+Python chatbot loads the Sumatera Selatan table-title catalog from the SIMDASI
+area endpoint, caches it in memory for 24 hours, and fetches a selected table by
+its table ID, year, and area. `simdasi_daftar_tabel` can list or search titles;
+`simdasi_cari_data` retrieves matching values, including regional rows such as
+kabupaten/kota data. This covers tables returned by that Sumatera Selatan
+SIMDASI endpoint and does not claim to index every BPS source or other provinces.
+All successful WebAPI GET responses are also cached on demand by endpoint and
+parameters: observations and releases for 30 minutes, period lists for one hour,
+and variable/table catalogs for 24 hours. Credentials are hashed into cache keys,
+not stored as part of them. This cache is process-local memory; it is cleared when
+the Python service restarts and is not shared between multiple workers.
 
 Unresolved data requests are emitted by the Python service as structured
 `BPS_QUERY_UNRESOLVED` warning log events. The logged question is length-limited

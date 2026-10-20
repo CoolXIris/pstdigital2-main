@@ -2081,6 +2081,44 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/'));
     }
 
+    public function test_gender_ratio_query_uses_bps_variable_793_for_lahat(): void
+    {
+        app(BpsWebApiService::class)->saveApiKey('bps-test-secret');
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-10-07 09:00:00', 'Asia/Jakarta'));
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/model/th/domain/1600/var/793/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2026', 'th_id' => 126]]]]);
+            }
+            if (str_contains($request->url(), '/model/data/domain/1600/var/793/th/126/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 793, 'label' => 'Rasio Jenis Kelamin.', 'unit' => 'Persen']],
+                    'vervar' => [
+                        ['val' => 1600, 'label' => 'Sumatera Selatan'],
+                        ['val' => 1604, 'label' => 'Lahat'],
+                    ],
+                    'turvar' => [['val' => '0', 'label' => 'Tidak ada']],
+                    'datacontent' => [
+                        '160079301260' => 103.44,
+                        '160479301260' => 104.25,
+                    ],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('berapa rasio jenis kelamin Kabupaten Lahat tahun 2026?');
+
+        $this->assertStringContainsString('"var_id":793', $context);
+        $this->assertStringContainsString('"label":"Lahat"', $context);
+        $this->assertStringContainsString('"nilai":{"160479301260":104.25}', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/793/th/126/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/257/'));
+        Carbon::setTestNow();
+    }
+
     public function test_unverified_gini_ai_reply_is_replaced_with_only_the_gini_release(): void
     {
         /** @var User $user */

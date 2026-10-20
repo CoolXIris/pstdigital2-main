@@ -503,7 +503,12 @@ class BpsWebApiService
         foreach ($result['items'] as $index => $item) {
             $title = $item['judul'] ?? 'Judul tidak tersedia pada respons API';
             $details = [];
-            foreach (['tanggal' => 'rilis', 'subjek' => 'subjek', 'jumlah_tabel' => 'jumlah tabel', 'tautan' => 'tautan'] as $key => $detailLabel) {
+            foreach ([
+                'tanggal' => 'rilis',
+                'subjek' => 'subjek',
+                'jumlah_tabel' => 'jumlah tabel',
+                'tautan' => 'tautan',
+            ] as $key => $detailLabel) {
                 if (isset($item[$key])) {
                     $details[] = $detailLabel.': '.$item[$key];
                 }
@@ -1530,7 +1535,6 @@ class BpsWebApiService
                 }
             }
         }
-
         return $formatted;
     }
 

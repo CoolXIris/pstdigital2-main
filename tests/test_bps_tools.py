@@ -10,6 +10,10 @@ import bps_tools
 
 
 class BpsToolsTests(unittest.TestCase):
+    def setUp(self):
+        with bps_tools._cache_lock:
+            bps_tools._cache.clear()
+
     def _response(self, status_code, payload, headers=None):
         return httpx.Response(
             status_code,
@@ -51,6 +55,43 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(payload["status"], "OK")
         self.assertEqual(payload["data"], [{"pages": 1}, []])
 
+    def test_successful_api_responses_are_cached_by_path_and_credential(self):
+        response = self._response(200, {"status": "OK", "data": [{"value": 12}]})
+        with (
+            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
+            patch.object(bps_tools._http, "get", return_value=response) as request,
+        ):
+            first = bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
+            second = bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
+            with patch.dict("os.environ", {"BPS_API_KEY": "another-key"}):
+                third = bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
+
+        self.assertEqual(first, second)
+        self.assertEqual(second, third)
+        self.assertEqual(request.call_count, 2)
+        self.assertTrue(all("test-key" not in key and "another-key" not in key for key in bps_tools._cache))
+
+    def test_failed_api_responses_are_not_cached(self):
+        response = self._response(400, {"status": "ERROR"})
+        with (
+            patch.dict("os.environ", {"BPS_API_KEY": "test-key"}),
+            patch.object(bps_tools._http, "get", return_value=response) as request,
+        ):
+            bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
+            bps_tools._get("list/model/data/domain/1600/var/1/th/2025")
+
+        self.assertEqual(request.call_count, 2)
+
+    def test_api_cache_uses_longer_ttl_for_catalogs_than_observations(self):
+        self.assertGreater(
+            bps_tools._api_response_ttl("interoperabilitas/datasource/simdasi/id/23/wilayah/1600000"),
+            bps_tools._api_response_ttl("list/model/data/domain/1600/var/1/th/2025"),
+        )
+        self.assertGreater(
+            bps_tools._api_response_ttl("list/model/var/domain/1600/keyword/penduduk"),
+            bps_tools._api_response_ttl("list/model/th/domain/1600/var/1"),
+        )
+
     def test_invalid_json_and_server_error_raise_bps_error(self):
         invalid_json = httpx.Response(
             200,
@@ -78,6 +119,98 @@ class BpsToolsTests(unittest.TestCase):
         ):
             with self.assertRaises(bps_tools.BpsError):
                 bps_tools._get("list/model/var")
+
+    def test_simdasi_catalog_lists_titles_and_available_years(self):
+        response = {
+            "data": [
+                {"page": 1, "pages": 1},
+                {
+                    "status": "OK",
+                    "data": [{
+                        "id_tabel": "table-id",
+                        "judul": "Tingkat Pengangguran Terbuka (TPT) Menurut Kabupaten/Kota",
+                        "subject": "Ketenagakerjaan",
+                        "bab": "Penduduk dan Ketenagakerjaan",
+                        "ketersediaan_tahun": [2024, 2025],
+                    }],
+                },
+            ]
+        }
+        with (
+            patch.object(bps_tools, "_cached", side_effect=lambda _key, _ttl, loader: loader()),
+            patch.object(bps_tools, "_get", return_value=response),
+        ):
+            result = bps_tools.simdasi_daftar_tabel("daftar tabel SIMDASI")
+
+        self.assertEqual(result["jumlah_ditemukan"], 1)
+        self.assertEqual(result["hasil"][0]["judul"], response["data"][1]["data"][0]["judul"])
+        self.assertEqual(result["hasil"][0]["id_tabel"], "table-id")
+        self.assertEqual(result["hasil"][0]["tahun_tersedia"], [2024, 2025])
+
+    def test_simdasi_data_filters_requested_region_indicator_and_month(self):
+        table = {
+            "id_tabel": "table-id",
+            "judul": "Tingkat Pengangguran Terbuka (TPT) Menurut Kabupaten/Kota",
+            "subject": "Ketenagakerjaan",
+            "ketersediaan_tahun": [2024, 2025],
+        }
+        catalog = {
+            "data": [{"pages": 1}, {"status": "OK", "data": [table]}],
+        }
+        detail = {
+            "data": [{
+                "page": 1,
+                "pages": 1,
+            }, {
+                "judul_tabel": f"{table['judul']}, 2025",
+                "tahun_data": 2025,
+                "subject": "Ketenagakerjaan",
+                "kolom": {
+                    "tpt_feb": {"nama_variabel": "Tingkat Pengangguran Terbuka (TPT) - Februari"},
+                    "tpt_aug": {"nama_variabel": "Tingkat Pengangguran Terbuka (TPT) - Agustus"},
+                    "tpak_aug": {"nama_variabel": "Tingkat Partisipasi Angkatan Kerja (TPAK) - Agustus"},
+                },
+                "data": [
+                    {
+                        "label": "Lahat",
+                        "variables": {
+                            "tpt_feb": {"value": "2,91"},
+                            "tpt_aug": {"value": "2,84"},
+                            "tpak_aug": {"value": "70,72"},
+                        },
+                    },
+                    {
+                        "label": "Palembang",
+                        "variables": {
+                            "tpt_feb": {"value": "3,10"},
+                            "tpt_aug": {"value": "3,00"},
+                            "tpak_aug": {"value": "68,00"},
+                        },
+                    },
+                ],
+            }],
+        }
+        requests = []
+
+        def fake_get(path):
+            requests.append(path)
+            return catalog if "/id/23/" in path else detail
+
+        with (
+            patch.object(bps_tools, "_cached", side_effect=lambda _key, _ttl, loader: loader()),
+            patch.object(bps_tools, "_get", side_effect=fake_get),
+        ):
+            result = bps_tools.simdasi_cari_data("TPT Agustus", "2025", "Lahat")
+
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(result["tahun"], 2025)
+        self.assertEqual(result["wilayah_ditafsirkan"], "Kabupaten Lahat")
+        self.assertEqual(result["data"], [{
+            "wilayah": "Lahat",
+            "variabel": "Tingkat Pengangguran Terbuka (TPT) - Agustus",
+            "nilai": "2,84",
+        }])
+        self.assertIn("/id/25/tahun/2025/id_tabel/table-id/wilayah/1600000", requests[1])
 
     def test_variable_search_strips_region_and_uses_synonym_fallback(self):
         with (

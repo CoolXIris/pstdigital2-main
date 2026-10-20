@@ -1,6 +1,7 @@
 """Tools WebAPI BPS untuk Gemini (function calling)."""
 import functools
 import csv
+import hashlib
 import html
 import itertools
 import json
@@ -52,6 +53,9 @@ _REGIONS = (
 )
 _SHORT_REGION_ALIASES = {"oku", "oki", "pali", "muba"}
 _VARIABLE_INDEX_TTL = 24 * 60 * 60
+_API_RESPONSE_TTL = 30 * 60
+_API_CATALOG_TTL = 24 * 60 * 60
+_API_PERIOD_TTL = 60 * 60
 _CATALOG_DIR = Path(__file__).resolve().parent
 _SUBJECT_CATALOG_PATH = _CATALOG_DIR / "katalog_subjek_1600.csv"
 _VARIABLE_CATALOG_PATH = _CATALOG_DIR / "katalog_variabel_1600.csv"
@@ -170,10 +174,33 @@ def strip_notes(value: Any) -> Any:
     return value
 
 
+def _api_response_ttl(path: str) -> int:
+    normalized = path.strip("/")
+    if (
+        normalized.startswith("interoperabilitas/datasource/simdasi/id/23/")
+        or normalized.startswith("list/model/var/")
+        or normalized.startswith("list/model/subject/")
+        or normalized.startswith("list/model/statictable/")
+    ):
+        return _API_CATALOG_TTL
+    if normalized.startswith("list/model/th/"):
+        return _API_PERIOD_TTL
+    return _API_RESPONSE_TTL
+
+
 def _get(path: str) -> dict:
     api_key = os.getenv("BPS_API_KEY")
     if not api_key:
         raise BpsError("BPS_API_KEY belum dikonfigurasi.")
+    cache_key = "api-response:"+hashlib.sha256(
+        f"{api_key}\0{path.strip('/')}".encode()
+    ).hexdigest()
+    ttl = _api_response_ttl(path)
+    with _cache_lock:
+        hit = _cache.get(cache_key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+
     try:
         response = _http.get(f"{BASE}/{path.strip('/')}/key/{api_key}/")
     except httpx.RequestError:
@@ -192,11 +219,16 @@ def _get(path: str) -> dict:
         payload["status"] = "OK"
         payload["data"] = [{"pages": 1}, []]
         payload["data_availability"] = availability
+        with _cache_lock:
+            _cache[cache_key] = (time.time(), payload)
         return payload
     if payload.get("status") != "OK":
         payload["status"] = "OK"
         payload["data"] = [{"pages": 1}, []]
         return payload
+    if response.is_success:
+        with _cache_lock:
+            _cache[cache_key] = (time.time(), payload)
     return payload
 
 
@@ -773,6 +805,282 @@ def cari_subjek(kata_kunci: str = "") -> dict:
     }
 
 
+def _simdasi_tables() -> list[dict]:
+    def load() -> list[dict]:
+        payload = _get("interoperabilitas/datasource/simdasi/id/23/wilayah/1600000")
+        data = payload.get("data")
+        table_block = data[1] if isinstance(data, list) and len(data) > 1 else {}
+        tables = table_block.get("data") if isinstance(table_block, dict) else None
+        if not isinstance(tables, list):
+            raise BpsError("Format katalog tabel SIMDASI BPS tidak dikenali.")
+        return [
+            table for table in tables
+            if isinstance(table, dict)
+            and isinstance(table.get("id_tabel"), str)
+            and isinstance(table.get("judul"), str)
+        ]
+
+    return _cached("simdasi:tables:1600000", _VARIABLE_INDEX_TTL, load)
+
+
+def simdasi_daftar_tabel(kata_kunci: str = "", jumlah: int = 250) -> dict:
+    """Mencari judul tabel SIMDASI Sumatera Selatan beserta ID dan tahun yang tersedia.
+
+    Kosongkan kata_kunci untuk seluruh daftar. Gunakan kata inti seperti "TPT",
+    "pendidikan", atau "pertanian" untuk memfilter judul.
+
+    Args:
+        kata_kunci: kata inti judul/subjek tabel (opsional).
+        jumlah: maksimal judul yang dikembalikan, dibatasi 1 sampai 250.
+    """
+    try:
+        tables = _simdasi_tables()
+    except BpsError as exc:
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
+
+    terms = [
+        term for term in _clean_search_keyword(kata_kunci or "").split()
+        if term not in {"simdasi", "tabel", "daftar", "list", "katalog", "judul"}
+    ]
+    ranked = []
+    for table in tables:
+        searchable = " ".join(
+            str(table.get(field) or "")
+            for field in ("judul", "subject", "bab", "mms_subject")
+        )
+        tokens = set(re.findall(r"[a-z0-9]+", searchable.casefold()))
+        score = sum(_token_match_score(term, tokens) for term in terms)
+        if not terms or score > 0:
+            ranked.append((score, table))
+    ranked.sort(key=lambda item: (item[0], str(item[1].get("judul", "")).casefold()), reverse=True)
+    count = max(1, min(int(jumlah or 250), 250))
+    results = [
+        {
+            "judul": table["judul"],
+            "id_tabel": table["id_tabel"],
+            "subjek": table.get("subject"),
+            "bab": table.get("bab"),
+            "tahun_tersedia": table.get("ketersediaan_tahun") or [],
+        }
+        for _, table in ranked[:count]
+    ]
+    return {
+        "jumlah_ditemukan": len(ranked),
+        "terpotong": len(ranked) > count,
+        "hasil": results,
+        "status_hasil": "ditemukan" if results else "kosong",
+    }
+
+
+def simdasi_cari_data(
+    kata_kunci: str,
+    tahun: Optional[str] = None,
+    wilayah: Optional[str] = None,
+) -> dict:
+    """Mencari judul dan mengambil data tabel SIMDASI Sumatera Selatan.
+
+    Gunakan sebagai sumber pelengkap bila data tidak ada pada variabel WebAPI biasa,
+    terutama tabel per kabupaten/kota. Isi kata_kunci dengan indikator inti seperti
+    "TPT" atau "pendidikan"; isi tahun dan wilayah bila disebut pengguna.
+
+    Args:
+        kata_kunci: kata inti indikator/topik tabel.
+        tahun: tahun yang diminta; jika kosong, gunakan tahun terakhir yang tersedia.
+        wilayah: kabupaten/kota yang ingin diambil; kosongkan untuk cakupan provinsi.
+    """
+    keyword = _clean_search_keyword(kata_kunci or "")
+    terms = keyword.split()
+    if not terms:
+        return {"error": "Masukkan kata inti indikator untuk mencari tabel SIMDASI.", "status_hasil": "kosong"}
+
+    resolved_region = None
+    if wilayah:
+        resolved_region, candidates = _resolve_region(wilayah)
+        if resolved_region is None:
+            return {
+                "error": f"Nama wilayah '{wilayah}' tidak dikenali dengan yakin.",
+                "wilayah_kandidat": candidates,
+                "status_hasil": "kosong",
+            }
+
+    try:
+        tables = _simdasi_tables()
+    except BpsError as exc:
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
+
+    ranked = []
+    for table in tables:
+        searchable = " ".join(
+            str(table.get(field) or "")
+            for field in ("judul", "subject", "bab", "mms_subject")
+        )
+        tokens = set(re.findall(r"[a-z0-9]+", searchable.casefold()))
+        score = sum(_token_match_score(term, tokens) for term in terms)
+        if score > 0:
+            ranked.append((score, table))
+    ranked.sort(key=lambda item: (item[0], str(item[1].get("judul", "")).casefold()), reverse=True)
+    if not ranked:
+        return {
+            "judul": "Tabel SIMDASI",
+            "hasil": [],
+            "status_hasil": "kosong",
+        }
+    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+        return {
+            "judul": "Kandidat tabel SIMDASI",
+            "kandidat": [
+                {"judul": table.get("judul"), "tahun_tersedia": table.get("ketersediaan_tahun") or []}
+                for _, table in ranked[:5]
+            ],
+            "status_hasil": "kosong",
+        }
+
+    table = ranked[0][1]
+    current_year = datetime.now(WIB).year
+    available_years = sorted(
+        {
+            int(value)
+            for value in table.get("ketersediaan_tahun", [])
+            if str(value).isdigit() and int(value) <= current_year
+        }
+    )
+    if not available_years:
+        return {
+            "judul": table.get("judul"),
+            "error": "Tabel SIMDASI belum memiliki tahun data yang dapat digunakan.",
+            "status_hasil": "kosong",
+        }
+
+    requested_year = None
+    if tahun is not None:
+        try:
+            requested_year = int(str(tahun).strip())
+        except ValueError:
+            return {"error": "Tahun harus berupa angka.", "status_hasil": "kosong"}
+    eligible_years = [
+        year for year in available_years
+        if requested_year is None or year <= requested_year
+    ]
+    if not eligible_years:
+        return {
+            "judul": table.get("judul"),
+            "tahun_tersedia": available_years,
+            "tahun_diminta_tidak_tersedia": requested_year,
+            "status_hasil": "kosong",
+        }
+    selected_year = eligible_years[-1]
+
+    try:
+        table_id = quote_plus(str(table["id_tabel"]), safe="")
+        detail = _get(
+            "interoperabilitas/datasource/simdasi/id/25"
+            f"/tahun/{selected_year}/id_tabel/{table_id}/wilayah/1600000"
+        )
+    except BpsError as exc:
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
+
+    data = detail.get("data")
+    table_data = data[1] if isinstance(data, list) and len(data) > 1 else None
+    if not isinstance(table_data, dict):
+        return {"judul": table.get("judul"), "hasil": [], "status_hasil": "kosong"}
+
+    columns = table_data.get("kolom")
+    rows = table_data.get("data")
+    if not isinstance(columns, dict) or not isinstance(rows, list):
+        return {"judul": table.get("judul"), "hasil": [], "status_hasil": "kosong"}
+
+    generic_terms = _SEARCH_FILLER_WORDS | {
+        "tingkat", "rasio", "persentase", "persen", "indikator", "variabel", "statistik",
+    }
+    months = _MONTH_WORDS - {"bulan"}
+    month_terms = {
+        month for month in months
+        if re.search(rf"\b{re.escape(month)}\b", str(kata_kunci), re.IGNORECASE)
+    }
+    indicator_terms = [term for term in terms if term not in generic_terms and term not in months]
+    matching_columns = {}
+    for column_id, column in columns.items():
+        if not isinstance(column, dict):
+            continue
+        name = str(column.get("nama_variabel") or column.get("nama_variabel_en") or column_id)
+        column_tokens = set(re.findall(r"[a-z0-9]+", name.casefold()))
+        if month_terms and not any(_token_match_score(month, column_tokens) > 0 for month in month_terms):
+            continue
+        if not indicator_terms or any(_token_match_score(term, column_tokens) > 0 for term in indicator_terms):
+            matching_columns[str(column_id)] = name
+    if not matching_columns:
+        return {
+            "judul": table_data.get("judul_tabel") or table.get("judul"),
+            "error": "Kolom pada tabel tidak cocok dengan indikator yang diminta.",
+            "status_hasil": "kosong",
+        }
+
+    if resolved_region:
+        target_names = {_norm_region(alias) for alias in _region_aliases(resolved_region)}
+        rows = [
+            row for row in rows
+            if isinstance(row, dict) and _norm_region(str(row.get("label") or "")) in target_names
+        ]
+        if not rows:
+            return {
+                "judul": table_data.get("judul_tabel") or table.get("judul"),
+                "wilayah_ditafsirkan": resolved_region,
+                "error": f"Data untuk {resolved_region} tidak tercantum pada tabel SIMDASI ini.",
+                "status_hasil": "kosong",
+            }
+    elif not re.search(r"\b(kabupaten|kab\s*/?\s*kota|per\s+kota)\b", kata_kunci, re.IGNORECASE):
+        province_rows = [
+            row for row in rows
+            if isinstance(row, dict)
+            and (
+                str(row.get("kode_wilayah") or "") == "1600000"
+                or _norm_region(str(row.get("label") or "")) == "sumatera selatan"
+            )
+        ]
+        if province_rows:
+            rows = province_rows
+
+    results = []
+    for row in rows[:150]:
+        if not isinstance(row, dict):
+            continue
+        for column_id, name in matching_columns.items():
+            cell = row.get("variables", {}).get(column_id)
+            value = cell.get("value") if isinstance(cell, dict) else cell
+            if value is None or str(value).strip() in {"", "...", "NA"}:
+                continue
+            results.append({
+                "wilayah": row.get("label"),
+                "variabel": name,
+                "nilai": value,
+            })
+
+    if not results:
+        return {
+            "judul": table_data.get("judul_tabel") or table.get("judul"),
+            "wilayah_ditafsirkan": resolved_region,
+            "tahun": selected_year,
+            "hasil": [],
+            "status_hasil": "kosong",
+        }
+
+    result = {
+        "judul": table_data.get("judul_tabel") or table.get("judul"),
+        "tahun": table_data.get("tahun_data") or selected_year,
+        "subjek": table_data.get("subject") or table.get("subject"),
+        "wilayah_ditafsirkan": resolved_region or "Provinsi Sumatera Selatan",
+        "jumlah_baris": len(results),
+        "terpotong": len(rows) > 150,
+        "data": results,
+        "status_hasil": "ditemukan",
+    }
+    if requested_year is not None and selected_year != requested_year:
+        result["tahun_diminta_tidak_tersedia"] = requested_year
+        result["tahun_tersedia"] = available_years
+
+    return result
+
+
 def warm_cache() -> None:
     now = datetime.now(WIB)
 
@@ -783,7 +1091,7 @@ def warm_cache() -> None:
         except BpsError:
             pass
 
-    cutoff = time.time() - 600
+    cutoff = time.time() - _API_CATALOG_TTL
     with _cache_lock:
         stale_keys = [
             key for key, (timestamp, _) in _cache.items()
@@ -1498,5 +1806,7 @@ TOOLS = [
         berita_resmi_statistik,
         publikasi_terbaru,
         tabel_statis,
+        simdasi_daftar_tabel,
+        simdasi_cari_data,
     )
 ]
