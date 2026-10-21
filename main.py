@@ -54,7 +54,7 @@ MAX_CHATS_PER_MINUTE = int(os.getenv("GEMINI_MAX_CHATS_PER_MINUTE", "4"))
 
 DATA_QUESTION = re.compile(
     r"\b(berapa|persen\w*|jumlah|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|tpt|"
-    r"\w*miskin\w*|penduduk|warga|jiwa|populasi|pdrb|ekspor|impor|upah|penganggur\w*|"
+    r"\w*miskin\w*|penduduk|warga|jiwa|populasi|pdrb|ekspor|impor|upah|harga|penganggur\w*|"
     r"ntp|terbaru|produksi|kasus|penyakit|penderita|gaji|penghasilan|pendapatan|minimum|ump|umk|umr|padi|beras|"
     r"luas|panen|pertanian|perkebunan|perikanan|konsumsi|rls|hls|rata-rata\s+lama\s+sekolah|"
     r"harapan\s+lama\s+sekolah)\b",
@@ -63,7 +63,7 @@ DATA_QUESTION = re.compile(
 _STATISTIC_TOPIC = re.compile(
     r"\b(ipm|indeks pembangunan manusia|kepadatan|penduduk|warga|jiwa|populasi|"
     r"kemiskinan|miskin\w*|penganggur\w*|tpt|upah|gaji|penghasilan|pendapatan|"
-    r"ump|umk|umr|inflasi|ntp|nilai tukar petani|ekspor|impor|pdrb|"
+    r"ump|umk|umr|inflasi|ntp|nilai tukar petani|ekspor|impor|harga|pdrb|"
     r"produk domestik regional bruto|pertumbuhan|kasus|penyakit|penderita|rasio gini|gini|"
     r"angka harapan hidup|umur harapan hidup|uhh|produksi|padi|"
     r"beras|luas panen|pertanian|perkebunan|perikanan|konsumsi|rls|hls|"
@@ -673,6 +673,8 @@ def _multi_topic_candidates(question: str) -> list[dict]:
     ):
         return []
 
+    year_match = re.search(r"\b(20\d{2})\b", question)
+    requested_year = year_match.group(1) if year_match else ""
     topic_text = bps_tools._remove_region_names(question)
     topic_text = re.sub(r"\b20\d{2}\b", " ", topic_text)
     topic_text = re.sub(
@@ -695,7 +697,11 @@ def _multi_topic_candidates(question: str) -> list[dict]:
         if keyword in selected_keywords:
             continue
         selected_keywords.add(keyword)
-        search_result = bps_tools.cari_variabel(keyword)
+        search_result = (
+            bps_tools.cari_variabel(keyword, tahun_diminta=requested_year)
+            if requested_year
+            else bps_tools.cari_variabel(keyword)
+        )
         if search_result.get("status_hasil") == "gagal_teknis":
             continue
         candidates = _rank_variable_candidate_options(
@@ -932,6 +938,7 @@ def _format_multi_topic_fallback(
     region: Optional[str],
     requested_year: str,
     include_categories: bool,
+    minta_total: bool = False,
 ) -> str:
     sections = []
     for entry in entries:
@@ -966,6 +973,7 @@ def _format_multi_topic_fallback(
             region,
             requested_year,
             include_categories,
+            minta_total,
         )
         omitted = data.get("baris_dipotong")
         if omitted:
@@ -981,10 +989,20 @@ def _requests_category_breakdown(question: str) -> bool:
         r"\b(menurut|berdasarkan|dirinci|terpilah|rincian|kategori|"
         r"jenis\s+kelamin|gender|kelompok|golongan|jenjang|"
         r"sd|smp|sma|smk|laki-laki|perempuan|wanita|pria|"
+        r"puskesmas|posyandu|klinik|balai\s+kesehatan|rumah\s+sakit|"
         r"perkotaan|pedesaan|perdesaan)\b",
         question,
         re.IGNORECASE,
     ) is not None
+
+
+def _requests_total_aggregate(question: str) -> bool:
+    return bool(re.search(
+        r"\b(total(?:\s+keseluruhan)?|jumlah\s+keseluruhan|secara\s+keseluruhan|"
+        r"seluruh\s+(?:sumsel|sumatera\s+selatan|kabupaten|kota|wilayah))\b",
+        question,
+        re.IGNORECASE,
+    ))
 
 
 def _explicit_category_hint(question: str) -> str | None:
@@ -995,6 +1013,11 @@ def _explicit_category_hint(question: str) -> str | None:
         ("SMK", r"\b(smk|sekolah menengah kejuruan)\b"),
         ("Laki-Laki", r"\b(laki[\s-]*laki|pria)\b"),
         ("Perempuan", r"\b(perempuan|wanita)\b"),
+        ("Puskesmas", r"\bpuskesmas\b"),
+        ("Posyandu", r"\bposyandu\b"),
+        ("Klinik/Balai Kesehatan", r"\b(klinik(?:\s+kesehatan)?|balai\s+kesehatan)\b"),
+        ("Rumah Sakit Khusus", r"\brumah\s+sakit\s+khusus\b"),
+        ("Rumah Sakit Umum", r"\brumah\s+sakit\s+umum\b"),
         ("Perkotaan", r"\bperkotaan\b"),
         ("Pedesaan", r"\b(pedesaan|perdesaan)\b"),
     )
@@ -1002,6 +1025,10 @@ def _explicit_category_hint(question: str) -> str | None:
         label for label, pattern in categories
         if re.search(pattern, question, re.IGNORECASE)
     ]
+    if re.search(r"\brumah\s+sakit\b", question, re.IGNORECASE) and not any(
+        label in matches for label in ("Rumah Sakit Khusus", "Rumah Sakit Umum")
+    ):
+        matches.extend(("Rumah Sakit Umum", "Rumah Sakit Khusus"))
     return ", ".join(matches) if matches else None
 
 
@@ -1401,8 +1428,8 @@ def _rank_variable_candidate_options(
                 similarity_score,
                 exact_score,
                 variant_score,
-                level_score,
                 specificity_score,
+                level_score,
                 latest_year,
                 candidate,
             ))
@@ -1420,6 +1447,20 @@ def _rank_variable_candidate_options(
         ]
         if len(latest_candidates) == 1:
             return latest_candidates
+
+    if len(terms) >= 2 and len(top_candidates) == 1:
+        top_similarity = int(top_candidates[0].get("skor_kemiripan") or 0)
+        close_candidates = [
+            item[6]
+            for item in ranked
+            if item[1] == ranked[0][1]
+            and item[2] == ranked[0][2]
+            and item[3] == ranked[0][3]
+            and item[4] == ranked[0][4]
+            and 0 <= top_similarity - int(item[6].get("skor_kemiripan") or 0) <= 3
+        ]
+        if len(close_candidates) > 1:
+            return close_candidates[:3]
 
     return top_candidates
 
@@ -1626,6 +1667,7 @@ def _format_indicator_fallback(
     wilayah: Optional[str],
     requested_year: str,
     include_categories: bool = False,
+    minta_total: bool = False,
 ) -> str:
     source_note = (
         f"\nSumber: {data.get('sumber') or 'BPS Provinsi Sumatera Selatan'}."
@@ -1731,21 +1773,70 @@ def _format_indicator_fallback(
         year = str(data.get("tahun") or requested_year or "terbaru")
         return f"Nilai {title} untuk {scope} tahun {year} tidak tercantum pada hasil WebAPI BPS yang tersedia."
 
-    usable = [
+    all_usable = [
         row for row in rows
         if isinstance(row, dict)
         and row.get("nilai") is not None
-        and (
-            data.get("wilayah_diminta_tidak_tersedia")
-            or include_categories
-            or not row.get("kategori")
-            or re.fullmatch(
-                r"(?:jumlah|total|laki-laki\s*\+\s*perempuan)",
-                str(row.get("kategori")).strip(),
-                re.IGNORECASE,
+    ]
+    if minta_total:
+        province_rows = [
+            row for row in all_usable
+            if bps_tools.resolve_region_from_text(str(row.get("wilayah") or ""))[0]
+            == "Provinsi Sumatera Selatan"
+        ]
+        if province_rows:
+            all_usable = province_rows
+        elif len(all_usable) > 1 and all(
+            bps_tools.resolve_region_from_text(str(row.get("wilayah") or ""))[0]
+            for row in all_usable
+        ):
+            return (
+                f"Baris total Provinsi Sumatera Selatan untuk "
+                f"{data.get('judul') or 'indikator BPS'} tahun "
+                f"{data.get('tahun') or requested_year or 'terbaru'} tidak tersedia. "
+                "Saya tidak menjumlahkan kabupaten/kota secara diam-diam; saya dapat "
+                "menampilkan rinciannya atau menghitung jumlah dengan label yang jelas."
+                + source_note
             )
+    aggregate_rows = [
+        row for row in all_usable
+        if not row.get("kategori")
+        or re.fullmatch(
+            r"(?:jumlah|total|laki-laki\s*\+\s*perempuan)",
+            str(row.get("kategori")).strip(),
+            re.IGNORECASE,
         )
     ]
+    category_rows = [row for row in all_usable if row.get("kategori")]
+    category_question = ""
+    if data.get("wilayah_diminta_tidak_tersedia") or include_categories:
+        usable = all_usable
+    elif aggregate_rows:
+        usable = aggregate_rows
+    elif category_rows:
+        categories = list(dict.fromkeys(
+            str(row.get("kategori")).strip()
+            for row in category_rows
+            if str(row.get("kategori") or "").strip()
+        ))
+        if minta_total:
+            return (
+                f"Tabel {data.get('judul') or 'indikator BPS'} tidak menyediakan baris "
+                f"total/agregat untuk {wilayah or 'wilayah yang diminta'} tahun "
+                f"{data.get('tahun') or requested_year or 'terbaru'}. "
+                "Kategori tidak saya jumlahkan; jika diperlukan, saya dapat menampilkan "
+                "rincian agar total dapat dihitung secara transparan."
+                + source_note
+            )
+        category_question = (
+            " Kategori tersedia: "
+            + ", ".join(categories[:8])
+            + (", dan lainnya." if len(categories) > 8 else ".")
+            + " Sebutkan kategori yang ingin ditampilkan."
+        )
+        usable = category_rows
+    else:
+        usable = all_usable
     if re.search(r"\bkelompok\s+umur\b", str(data.get("judul") or ""), re.IGNORECASE):
         age_keys = [_age_group_order_key(row) for row in usable]
         if all(key is not None for key in age_keys):
@@ -1776,7 +1867,11 @@ def _format_indicator_fallback(
             else:
                 value_text = str(value)
             label = str(row.get("wilayah") or "Wilayah")
-            if (include_categories or data.get("wilayah_diminta_tidak_tersedia")) and row.get("kategori"):
+            if (
+                include_categories
+                or category_question
+                or data.get("wilayah_diminta_tidak_tersedia")
+            ) and row.get("kategori"):
                 label += f" ({row['kategori']})"
             lines.append(f"{label}: {value_text}")
         unit = str(data.get("satuan") or "").strip()
@@ -1792,17 +1887,13 @@ def _format_indicator_fallback(
             + "\n".join(lines)
             + unavailable_note
             + nature_note
+            + category_question
             + source_note
         )
     if not usable:
         title = data.get("judul") or data.get("nama_indikator") or "Indikator BPS"
         actual_year = str(data.get("tahun") or requested_year or "terbaru")
         scope = wilayah or "Provinsi Sumatera Selatan"
-        if rows:
-            return (
-                f"Hasil {title} untuk {scope} tahun {actual_year} tidak memuat baris total/agregat; "
-                f"kategori yang tersedia tidak dijumlahkan.{unavailable_note}{nature_note}"
-            )
         return (
             f"WebAPI BPS tidak mengembalikan baris nilai {title} untuk {scope} "
             f"tahun {actual_year}.{unavailable_note}{nature_note}"
@@ -1822,7 +1913,7 @@ def _format_indicator_fallback(
             else:
                 value_text = str(value)
             label = str(row.get("wilayah") or row.get("kategori") or "Nilai")
-            if include_categories and row.get("kategori"):
+            if (include_categories or category_question) and row.get("kategori"):
                 label += f" ({row['kategori']})"
             lines.append(f"{label}: {value_text}")
         return (
@@ -1831,6 +1922,7 @@ def _format_indicator_fallback(
             + "\n".join(lines)
             + unavailable_note
             + nature_note
+            + category_question
             + source_note
         )
 
@@ -1853,7 +1945,7 @@ def _format_indicator_fallback(
         or wilayah
         or "Sumatera Selatan"
     )
-    if data.get("wilayah_diminta_tidak_tersedia") and row.get("kategori"):
+    if (data.get("wilayah_diminta_tidak_tersedia") or category_question) and row.get("kategori"):
         scope = f"{scope} ({row['kategori']})"
     elif include_categories and row.get("kategori"):
         scope = f"{scope} ({row['kategori']})"
@@ -2430,18 +2522,38 @@ def _format_static_table_fallback(data: dict, keyword: str) -> str:
         return "Maaf, tabel BPS belum dapat diverifikasi saat ini."
     tables = data.get("hasil")
     if not isinstance(tables, list) or not tables:
+        suggestions = [
+            str(item.get("judul") or "").strip()
+            for item in data.get("kandidat_terdekat") or []
+            if item.get("judul")
+        ]
+        if suggestions:
+            return (
+                f"Tabel statis BPS untuk topik '{keyword}' belum ditemukan. "
+                "Judul terdekat: " + "; ".join(suggestions[:3]) + "."
+            )
         return f"Tabel statis BPS yang cocok untuk topik '{keyword}' belum tersedia pada hasil pencarian."
     table = tables[0]
     title = table.get("judul") or "Tabel BPS"
     content = str(table.get("isi") or "").strip()[:2500]
     if not content:
         return f"Tabel statis BPS '{title}' ditemukan, tetapi isinya tidak tersedia pada respons."
+    year_notice = ""
+    if table.get("tahun_diminta_tidak_ditemukan"):
+        year_notice = (
+            f"Tahun {table['tahun_diminta_tidak_ditemukan']} belum tersedia pada tabel ini; "
+            f"yang ditampilkan adalah tahun terbaru yang tersedia "
+            f"({table.get('tahun_terbaru_tersedia')}).\n"
+        )
+    download_note = ""
+    if table.get("terpotong") and table.get("excel"):
+        download_note = f"\nTabel dibatasi hingga 25 baris. Unduh seluruh tabel: {table['excel']}"
     scope_note = (
         " Sumber berasal dari domain nasional; angka tidak boleh dianggap khusus Sumatera Selatan."
         if str(table.get("cakupan") or table.get("domain")) in {"nasional", "0000"}
         else ""
     )
-    return f"Tabel BPS: {title}\n{content}{scope_note}"
+    return f"{year_notice}Tabel BPS: {title}\n{content}{download_note}{scope_note}"
 
 
 @app.post("/api/chat")
@@ -2477,6 +2589,8 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     requires_tool = intent_kind in {"nilai", "rentang_waktu"} or editorial_intent
     canonical_data: dict | None = None
     year_range = _year_range_intent(question) if requires_tool and not editorial_intent else None
+    year_match = re.search(r"\b(20\d{2})\b", question)
+    requested_year = year_match.group(1) if year_match and year_range is None else ""
     multi_topic_intents = (
         _recommended_data_followup(question, request.history)
         or _multi_topic_candidates(question)
@@ -2526,7 +2640,15 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     force_deterministic_fallback = False
     if static_table_keyword:
         try:
-            static_table_result = bps_tools.tabel_statis(static_table_keyword)
+            static_options = {}
+            if requested_year:
+                static_options["tahun_diminta"] = requested_year
+            if requested_regions and requested_regions != ["Provinsi Sumatera Selatan"]:
+                static_options["wilayah"] = requested_regions
+            static_table_result = bps_tools.tabel_statis(
+                static_table_keyword,
+                **static_options,
+            )
             static_table_checked = True
             if static_table_result.get("status_hasil") != "kosong":
                 canonical_data = static_table_result
@@ -2545,7 +2667,11 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         and static_table_result.get("status_hasil") == "kosong"
     ):
         try:
-            variable_search = bps_tools.cari_variabel("upah")
+            variable_search = (
+                bps_tools.cari_variabel("upah", tahun_diminta=requested_year)
+                if requested_year
+                else bps_tools.cari_variabel("upah")
+            )
             variable = _rank_variable_candidates(variable_search, "upah minimum", None)
             variable_title = str(variable.get("judul") or "").lower() if variable else ""
             if variable_search.get("status_hasil") == "gagal_teknis":
@@ -2579,6 +2705,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     canonical_data,
                     "Provinsi Sumatera Selatan",
                     displayed_year,
+                    minta_total=_requests_total_aggregate(question),
                 )
             else:
                 canonical_data = {
@@ -2703,6 +2830,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             regions[0] if len(regions) == 1 else None,
             displayed_year,
             include_categories,
+            _requests_total_aggregate(question),
         )
         force_deterministic_fallback = True
     if editorial_intent:
@@ -2898,6 +3026,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     canonical_data,
                     region,
                     requested_year,
+                    minta_total=_requests_total_aggregate(question),
                 )
             if len(requested_regions) > 1:
                 if bps_tools._INDIKATOR_UTAMA.get(indicator_name, {}).get("province_only"):
@@ -2915,6 +3044,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             region,
                             requested_year,
                             include_categories,
+                            _requests_total_aggregate(question),
                         )
                         + " Indikator ini hanya tersedia pada tingkat provinsi, bukan per kabupaten/kota."
                     )
@@ -2937,6 +3067,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         region,
                         requested_year,
                         include_categories,
+                        _requests_total_aggregate(question),
                     )
                 force_deterministic_fallback = True
             elif include_categories and (
@@ -2948,6 +3079,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     region,
                     requested_year,
                     include_categories=True,
+                    minta_total=_requests_total_aggregate(question),
                 )
                 force_deterministic_fallback = True
         except Exception:
@@ -2969,7 +3101,11 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             if len(requested_regions) > 1:
                 region = None
             try:
-                search_result = bps_tools.cari_variabel(keyword)
+                search_result = (
+                    bps_tools.cari_variabel(keyword, tahun_diminta=requested_year)
+                    if requested_year
+                    else bps_tools.cari_variabel(keyword)
+                )
                 school_levels = re.findall(
                     r"\b(?:sd|smp|sma|smk|tk)\b",
                     question,
@@ -3004,6 +3140,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                                 canonical_data,
                                 region,
                                 requested_year,
+                                minta_total=_requests_total_aggregate(question),
                             )
                         else:
                             canonical_fallback = (
@@ -3045,6 +3182,27 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             question,
                         )
                         force_deterministic_fallback = True
+                elif not candidate_options:
+                    suggestions = [
+                        str(item.get("judul") or "").strip()
+                        for item in search_result.get("kandidat_terdekat") or []
+                        if item.get("judul")
+                    ]
+                    canonical_data = {
+                        "hasil": [],
+                        "kata_inti": search_result.get("kata_inti") or [],
+                        "kandidat_terdekat": search_result.get("kandidat_terdekat") or [],
+                        "status_hasil": "kosong",
+                    }
+                    canonical_tool_call = f"cari_variabel(kata_kunci='{keyword}')"
+                    canonical_fallback = (
+                        f"Data untuk topik '{keyword}' belum ditemukan pada katalog BPS."
+                        + (
+                            " Judul terdekat: " + "; ".join(suggestions[:3]) + "."
+                            if suggestions else ""
+                        )
+                    )
+                    force_deterministic_fallback = True
                 elif variable is not None:
                     variable_id = int(variable["var_id"])
                     if include_categories:
@@ -3122,6 +3280,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             region,
                             requested_year,
                             include_categories,
+                            _requests_total_aggregate(question),
                         )
                 else:
                     if not static_table_checked:

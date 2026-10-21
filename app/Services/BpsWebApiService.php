@@ -11,7 +11,7 @@ use RuntimeException;
 
 class BpsWebApiService
 {
-    private const GENERIC_TERMS = ['jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia', 'status'];
+    private const GENERIC_TERMS = ['rata', 'rata-rata', 'jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia', 'status'];
 
     private const VARIABLE_INDEX_CACHE_PREFIX = 'bps-webapi:variables:index:';
 
@@ -315,12 +315,12 @@ class BpsWebApiService
             }
 
             if ($this->isStaticWageQuestion($question)) {
-                $tableContext = $this->staticTableContext($keywords, $domain, $apiKey);
+                $tableContext = $this->staticTableContext($keywords, $domain, $apiKey, $question);
                 if ($tableContext !== null) {
                     return $tableContext;
                 }
                 if ($regionalFallbackQuestion) {
-                    $tableContext = $this->staticTableContext($keywords, '1600', $apiKey);
+                    $tableContext = $this->staticTableContext($keywords, '1600', $apiKey, $question);
                     if ($tableContext !== null) {
                         return $this->provinceScopeFallbackContext($tableContext, $this->regionMentioned($question));
                     }
@@ -376,15 +376,15 @@ class BpsWebApiService
                 return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk periode terbaru/tahun berjalan belum ditemukan. Jangan gunakan periode lama atau variabel yang kurang relevan sebagai pengganti.';
             }
 
-            $tables = $this->matchingTables($keywords, $domain, $apiKey);
+            $tables = $this->matchingTables($keywords, $domain, $apiKey, $question);
             $tableDomain = $domain;
             if ($tables === [] && $regionalFallbackQuestion) {
                 $tableDomain = '1600';
-                $tables = $this->matchingTables($keywords, $tableDomain, $apiKey);
+                $tables = $this->matchingTables($keywords, $tableDomain, $apiKey, $question);
             } elseif ($tables === []) {
                 $domain = '0000';
                 $tableDomain = $domain;
-                $tables = $this->matchingTables($keywords, $domain, $apiKey);
+                $tables = $this->matchingTables($keywords, $domain, $apiKey, $question);
             }
 
             $context = [];
@@ -394,7 +394,15 @@ class BpsWebApiService
                     continue;
                 }
 
-                $detail = $this->tableDetail((string) $tableId, $tableDomain, $apiKey);
+                $detail = ! empty($table['related_match'])
+                    ? $this->relatedTableSummary($table)
+                    : $this->tableDetail(
+                        (string) $tableId,
+                        $tableDomain,
+                        $apiKey,
+                        (string) ($table['type'] ?? 'Tabel Statis'),
+                        (string) ($table['year'] ?? '')
+                    );
                 if ($detail !== null) {
                     $context[] = '[Sumber: BPS WebAPI, '.$table['title'].'] '.$detail;
                 }
@@ -402,6 +410,13 @@ class BpsWebApiService
 
             if ($context !== []) {
                 $tableContext = implode("\n\n", $context);
+                if ($this->tablesNeedConfirmation($tables, $question)) {
+                    return "[WebAPI BPS][KANDIDAT_TOPIK_TERKAIT]\n"
+                        ."Topik yang diminta belum memiliki kecocokan yang persis. Tabel berikut "
+                        ."hanya kandidat terkait; jangan menyajikan nilainya sebagai jawaban final. "
+                        ."Tanyakan dengan sopan apakah salah satu tabel berikut yang dimaksud:\n\n"
+                        .$tableContext;
+                }
 
                 return $regionalFallbackQuestion
                     ? $this->provinceScopeFallbackContext($tableContext, $this->regionMentioned($question))
@@ -503,7 +518,21 @@ class BpsWebApiService
                 ?? $notice."\n\nArsip editorial belum dapat dimuat dari WebAPI BPS.\n\n".$closing;
         }
         if ($apiKey !== null && $this->isStaticWageQuestion($question)) {
-            $tableContext = $this->staticTableContext($this->keywords($question), '1600', $apiKey);
+            $tables = $this->matchingTables(
+                $this->keywords($question),
+                '1600',
+                $apiKey,
+                $question
+            );
+            if ($this->tablesNeedConfirmation($tables, $question)) {
+                return $this->formatRelatedTableAnswer($tables);
+            }
+            $tableContext = $this->staticTableContext(
+                $this->keywords($question),
+                '1600',
+                $apiKey,
+                $question
+            );
             if ($tableContext !== null) {
                 return $notice."\n\n".$tableContext."\n\n".$closing;
             }
@@ -512,6 +541,16 @@ class BpsWebApiService
             $canonicalAnswer = $this->canonicalIndicatorFallback($question, $apiKey, $notice, $closing);
             if ($canonicalAnswer !== null) {
                 return $canonicalAnswer;
+            }
+
+            $relatedTables = $this->matchingTables(
+                $this->keywords($question),
+                '1600',
+                $apiKey,
+                $question
+            );
+            if ($this->tablesNeedConfirmation($relatedTables, $question)) {
+                return $this->formatRelatedTableAnswer($relatedTables);
             }
         }
 
@@ -2908,7 +2947,7 @@ class BpsWebApiService
         return array_values(array_unique(array_filter($variants)));
     }
 
-    private function titleTermScore(string $title, string $term): float
+    private function titleTermScore(string $title, string $term, bool $allowFuzzy = true): float
     {
         $normalizedTitle = Str::lower(Str::ascii($title));
         $variants = $this->keywordVariants($term);
@@ -2919,6 +2958,9 @@ class BpsWebApiService
             ) === 1) {
                 return 1.0;
             }
+        }
+        if (! $allowFuzzy) {
+            return 0.0;
         }
 
         $best = 0.0;
@@ -3456,33 +3498,64 @@ class BpsWebApiService
 
     private function searchTables(string $keyword, string $domain, string $apiKey): array
     {
+        unset($apiKey);
         $rows = array_filter(
             $this->csvCatalogRows(),
-            fn (array $row) => ($row['jenis_tabel'] ?? '') === 'Tabel Statis'
-                && str_contains((string) ($row['link_json'] ?? ''), '/domain/'.$domain.'/')
-                && $this->titleTermScore((string) ($row['judul'] ?? ''), $keyword) > 0
+            function (array $row) use ($keyword, $domain): bool {
+                $type = (string) ($row['jenis_tabel'] ?? '');
+                $link = (string) ($row['link_json'] ?? '');
+                $inDomain = $type === 'SIMDASI'
+                    ? $domain === '1600' && str_contains($link, '/wilayah/1600000/')
+                    : $type === 'Tabel Statis' && str_contains($link, '/domain/'.$domain.'/');
+
+                return $inDomain
+                    && $this->titleTermScore(
+                        (string) ($row['judul'] ?? ''),
+                        $keyword,
+                        false
+                    ) > 0;
+            }
         );
 
-        return array_map(
-            fn (array $row) => [
+        $tables = [];
+        foreach ($rows as $row) {
+            $tableId = (string) ($row['id_tabel'] ?? '');
+            $year = (string) ($row['tahun'] ?? '');
+            if ($tableId === '') {
+                continue;
+            }
+            $table = [
                 'table_id' => $row['id_tabel'],
                 'title' => $row['judul'],
                 'subject' => $row['subjek'],
                 'link_json' => $row['link_json'],
-            ],
-            array_values($rows)
-        );
+                'type' => $row['jenis_tabel'],
+                'year' => $year,
+            ];
+            $existingYear = (string) ($tables[$tableId]['year'] ?? '');
+            if (! isset($tables[$tableId]) || (int) $year > (int) $existingYear) {
+                $tables[$tableId] = $table;
+            }
+        }
+
+        return array_values($tables);
     }
 
-    private function matchingTables(array $keywords, string $domain, string $apiKey): array
+    private function matchingTables(
+        array $keywords,
+        string $domain,
+        string $apiKey,
+        string $question = ''
+    ): array
     {
-        $mainKeyword = $this->mainKeyword($keywords);
+        $coreKeywords = $this->coreTableKeywords($keywords);
+        $mainKeyword = $this->mainKeyword($coreKeywords);
         if ($mainKeyword === null) {
             return [];
         }
 
         $matches = [];
-        foreach (array_slice(array_values(array_filter($keywords, fn (string $term) => ! in_array($term, self::GENERIC_TERMS, true))), 0, 4) as $keyword) {
+        foreach (array_slice($coreKeywords, 0, 4) as $keyword) {
             foreach ($this->searchTables($keyword, $domain, $apiKey) as $table) {
                 $tableId = $table['table_id'] ?? null;
                 $title = $table['title'] ?? null;
@@ -3490,11 +3563,24 @@ class BpsWebApiService
                     continue;
                 }
 
-                $score = 0;
-                foreach ($keywords as $term) {
-                    $score += min(Str::length($term), 10) * $this->titleTermScore($title, $term);
+                $searchText = $title;
+                if (in_array('gaji', $coreKeywords, true)
+                    && preg_match('/\b(?:upah|gaji|balas jasa|pekerja|buruh|pegawai|karyawan)\b/i', strip_tags($title)) !== 1) {
+                    continue;
                 }
-                if ($score === 0.0) {
+                $score = 0.0;
+                $matchedCoreTerms = 0;
+                foreach ($coreKeywords as $term) {
+                    $termScore = $this->titleTermScore($searchText, $term, false);
+                    if ($termScore === 0.0) {
+                        $termScore = $this->titleTermScore($searchText, $term) * 0.45;
+                    }
+                    if ($termScore > 0.0) {
+                        $matchedCoreTerms++;
+                        $score += min(Str::length($term), 10) * $termScore;
+                    }
+                }
+                if ($score === 0.0 || $matchedCoreTerms === 0) {
                     continue;
                 }
                 if (preg_match(
@@ -3503,7 +3589,11 @@ class BpsWebApiService
                 ) === 1) {
                     $score += 4;
                 }
-                $matches[(string) $tableId] = ['table' => $table, 'score' => $score];
+                $matches[(string) $tableId] = [
+                    'table' => $table,
+                    'score' => $score,
+                    'matched_core_terms' => $matchedCoreTerms,
+                ];
             }
         }
 
@@ -3511,27 +3601,157 @@ class BpsWebApiService
         $ranked = array_values($matches);
         $best = $ranked[0] ?? null;
         $runnerUp = $ranked[1] ?? null;
-        $requiredScore = count(array_filter(
-            $keywords,
-            fn (string $term) => ! in_array($term, self::GENERIC_TERMS, true)
-        )) > 1 ? 6 : max(2.5, Str::length($mainKeyword) * 0.65);
+        $requiredScore = count($coreKeywords) > 1
+            ? 6
+            : max(2.5, Str::length($mainKeyword) * 0.65);
         if ($best === null || $best['score'] < $requiredScore) {
             return [];
         }
-        if ($runnerUp !== null && $best['score'] - $runnerUp['score'] < 2) {
-            return array_column(array_slice($ranked, 0, 3), 'table');
+        $selected = [$best];
+        if ($runnerUp !== null
+            && $best['score'] - $runnerUp['score'] <= 5
+            && $runnerUp['matched_core_terms'] === $best['matched_core_terms']) {
+            $selected = array_values(array_filter(
+                array_slice($ranked, 0, 3),
+                fn (array $match) => $best['score'] - $match['score'] <= 5
+                    && $match['matched_core_terms'] === $best['matched_core_terms']
+            ));
+        }
+        if (! preg_match('/\b(?:19|20)\d{2}\b/', $question)) {
+            $years = array_values(array_filter(
+                array_map(static fn (array $match) => (int) ($match['table']['year'] ?? 0), $selected),
+                static fn (int $year) => $year > 0
+            ));
+            if ($years !== []) {
+                $latestYear = max($years);
+                $selected = array_values(array_filter(
+                    $selected,
+                    static fn (array $match) => (int) ($match['table']['year'] ?? 0) === 0
+                        || (int) $match['table']['year'] >= $latestYear - 1
+                ));
+            }
         }
 
-        return [$best['table']];
+        $allCoreTermsMatched = $best['matched_core_terms'] >= count($coreKeywords);
+        foreach ($selected as &$match) {
+            $match['table']['related_match'] = ! $allCoreTermsMatched
+                || $this->hasUnrequestedTableScope($match['table']['title'], $question);
+        }
+        unset($match);
+
+        return array_column($selected, 'table');
     }
 
-    private function staticTableContext(array $keywords, string $domain, string $apiKey): ?string
+    private function coreTableKeywords(array $keywords): array
     {
-        $tables = $this->matchingTables($keywords, $domain, $apiKey);
+        $synonymGroups = [
+            'gaji' => ['gaji', 'upah', 'penghasilan', 'pendapatan'],
+            'pekerja' => ['pekerja', 'buruh', 'karyawan', 'pegawai'],
+            'miskin' => ['miskin', 'kemiskinan'],
+            'penduduk' => ['penduduk', 'populasi', 'warga', 'masyarakat', 'rakyat'],
+        ];
+        $canonical = [];
+        foreach ($synonymGroups as $term => $members) {
+            foreach ($members as $member) {
+                $canonical[$member] = $term;
+            }
+        }
+
+        $core = [];
+        foreach ($keywords as $keyword) {
+            $keyword = Str::lower(trim((string) $keyword));
+            if ($keyword === '' || in_array($keyword, self::GENERIC_TERMS, true)) {
+                continue;
+            }
+            $term = $canonical[$keyword] ?? $keyword;
+            if (! in_array($term, $core, true)) {
+                $core[] = $term;
+            }
+        }
+
+        return $core;
+    }
+
+    private function hasUnrequestedTableScope(string $title, string $question): bool
+    {
+        $normalizedTitle = Str::lower(Str::ascii(strip_tags($title)));
+        $normalizedQuestion = Str::lower(Str::ascii($question));
+        foreach ([
+            'pekerja informal',
+            'pekerja formal',
+            'informal',
+            'formal',
+            'pendidikan tertinggi',
+            'lapangan pekerjaan',
+            'lapangan usaha',
+            'usaha konstruksi',
+        ] as $scope) {
+            if (str_contains($normalizedTitle, $scope)
+                && ! str_contains($normalizedQuestion, $scope)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function tablesNeedConfirmation(array $tables, string $question): bool
+    {
+        if (count($tables) > 1) {
+            return true;
+        }
+
+        return ! empty($tables[0]['related_match'])
+            || ($tables !== [] && $this->hasUnrequestedTableScope(
+                (string) ($tables[0]['title'] ?? ''),
+                $question
+            ));
+    }
+
+    private function relatedTableSummary(array $table): string
+    {
+        $summary = [];
+        if (! empty($table['year'])) {
+            $summary[] = 'Tahun tersedia: '.$table['year'].'.';
+        }
+        if (! empty($table['subject'])) {
+            $summary[] = 'Subjek: '.$table['subject'].'.';
+        }
+
+        return implode(' ', $summary);
+    }
+
+    private function formatRelatedTableAnswer(array $tables): string
+    {
+        $lines = [
+            'Saya belum menemukan kecocokan persis untuk pertanyaan tersebut. Ada beberapa tabel BPS Sumatera Selatan yang topiknya berkaitan:',
+        ];
+        foreach ($tables as $index => $table) {
+            $title = html_entity_decode(
+                strip_tags((string) ($table['title'] ?? 'Tabel BPS')),
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8'
+            );
+            $year = trim((string) ($table['year'] ?? ''));
+            $lines[] = ($index + 1).'. '.$title.($year !== '' ? ' (tahun '.$year.')' : '');
+        }
+        $lines[] = 'Apakah salah satu tabel tersebut yang Anda cari? Jika ya, sebutkan judul atau rinciannya.';
+
+        return implode("\n", $lines);
+    }
+
+    private function staticTableContext(
+        array $keywords,
+        string $domain,
+        string $apiKey,
+        string $question = ''
+    ): ?string
+    {
+        $tables = $this->matchingTables($keywords, $domain, $apiKey, $question);
         $tableDomain = $domain;
         if ($tables === [] && $domain !== '0000') {
             $tableDomain = '0000';
-            $tables = $this->matchingTables($keywords, $tableDomain, $apiKey);
+            $tables = $this->matchingTables($keywords, $tableDomain, $apiKey, $question);
         }
 
         $context = [];
@@ -3540,14 +3760,35 @@ class BpsWebApiService
             if (! is_scalar($tableId) || ! isset($table['title'])) {
                 continue;
             }
-            $detail = $this->tableDetail((string) $tableId, $tableDomain, $apiKey);
+            $detail = ! empty($table['related_match'])
+                ? $this->relatedTableSummary($table)
+                : $this->tableDetail(
+                    (string) $tableId,
+                    $tableDomain,
+                    $apiKey,
+                    (string) ($table['type'] ?? 'Tabel Statis'),
+                    (string) ($table['year'] ?? '')
+                );
             if ($detail !== null) {
                 $scope = $tableDomain === '0000' ? 'domain nasional' : 'domain Sumatera Selatan';
-                $context[] = '[Sumber: BPS WebAPI, '.$scope.', '.$table['title'].'] '.$detail;
+                $context[] = '[Sumber: BPS WebAPI, '.$scope.', '
+                    .html_entity_decode(strip_tags((string) $table['title']), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                    .'] '.$detail;
             }
         }
 
-        return $context === [] ? null : implode("\n\n", $context);
+        if ($context === []) {
+            return null;
+        }
+        if ($this->tablesNeedConfirmation($tables, $question)) {
+            return "[WebAPI BPS][KANDIDAT_TOPIK_TERKAIT]\n"
+                ."Topik yang diminta belum memiliki kecocokan yang persis. Tabel berikut "
+                ."hanya kandidat terkait; jangan menyajikan nilainya sebagai jawaban final. "
+                ."Tanyakan dengan sopan apakah salah satu tabel berikut yang dimaksud:\n\n"
+                .implode("\n\n", $context);
+        }
+
+        return implode("\n\n", $context);
     }
 
     private function isStaticWageQuestion(string $question): bool
@@ -3566,24 +3807,35 @@ class BpsWebApiService
         return null;
     }
 
-    private function tableDetail(string $tableId, string $domain, string $apiKey): ?string
+    private function tableDetail(
+        string $tableId,
+        string $domain,
+        string $apiKey,
+        string $type = 'Tabel Statis',
+        string $year = ''
+    ): ?string
     {
-        $row = $this->catalogRowForTable($tableId, null, 'Tabel Statis', $domain);
+        $row = $this->catalogRowForTable(
+            $tableId,
+            $year !== '' ? $year : null,
+            $type,
+            $domain
+        );
         if ($row === null) {
             return null;
         }
         $response = $this->catalogResponse($row, $apiKey);
+
+        if ($type === 'SIMDASI') {
+            return $this->formatSimdasiTable($response->json('data.1'));
+        }
 
         $table = $response->json('data.table');
         if (! is_string($table) || trim($table) === '') {
             return null;
         }
 
-        $text = html_entity_decode($table, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $text = preg_replace('/<\/(?:td|th|tr|p|div)>/i', "\n", $text) ?? $text;
-        $text = strip_tags($text);
-        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $text = trim(preg_replace('/\s+/u', ' ', strip_tags($text)) ?? '');
+        $text = $this->formatStaticTableHtml($table);
 
         $stalenessNote = $response->json('_catatan');
         if (is_string($stalenessNote) && trim($stalenessNote) !== '') {
@@ -3591,6 +3843,126 @@ class BpsWebApiService
         }
 
         return Str::limit($text, 5000, '...');
+    }
+
+    private function formatStaticTableHtml(string $table): string
+    {
+        $previousErrorMode = libxml_use_internal_errors(true);
+        $document = new \DOMDocument('1.0', 'UTF-8');
+        try {
+            $loaded = $document->loadHTML(
+                '<?xml encoding="UTF-8">'.$table,
+                LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousErrorMode);
+        }
+
+        if (! $loaded) {
+            $text = html_entity_decode($table, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $text = trim(preg_replace('/\s+/', ' ', strip_tags($text)) ?? '');
+
+            return Str::limit($text, 2500, '...');
+        }
+
+        $rows = [];
+        $truncated = false;
+        foreach ($document->getElementsByTagName('tr') as $row) {
+            $cells = [];
+            foreach ($row->childNodes as $cell) {
+                if (! $cell instanceof \DOMElement
+                    || ! in_array(strtolower($cell->tagName), ['td', 'th'], true)) {
+                    continue;
+                }
+
+                $cells[] = trim(preg_replace('/\s+/', ' ', $cell->textContent) ?? $cell->textContent);
+            }
+            $cells = array_values(array_filter($cells, static fn (string $value) => $value !== ''));
+            if ($cells === []) {
+                continue;
+            }
+            if (count($rows) >= 25) {
+                $truncated = true;
+                break;
+            }
+
+            $rows[] = '| '.implode(' | ', $cells).' |';
+        }
+
+        if ($rows === []) {
+            $text = html_entity_decode($table, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $text = trim(preg_replace('/\s+/', ' ', strip_tags($text)) ?? '');
+
+            return Str::limit($text, 2500, '...');
+        }
+
+        $text = Str::limit(implode("\n", $rows), 2300, '...');
+        if ($truncated) {
+            $text .= "\n[Data tabel dipotong setelah 25 baris.]";
+        }
+
+        return $text;
+    }
+
+    private function formatSimdasiTable(mixed $table): ?string
+    {
+        if (! is_array($table) || ! is_array($table['kolom'] ?? null) || ! is_array($table['data'] ?? null)) {
+            return null;
+        }
+
+        $columns = [];
+        foreach ($table['kolom'] as $key => $column) {
+            if (! is_array($column)) {
+                continue;
+            }
+            $label = html_entity_decode(
+                strip_tags((string) ($column['nama_variabel'] ?? $column['label'] ?? $key)),
+                ENT_QUOTES | ENT_HTML5,
+                'UTF-8'
+            );
+            if (preg_match('/\s+-\s*(.+)$/u', $label, $match) === 1) {
+                $label = trim($match[1]);
+            } else {
+                $label = trim($label);
+            }
+            $columns[(string) $key] = $label;
+        }
+        if ($columns === []) {
+            return null;
+        }
+
+        $headers = ['Wilayah', ...array_values($columns)];
+        $lines = ['| '.implode(' | ', $headers).' |'];
+        $lines[] = '| '.implode(' | ', array_fill(0, count($headers), '---')).' |';
+        $truncated = false;
+        foreach ($table['data'] as $row) {
+            if (! is_array($row) || ! is_array($row['variables'] ?? null)) {
+                continue;
+            }
+            if (count($lines) >= 27) {
+                $truncated = true;
+                break;
+            }
+            $cells = [trim((string) ($row['label'] ?? ''))];
+            foreach ($columns as $key => $_label) {
+                $value = $row['variables'][$key]['value'] ?? '';
+                $cells[] = is_scalar($value) ? trim((string) $value) : '';
+            }
+            $cells = array_map(
+                static fn (string $cell) => str_replace('|', '\\|', $cell),
+                $cells
+            );
+            $lines[] = '| '.implode(' | ', $cells).' |';
+        }
+        if (count($lines) <= 2) {
+            return null;
+        }
+        if ($truncated) {
+            $lines[] = '[Data tabel dipotong setelah 25 baris.]';
+        }
+
+        return Str::limit(implode("\n", $lines), 4500, '...');
     }
 
     private function keywords(string $question): array

@@ -1495,7 +1495,7 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/view/model/statictable/') && str_contains($request->url(), '/1/'));
     }
 
-    public function test_upah_uses_a_static_table_before_monthly_releases(): void
+    public function test_upah_question_offers_related_simdasi_tables_before_monthly_releases(): void
     {
         config(['services.bps.api_key' => 'bps-test-secret']);
         Cache::flush();
@@ -1520,9 +1520,11 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $context = app(BpsWebApiService::class)->contextFor('Berapa upah terbaru?');
 
-        $this->assertStringContainsString('Rata-rata Upah Buruh Sumatera Selatan', $context);
-        $this->assertStringContainsString('3.500.000', $context);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/statictable/domain/1600/keyword/upah/'));
+        $this->assertStringContainsString('[KANDIDAT_TOPIK_TERKAIT]', $context);
+        $this->assertStringContainsString('Lapangan Pekerjaan Utama', $context);
+        $this->assertStringContainsString('Pendidikan Tertinggi', $context);
+        $this->assertStringContainsString('Tahun tersedia: 2025', $context);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/statictable/domain/1600/keyword/upah/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/pressrelease/'));
     }
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import bps_tools
+import bps_csv_search
 import bps_data_store
 from mysql_test_adapter import MySQLStorageTestConnection
 
@@ -331,6 +332,8 @@ class BpsToolsTests(unittest.TestCase):
             female = bps_tools.cari_variabel("wanita")
             both = bps_tools.cari_variabel("pria dan wanita")
             hospitals = bps_tools.cari_variabel("rumah sakit")
+            puskesmas = bps_tools.cari_variabel("puskesmas")
+            posyandu = bps_tools.cari_variabel("posyandu")
 
         self.assertEqual(male["status_hasil"], "ditemukan")
         self.assertTrue(any("laki-laki" in item["judul"].casefold() for item in male["hasil"]))
@@ -338,8 +341,12 @@ class BpsToolsTests(unittest.TestCase):
         self.assertTrue(any("perempuan" in item["judul"].casefold() for item in female["hasil"]))
         self.assertTrue(any("jenis kelamin" in item["judul"].casefold() for item in both["hasil"]))
         self.assertEqual(hospitals["hasil"][0]["judul"], "Jumlah Fasilitas Kesehatan. (Unit)")
+        self.assertEqual(puskesmas["hasil"][0]["var_id"], 779)
+        self.assertEqual(posyandu["hasil"][0]["var_id"], 779)
         self.assertTrue(bps_tools.catalog_variable_matches("pria dan wanita"))
         self.assertTrue(bps_tools.catalog_variable_matches("rumah sakit"))
+        self.assertTrue(bps_tools.catalog_variable_matches("puskesmas"))
+        self.assertTrue(bps_tools.catalog_variable_matches("posyandu"))
 
     def test_ambil_data_returns_a_bounded_year_range(self):
         periods = [
@@ -696,6 +703,85 @@ class BpsToolsTests(unittest.TestCase):
             "nested": [{"NoTeS": "also removed", "value": 1}],
         })
         self.assertEqual(cleaned, {"title": "example", "nested": [{"value": 1}]})
+
+    def test_requested_query_examples_use_core_terms_and_synonyms(self):
+        rows = [
+            {
+                "id_tabel": "salary",
+                "judul": "Rata-rata Upah/Gaji Pekerja Menurut Kabupaten/Kota",
+                "subjek": "Ketenagakerjaan",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+            },
+            {
+                "id_tabel": "calories",
+                "judul": "Rata-rata Konsumsi Kalori per Kapita",
+                "subjek": "Konsumsi dan Pengeluaran",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+            },
+            {
+                "id_tabel": "pdrb",
+                "judul": "Produk Domestik Regional Bruto Menurut Kabupaten/Kota",
+                "subjek": "Produk Domestik Regional Bruto",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+            },
+        ]
+        search = bps_csv_search.Pencari(rows)
+
+        question = "rata-rata gaji di sumsel berapa untuk 2026"
+        core = search.kata_inti(question)
+        result = search.cari(question, tahun_diminta=2026)
+        self.assertEqual(core, ["gaji"])
+        self.assertEqual(result["hasil"][0]["id"], "salary")
+        self.assertNotIn("2026", result["hasil"][0]["tahun"])
+
+        result = search.cari("penghasilan pekerja di sumsel 2025", tahun_diminta=2025)
+        self.assertEqual(result["hasil"][0]["id"], "salary")
+        self.assertIn("penghasilan", result["hasil"][0]["sinonim_digunakan"])
+
+        result = search.cari("PDRB kabupaten dan kota sumatera selatan terbaru")
+        self.assertEqual(result["hasil"][0]["id"], "pdrb")
+
+        result = search.cari("rata-rata konsumsi kalori sumsel")
+        self.assertEqual(result["hasil"][0]["id"], "calories")
+
+        result = search.cari("harga mobil listrik di Lahat")
+        self.assertEqual(result["hasil"], [])
+        self.assertLessEqual(len(result["saran"]), 3)
+        self.assertTrue(result["saran"])
+
+    def test_static_table_parser_deduplicates_filters_year_and_bounds_rows(self):
+        rows = "".join(
+            f"<tr><td>Kabupaten Lahat</td><td>{index}</td><td>{index}</td>"
+            f"<td>{index + 1}</td></tr>"
+            for index in range(30)
+        )
+        table_html = (
+            "<table><thead><tr><th>Wilayah</th><th>2024</th><th>Duplikat</th>"
+            f"<th>2025</th></tr></thead><tbody>{rows}</tbody></table>"
+        )
+        frame, info = bps_tools._static_table_dataframe(
+            table_html,
+            wilayah="Lahat",
+            tahun_diminta="2026",
+        )
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(len(frame.columns), 2)
+        self.assertEqual(len(frame), 30)
+        self.assertEqual(info["tahun_tersedia"], ["2024", "2025"])
+        self.assertEqual(info["tahun_diminta_tidak_ditemukan"], "2026")
+        self.assertEqual(info["tahun_terbaru_tersedia"], "2025")
+        self.assertEqual(list(frame.columns), ["Wilayah", "2025"])
+        latest_frame, _ = bps_tools._static_table_dataframe(
+            table_html,
+            wilayah="Lahat",
+        )
+        self.assertEqual(list(latest_frame.columns), ["Wilayah", "2025"])
+        rendered = bps_tools.tabel_statis_ke_teks(table_html, wilayah="Lahat")
+        self.assertLessEqual(rendered.count("\n"), 26)
 
 
 if __name__ == "__main__":

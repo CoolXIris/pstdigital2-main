@@ -35,6 +35,7 @@ class ChatRoutingTests(unittest.TestCase):
             ("Berapa tingkat pengangguran Sumatera Selatan terbaru?", "nilai"),
             ("RLS Sumatera Selatan", "nilai"),
             ("perkawinan di Sumsel 2026?", "nilai"),
+            ("harga mobil listrik di Lahat", "nilai"),
             ("Jelaskan IPM tahun 2025", "nilai"),
             ("Apa itu IPM di Palembang?", "nilai"),
             ("cara membaca inflasi", "definisi"),
@@ -97,6 +98,30 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIsNone(result[0]["candidate"])
         self.assertEqual(len(result[0]["suggestions"]), 2)
         self.assertEqual(result[1]["candidate"]["var_id"], 847)
+
+    def test_close_catalog_scores_keep_alternative_indicator_candidates(self):
+        options = main._rank_variable_candidate_options(
+            {
+                "hasil": [
+                    {
+                        "var_id": 10,
+                        "judul": "PDRB Kabupaten/Kota Sumatera Selatan Harga Berlaku",
+                        "skor_kemiripan": 94,
+                        "tahun_terbaru": "2022",
+                    },
+                    {
+                        "var_id": 11,
+                        "judul": "PDRB Kabupaten/Kota Sumatera Selatan Harga Konstan",
+                        "skor_kemiripan": 92,
+                        "tahun_terbaru": "2025",
+                    },
+                ],
+            },
+            "PDRB kabupaten kota",
+            "Provinsi Sumatera Selatan",
+        )
+
+        self.assertEqual([item["var_id"] for item in options], [10, 11])
 
     def test_latest_followup_fetches_all_indicators_from_prior_recommendations(self):
         recommendation = (
@@ -504,6 +529,67 @@ class ChatRoutingTests(unittest.TestCase):
             None,
         )
         self.assertEqual([candidate["var_id"] for candidate in candidates], [362])
+
+    def test_regional_health_category_uses_best_matching_table_not_incidental_title_hit(self):
+        question = "berapa jumlah puskesmas di Pali"
+        intent = main._dynamic_variable_intent(question)
+        self.assertIsNotNone(intent)
+        if intent is None:
+            self.fail("A health-facility question should create a catalog intent.")
+
+        search_result = main.bps_tools.cari_variabel(intent[0])
+        candidates = main._rank_variable_candidate_options(
+            search_result,
+            intent[0],
+            intent[2],
+            prefer_latest=True,
+        )
+        self.assertEqual([candidate["var_id"] for candidate in candidates], [779])
+        self.assertEqual(main._explicit_category_hint(question), "Puskesmas")
+
+    def test_chat_passes_health_category_through_csv_table_lookup(self):
+        question = "berapa jumlah puskesmas di Pali"
+        intent = main._dynamic_variable_intent(question)
+        self.assertIsNotNone(intent)
+        if intent is None:
+            self.fail("A health-facility question should create a catalog intent.")
+        candidate = {
+            "var_id": 779,
+            "judul": "Jumlah Fasilitas Kesehatan. (Unit)",
+            "satuan": "Unit",
+            "tahun_terbaru": "2025",
+            "skor_kemiripan": 100,
+            "jenis_kecocokan": "direct",
+        }
+
+        with (
+            patch.object(main, "verify_token"),
+            patch.object(main, "allow_request", return_value=True),
+            patch.object(
+                main.bps_tools,
+                "cari_variabel",
+                return_value={"status_hasil": "ditemukan", "hasil": [candidate]},
+            ) as search,
+            patch.object(
+                main,
+                "_fetch_candidate_data",
+                return_value={
+                    "judul": candidate["judul"],
+                    "tahun": "2025",
+                    "satuan": "Unit",
+                    "sumber": "BPS Provinsi Sumatera Selatan",
+                    "data": [{"wilayah": "Pali", "kategori": "Puskesmas", "nilai": 10}],
+                },
+            ) as fetch,
+        ):
+            result = main.chat_endpoint(main.ChatRequest(question=question))
+
+        search.assert_called_once_with(intent[0])
+        fetch.assert_called_once()
+        self.assertEqual(fetch.call_args.args[0]["var_id"], 779)
+        self.assertEqual(fetch.call_args.kwargs.get("kategori"), "Puskesmas")
+        self.assertIn("(Puskesmas) tahun 2025: 10 Unit", result["reply"])
+        self.assertIn("BPS Provinsi Sumatera Selatan", result["reply"])
 
     def test_chat_returns_requested_teacher_categories_for_regions_and_province(self):
         question = "jumlah guru SMP SD di Pali dan Lahat"
@@ -1824,7 +1910,10 @@ class ChatRoutingTests(unittest.TestCase):
         ):
             result = main.chat_endpoint(request)
 
-        static_table.assert_called_once_with("upah minimum")
+        static_table.assert_called_once_with(
+            "upah minimum",
+            tahun_diminta="2025",
+        )
         variable_search.assert_not_called()
         self.assertEqual(result["reply"], "Upah minimum tahun 2025 tercantum di tabel.")
         gemini_text = fake_models.calls[0]["contents"][-1].parts[0].text
@@ -1836,6 +1925,10 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(
             main._dynamic_variable_intent("berapa produksi padi Palembang tahun 2025"),
             ("produksi padi", "2025", "Kota Palembang"),
+        )
+        self.assertEqual(
+            main._dynamic_variable_intent("harga mobil listrik di Lahat"),
+            ("harga mobil listrik", "", "Kabupaten Lahat"),
         )
         self.assertEqual(
             main._dynamic_variable_intent("produksi padi menurut kabupaten/kota"),
@@ -2494,7 +2587,7 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("1.234.567 Jiwa", reply)
         self.assertIn("estimasi", reply)
 
-    def test_indicator_fallback_describes_empty_result_from_returned_metadata(self):
+    def test_indicator_fallback_asks_for_category_without_claiming_total_is_missing(self):
         reply = main._format_indicator_fallback(
             {
                 "judul": "Jumlah Penduduk Menurut Kabupaten/Kota",
@@ -2509,10 +2602,74 @@ class ChatRoutingTests(unittest.TestCase):
             "Provinsi Sumatera Selatan",
             "2025",
         )
-        self.assertIn("tidak memuat baris total/agregat", reply)
-        self.assertIn("kategori yang tersedia tidak dijumlahkan", reply)
+        self.assertIn("Laki-Laki", reply)
+        self.assertIn("Perempuan", reply)
+        self.assertIn("Sebutkan kategori", reply)
+        self.assertNotIn("tidak memuat baris total/agregat", reply)
         self.assertIn("estimasi", reply)
         self.assertNotEqual(reply, main.NOT_FOUND)
+
+    def test_indicator_fallback_lists_regional_pdrb_without_total_warning(self):
+        reply = main._format_indicator_fallback(
+            {
+                "judul": "PDRB Menurut Kabupaten/Kota",
+                "tahun": "2025",
+                "satuan": "Miliar Rupiah",
+                "data": [
+                    {"wilayah": "Lahat", "nilai": 120},
+                    {"wilayah": "PALI", "nilai": 80},
+                ],
+            },
+            None,
+            "2025",
+        )
+
+        self.assertIn("Lahat: 120", reply)
+        self.assertIn("PALI: 80", reply)
+        self.assertNotIn("total/agregat", reply)
+
+    def test_explicit_total_without_province_row_is_reported_without_summing(self):
+        reply = main._format_indicator_fallback(
+            {
+                "judul": "PDRB Menurut Kabupaten/Kota",
+                "tahun": "2025",
+                "satuan": "Miliar Rupiah",
+                "data": [
+                    {"wilayah": "Lahat", "nilai": 120},
+                    {"wilayah": "PALI", "nilai": 80},
+                ],
+            },
+            None,
+            "2025",
+            minta_total=True,
+        )
+
+        self.assertIn("Baris total Provinsi Sumatera Selatan", reply)
+        self.assertIn("tidak menjumlahkan kabupaten/kota", reply)
+        self.assertNotIn("200 Miliar", reply)
+
+    def test_static_fallback_discloses_missing_year_and_download_link(self):
+        reply = main._format_static_table_fallback(
+            {
+                "hasil": [{
+                    "judul": "Upah/Gaji Menurut Tahun",
+                    "isi": "| Tahun | Nilai |\n|---|---|\n| 2025 | 3500 |",
+                    "tahun_diminta_tidak_ditemukan": "2026",
+                    "tahun_terbaru_tersedia": "2025",
+                    "terpotong": True,
+                    "excel": "https://example.test/table.xlsx",
+                }],
+            },
+            "gaji",
+        )
+
+        self.assertIn("Tahun 2026 belum tersedia", reply)
+        self.assertIn("2025", reply)
+        self.assertIn("https://example.test/table.xlsx", reply)
+
+    def test_total_request_is_distinguished_from_indicator_quantity(self):
+        self.assertFalse(main._requests_total_aggregate("jumlah PDRB kabupaten dan kota"))
+        self.assertTrue(main._requests_total_aggregate("total PDRB Sumatera Selatan"))
 
     def test_indicator_fallback_uses_explicit_total_category_only(self):
         reply = main._format_indicator_fallback(

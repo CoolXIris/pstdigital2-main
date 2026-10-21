@@ -3,27 +3,31 @@ import functools
 import html
 import json
 import logging
-import math
 import os
 import re
 import time
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
+from lxml.etree import LxmlError
+import pandas as pd
 
 import bps_csv_catalog
+import bps_csv_search
 import bps_data_store
+import sinonim
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 DOMAIN = os.getenv("BPS_DOMAIN", "1600")
 WIB = timezone(timedelta(hours=7))
+_YEAR_PATTERN = re.compile(r"20\d{2}")
 _REGIONS = (
     ("Provinsi Sumatera Selatan", ("sumatera selatan", "sumsel")),
     ("Kabupaten Ogan Komering Ulu", ("ogan komering ulu", "oku")),
@@ -74,7 +78,21 @@ _VARIABLE_SYNONYM_GROUPS = (
     _GENDER_FEMALE_SYNONYMS,
 )
 _VARIABLE_SYNONYM_PHRASES = (
-    ("fasilitas kesehatan", ("rumah sakit umum", "rumah sakit", "rsud", "faskes")),
+    (
+        "fasilitas kesehatan",
+        (
+            "rumah sakit khusus",
+            "rumah sakit umum",
+            "balai kesehatan",
+            "klinik kesehatan",
+            "rumah sakit",
+            "puskesmas",
+            "posyandu",
+            "klinik",
+            "rsud",
+            "faskes",
+        ),
+    ),
     ("jenis kelamin", ("gender", "sex")),
     ("nilai tukar petani", ("ntp",)),
     ("penjara", ("masuk penjara", "dipenjara", "masuk tahanan")),
@@ -219,7 +237,10 @@ def _clean_search_keyword(keyword: str) -> str:
     result = re.sub(r"\b20\d{2}\b", " ", result)
     words = [
         word for word in re.findall(r"[a-z0-9]+", result.casefold())
-        if word not in _SEARCH_FILLER_WORDS and word not in _MONTH_WORDS
+        if word not in _SEARCH_FILLER_WORDS
+        and word not in _MONTH_WORDS
+        and word not in sinonim.STOP
+        and word not in sinonim.GENERIC
     ]
     canonical_synonyms = {
         synonym: group[0]
@@ -228,6 +249,24 @@ def _clean_search_keyword(keyword: str) -> str:
     }
     words = [canonical_synonyms.get(word, word) for word in words]
     return " ".join(words)[:80].strip()
+
+
+def _token_match_score(term: str, tokens: set[str]) -> float:
+    normalized = str(term or "").casefold().strip()
+    if not normalized:
+        return 0.0
+    if normalized in tokens:
+        return 1.0
+    if len(normalized) < 4:
+        return 0.0
+    score = max(
+        (
+            SequenceMatcher(None, normalized, token).ratio()
+            for token in tokens
+        ),
+        default=0.0,
+    )
+    return score if score >= 0.8 else 0.0
 
 
 def _stem_keyword(word: str) -> str:
@@ -407,126 +446,51 @@ def _variable_index() -> dict:
     return _load_searchable_variable_index()
 
 
-def _token_match_score(term: str, title_tokens: set[str]) -> float:
-    variants = {term, _VARIABLE_SYNONYMS.get(term, term)}
-    for group in _VARIABLE_SYNONYM_GROUPS:
-        if term in group:
-            variants.update(group)
-    fuzzy_variants = set(variants)
-    for variant in tuple(variants):
-        variants.add(_stem_keyword(variant))
-        variants.add(_VARIABLE_SYNONYMS.get(variant, variant))
-    if variants & title_tokens:
-        return 1.0
-
-    threshold = 0.78 if len(term) >= 7 else 0.84 if len(term) >= 5 else 0.9
-    best_score = max(
-        (
-            SequenceMatcher(None, variant, title_token).ratio()
-            for variant in fuzzy_variants
-            for title_token in title_tokens
-            if min(len(variant), len(title_token)) >= 4
-            and abs(len(variant) - len(title_token)) <= max(2, len(variant) // 4)
-        ),
-        default=0.0,
+def _rank_local_variables(
+    keyword: str,
+    variables: list[dict],
+    tahun_diminta: Optional[str] = None,
+) -> list[dict]:
+    search = bps_csv_search.Pencari(
+        variables,
+        corpus_rows=_catalog_rows(),
+    ).cari(
+        keyword,
+        tahun_diminta=tahun_diminta,
+        top=len(variables),
     )
-    return best_score if best_score >= threshold else 0.0
-
-
-def _rank_local_variables(keyword: str, variables: list[dict]) -> list[dict]:
-    terms = list(dict.fromkeys(
-        word for word in re.findall(r"[a-z0-9]+", keyword.casefold())
-        if len(word) >= 3 and word != "total"
-    ))
-    male_terms = set(_GENDER_MALE_SYNONYMS)
-    female_terms = set(_GENDER_FEMALE_SYNONYMS)
-    if set(terms) & male_terms and set(terms) & female_terms:
-        terms = [
-            term for term in terms
-            if term not in male_terms and term not in female_terms
-        ]
-        terms.extend(("jenis", "kelamin"))
-    if not terms:
-        return []
-
-    title_tokens_by_id = []
-    document_frequency: Counter[str] = Counter()
-    for variable in variables:
-        searchable = " ".join([
-            str(variable.get("title") or ""),
-            " ".join(variable.get("aliases") or []),
-        ]).casefold()
-        tokens = set(re.findall(r"[a-z0-9]+", searchable))
-        title_tokens_by_id.append((variable, tokens))
-        document_frequency.update(term for term in terms if _token_match_score(term, tokens) > 0)
-
-    quantity_cue = "total" in re.findall(r"[a-z0-9]+", keyword.casefold())
-    query_phrase = " ".join(terms)
-    ranked: list[tuple[float, int, int, int, str, dict]] = []
-    for variable, title_tokens in title_tokens_by_id:
-        weighted_score = 0.0
-        total_weight = 0.0
-        matched_terms = 0
-        related_match = False
-        fuzzy_match = False
-        for term in terms:
-            weight = 1.0 + math.log(
-                (len(variables) + 1) / (document_frequency[term] + 1)
-            )
-            match_score = _token_match_score(term, title_tokens)
-            if match_score and match_score < 1.0:
-                fuzzy_match = True
-            if not match_score:
-                related_terms = _RELATED_VARIABLE_SYNONYMS.get(term, ())
-                if any(
-                    all(
-                        word in title_tokens or _stem_keyword(word) in title_tokens
-                        for word in re.findall(r"[a-z0-9]+", related)
-                    )
-                    for related in related_terms
-                ):
-                    match_score = 0.55
-                    related_match = True
-            weighted_score += weight * match_score
-            total_weight += weight
-            matched_terms += match_score > 0
-
-        if total_weight == 0 or matched_terms == 0:
+    matches: list[dict] = []
+    for match in search["hasil"]:
+        source_rows = match["rows"]
+        if not source_rows:
             continue
-
-        score = weighted_score / total_weight
-        title = str(variable.get("title") or "")
-        if quantity_cue and re.search(r"\b(jumlah|total)\b", title, re.IGNORECASE):
-            score = min(1.0, score + 0.08)
-        score_percent = round(score * 100)
-        variable_with_score = dict(variable)
-        variable_with_score["similarity_score"] = score_percent
-        variable_with_score["match_type"] = (
-            "related" if related_match else "fuzzy" if fuzzy_match else "direct"
-        )
-        normalized_title = " ".join(re.findall(r"[a-z0-9]+", title.casefold()))
-        phrase_position = normalized_title.find(query_phrase)
-        if phrase_position < 0:
-            phrase_position = len(normalized_title) + 1
-        ranked.append((
-            score,
-            matched_terms,
-            -phrase_position,
-            -len(title),
-            title.casefold(),
-            variable_with_score,
-        ))
-    ranked.sort(key=lambda item: item[:4], reverse=True)
-    return [item[5] for item in ranked if item[0] >= 0.35]
+        variable = dict(source_rows[0])
+        variable["similarity_score"] = match["skor_kemiripan"]
+        variable["match_type"] = match["jenis_kecocokan"]
+        variable["core_terms"] = match["kata_inti_cocok"]
+        variable["synonyms_used"] = match["sinonim_digunakan"]
+        variable["search_score"] = match["skor"]
+        matches.append(variable)
+    return matches
 
 
 def catalog_variable_matches(question: str) -> bool:
     keyword = _clean_search_keyword(question or "")
     catalog = _load_catalog_index()
-    return bool(_rank_local_variables(keyword, catalog["variables"]))
+    variables = [
+        {
+            **variable,
+            "var_id": variable.get("var_id") or f"catalog-{index}",
+        }
+        for index, variable in enumerate(catalog["variables"])
+    ]
+    return bool(_rank_local_variables(keyword, variables))
 
 
-def cari_variabel(kata_kunci: str) -> dict:
+def cari_variabel(
+    kata_kunci: str,
+    tahun_diminta: Optional[str] = None,
+) -> dict:
     """Mencari variabel (indikator) data tahunan BPS Sumatera Selatan berdasarkan kata kunci.
 
     Gunakan 1-2 kata inti, mis. "jumlah penduduk", "penduduk miskin", "IPM". Jangan
@@ -555,11 +519,29 @@ def cari_variabel(kata_kunci: str) -> dict:
             "status_hasil": "kosong",
             "petunjuk": "Masukkan kata inti indikator tanpa nama wilayah.",
         }
+    search_keyword = (
+        "ntp"
+        if re.search(r"\bntp\b", kata_kunci or "", re.IGNORECASE)
+        else keyword
+    )
 
     try:
         index = _variable_index()
-        variables = _rank_local_variables(keyword, index["variables"])
-        candidates = variables[:15]
+        catalog_rows = _catalog_rows()
+        search = bps_csv_search.Pencari(
+            index["variables"],
+            corpus_rows=catalog_rows,
+        ).cari(
+            search_keyword,
+            tahun_diminta=tahun_diminta,
+            top=3,
+        )
+        variables = _rank_local_variables(
+            search_keyword,
+            index["variables"],
+            tahun_diminta=tahun_diminta,
+        )[:3]
+        candidates = variables[:3]
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
     except (KeyError, ValueError, TypeError):
@@ -596,6 +578,11 @@ def cari_variabel(kata_kunci: str) -> dict:
     result = {
         "jumlah_ditemukan": len(variables),
         "hasil": hasil,
+        "kata_inti": bps_csv_search.Pencari(
+            index["variables"],
+            corpus_rows=catalog_rows,
+        ).kata_inti(search_keyword),
+        "kandidat_terdekat": search["saran"],
         "status_hasil": (
             "ditemukan"
             if variables and int(variables[0].get("similarity_score") or 0) >= 80
@@ -1710,10 +1697,12 @@ def _static_table_rows(keyword: str, domain: str) -> list[dict]:
         title = row.get("judul", "")
         if row.get("jenis_tabel") != "Tabel Statis" or not table_id or not title:
             continue
-        tables.setdefault(table_id, {
+        table = tables.setdefault(table_id, {
             "table_id": table_id,
             "title": title,
             "domain": domain,
+            "jenis_tabel": "Tabel Statis",
+            "years": set(),
             "aliases": list(dict.fromkeys([
                 *_variable_aliases(title),
                 row.get("subjek", ""),
@@ -1721,31 +1710,207 @@ def _static_table_rows(keyword: str, domain: str) -> list[dict]:
             ])),
             "catalog_row": row,
         })
+        year = str(row.get("tahun") or "").strip()
+        if year:
+            table["years"].add(year[:4])
     return list(tables.values())
 
 
-def _static_table_text(payload: dict) -> Optional[str]:
+def _static_table_dataframe(
+    table_html: str,
+    wilayah: Optional[str | list[str]] = None,
+    tahun_diminta: Optional[str] = None,
+) -> tuple[Optional[pd.DataFrame], dict[str, Any]]:
+    try:
+        frames = pd.read_html(
+            StringIO(html.unescape(table_html)),
+            thousands=".",
+            decimal=",",
+        )
+    except (ImportError, LxmlError, TypeError, ValueError):
+        return None, {}
+    if not frames:
+        return None, {}
+
+    frame = frames[0].dropna(how="all").dropna(axis=1, how="all")
+    frame = frame.loc[:, ~frame.T.duplicated()].copy()
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = [
+            " ".join(str(part) for part in column if str(part) != "nan").strip()
+            for column in frame.columns
+        ]
+
+    info: dict[str, Any] = {"jumlah_baris_total": len(frame)}
+    year_columns = [
+        column for column in frame.columns
+        if _YEAR_PATTERN.findall(str(column))
+    ]
+    year_column = next(
+        (
+            column for column in frame.columns
+            if frame[column].astype(str).str.fullmatch(r"20\d{2}").any()
+        ),
+        None,
+    )
+    years = {
+        year
+        for column in year_columns
+        for year in _YEAR_PATTERN.findall(str(column))
+    }
+    if year_column is not None:
+        years.update(
+            frame[year_column].astype(str).loc[
+                frame[year_column].astype(str).str.fullmatch(r"20\d{2}")
+            ].tolist()
+        )
+    info["tahun_tersedia"] = sorted(years, key=int)
+
+    if wilayah and not frame.empty:
+        requested_regions = wilayah if isinstance(wilayah, list) else [wilayah]
+        requested_names = set()
+        for requested in requested_regions:
+            canonical, _ = resolve_region_from_text(str(requested))
+            requested_names.add(_static_region_key(canonical or str(requested)))
+            requested_names.add(_static_region_key(str(requested)))
+        first_column = frame.columns[0]
+        region_keys = frame[first_column].astype(str).map(_static_region_key)
+        matched = region_keys.isin(requested_names)
+        frame = frame.loc[matched].copy()
+        if frame.empty:
+            info["wilayah_tidak_ditemukan"] = True
+
+    if not years:
+        return frame, info
+
+    ordered_years = sorted(years, key=int)
+    requested_year = str(tahun_diminta or "").strip()
+    all_year_columns = [
+        column for column in frame.columns
+        if _YEAR_PATTERN.findall(str(column))
+    ]
+    selected_year = requested_year if requested_year in years else ordered_years[-1]
+    matching_year_columns = [
+        column for column in all_year_columns
+        if selected_year in _YEAR_PATTERN.findall(str(column))
+    ]
+    if matching_year_columns:
+        non_year_columns = [
+            column for column in frame.columns if column not in all_year_columns
+        ]
+        frame = frame.loc[:, [*non_year_columns, *matching_year_columns]]
+        if requested_year and requested_year not in years:
+            info["tahun_diminta_tidak_ditemukan"] = requested_year
+            info["tahun_terbaru_tersedia"] = selected_year
+        return frame, info
+    if year_column is not None:
+        frame = frame.loc[frame[year_column].astype(str) == selected_year]
+        if requested_year and requested_year not in years:
+            info["tahun_diminta_tidak_ditemukan"] = requested_year
+            info["tahun_terbaru_tersedia"] = selected_year
+        return frame, info
+    if requested_year and requested_year in years:
+        return frame, info
+
+    if requested_year:
+        info["tahun_diminta_tidak_ditemukan"] = requested_year
+        info["tahun_terbaru_tersedia"] = selected_year
+    return frame, info
+
+
+def _static_region_key(value: str) -> str:
+    normalized = re.sub(r"^\d+[\s.)-]+", "", str(value).casefold().strip())
+    normalized = re.sub(
+        r"^(?:kabupaten|kab\.?|kota|provinsi)\s*",
+        "",
+        normalized,
+    )
+    return " ".join(re.findall(r"[a-z]+", normalized))
+
+
+def _static_table_fallback_text(table_html: str) -> str:
+    text = html.unescape(table_html)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:1500] + (" ..." if len(text) > 1500 else "")
+
+
+def _static_table_markdown(frame: pd.DataFrame) -> str:
+    display = frame.copy()
+    for column in display.columns:
+        if _YEAR_PATTERN.fullmatch(str(column).strip()):
+            continue
+        values = display[column].astype(str)
+        if values.str.fullmatch(r"20\d{2}").all():
+            continue
+        if not pd.api.types.is_numeric_dtype(display[column]):
+            continue
+
+        def format_number(value: Any) -> str:
+            if pd.isna(value):
+                return ""
+            number = float(value)
+            formatted = f"{number:,.3f}".rstrip("0").rstrip(".")
+            return formatted.replace(",", "_").replace(".", ",").replace("_", ".")
+
+        display[column] = display[column].map(format_number)
+    return display.to_markdown(index=False, disable_numparse=True)
+
+
+def tabel_statis_ke_teks(
+    table_html: str,
+    wilayah: Optional[str | list[str]] = None,
+    maks_baris: int = 25,
+) -> str:
+    """Convert BPS static-table HTML into bounded Markdown, with safe text fallback."""
+    frame, info = _static_table_dataframe(table_html, wilayah)
+    if frame is None:
+        return _static_table_fallback_text(table_html)
+    if info.get("wilayah_tidak_ditemukan"):
+        return f"Tidak ada baris tabel untuk wilayah {wilayah}."
+    if frame.empty:
+        return "Tabel statis tidak memuat baris data."
+    return _static_table_markdown(frame.head(max(1, maks_baris)))
+
+
+def _static_table_text(
+    payload: dict,
+    wilayah: Optional[str | list[str]] = None,
+    tahun_diminta: Optional[str] = None,
+) -> tuple[Optional[str], dict[str, Any]]:
     data = payload.get("data")
     table_html = data.get("table") if isinstance(data, dict) else None
     if not isinstance(table_html, str) or not table_html.strip():
-        return None
-    table_html = html.unescape(table_html)
-    table_html = re.sub(
-        r"<(?:br\s*/?|/(?:td|th|tr|p|div|li|h[1-6]))[^>]*>",
-        "\n",
-        table_html,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(r"<[^>]+>", " ", table_html)
-    lines = [
-        re.sub(r"\s+", " ", line).strip()
-        for line in text.splitlines()
-    ]
-    cleaned = "\n".join(line for line in lines if line)
-    return cleaned[:5000].rstrip() or None
+        return None, {}
+    frame, info = _static_table_dataframe(table_html, wilayah, tahun_diminta)
+    if frame is None:
+        return _static_table_fallback_text(table_html), info
+    if info.get("wilayah_tidak_ditemukan"):
+        return f"Tidak ada baris tabel untuk wilayah {wilayah}.", info
+    if frame.empty:
+        return "Tabel statis tidak memuat baris data.", info
+    info["baris_ditampilkan"] = min(len(frame), 25)
+    info["terpotong"] = len(frame) > 25
+    return _static_table_markdown(frame.head(25)), info
 
 
-def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
+def _static_excel_link(payload: dict) -> Optional[str]:
+    containers = [payload]
+    if isinstance(payload.get("data"), dict):
+        containers.append(payload["data"])
+    for container in containers:
+        for key in ("excel", "excel_url", "url_excel"):
+            value = container.get(key)
+            if isinstance(value, str) and value.startswith("https://"):
+                return value
+    return None
+
+
+def tabel_statis(
+    kata_kunci: str,
+    jumlah: int = 3,
+    wilayah: Optional[str] = None,
+    tahun_diminta: Optional[str] = None,
+) -> dict:
     """Mencari dan membaca tabel statis BPS, termasuk topik yang tidak ada di variabel.
 
     Gunakan untuk tabel seperti upah/gaji, tabel tematik, atau ketika cari_variabel
@@ -1762,9 +1927,29 @@ def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
     count = max(1, min(int(jumlah or 1), 3))
     try:
         results = []
-        ranked = _rank_local_variables(keyword, _static_table_rows(keyword, DOMAIN))
+        static_rows = _static_table_rows(keyword, DOMAIN)
+        catalog_rows = _catalog_rows()
+        search = bps_csv_search.Pencari(
+            static_rows,
+            corpus_rows=catalog_rows,
+        ).cari(
+            keyword,
+            tahun_diminta=tahun_diminta,
+            top=3,
+            jenis="Tabel Statis",
+        )
+        ranked = _rank_local_variables(
+            keyword,
+            static_rows,
+            tahun_diminta=tahun_diminta,
+        )
         for table in ranked[:count]:
-            text = _static_table_text(_fetch_catalog_row(table["catalog_row"]))
+            payload = _fetch_catalog_row(table["catalog_row"])
+            text, table_info = _static_table_text(
+                payload,
+                wilayah=wilayah,
+                tahun_diminta=tahun_diminta,
+            )
             if text:
                 results.append({
                     "table_id": table["table_id"],
@@ -1773,6 +1958,12 @@ def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
                     "cakupan": "Sumatera Selatan",
                     "sumber": "BPS Provinsi Sumatera Selatan",
                     "isi": text,
+                    **table_info,
+                    **(
+                        {"excel": excel_link}
+                        if (excel_link := _static_excel_link(payload))
+                        else {}
+                    ),
                 })
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
@@ -1780,6 +1971,8 @@ def tabel_statis(kata_kunci: str, jumlah: int = 3) -> dict:
     return {
         "jumlah_ditemukan": len(results),
         "hasil": results,
+        "kata_inti": search["kata_inti"],
+        "kandidat_terdekat": search["saran"],
         "status_hasil": "ditemukan" if results else "kosong",
     }
 
