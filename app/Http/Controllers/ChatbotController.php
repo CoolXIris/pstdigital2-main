@@ -401,8 +401,8 @@ class ChatbotController extends Controller
     private function isConceptQuestion(string $message): bool
     {
         if (preg_match(
-            '/\b(apa\s+itu|apa\s+perbedaan|perbedaan|pengertian|definisi|arti|maksud|konsep|cara\s+membaca|'
-            .'cara\s+menghitung|cara\s+menafsir\w*|rumus|jelaskan)\b/iu',
+            '/\b(apa\s+itu|apa\s+artinya|apa\s+makna|apa\s+perbedaan|perbedaan|pengertian|definisi|arti|makna|'
+            .'maksud(?:nya)?|konsep|cara\s+membaca|cara\s+menghitung|cara\s+menafsir\w*|rumus|jelaskan|itu\s+apa)\b/iu',
             $message
         ) !== 1) {
             return false;
@@ -410,18 +410,6 @@ class ChatbotController extends Controller
         if (preg_match('/\b(berapa|nilai|angka|terbaru|terkini|tahun|periode|rilis)\b|\b20\d{2}\b/iu', $message)) {
             return false;
         }
-        if (preg_match('/\b(sumsel|sumatera\s+selatan)\b/iu', $message)) {
-            return false;
-        }
-
-        foreach (config('sumsel_regions', []) as $region) {
-            foreach (array_merge($region['aliases'] ?? [], [$region['label'] ?? '']) as $name) {
-                if ($name !== '' && preg_match('/\b'.preg_quote($name, '/').'\b/iu', $message)) {
-                    return false;
-                }
-            }
-        }
-
         return true;
     }
 

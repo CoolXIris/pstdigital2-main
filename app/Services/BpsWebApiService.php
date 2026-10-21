@@ -88,7 +88,7 @@ class BpsWebApiService
                 if ($year <= 0 || $periodId <= 0) {
                     continue;
                 }
-                $response = $this->canonicalDataForPeriod($variableId, $periodId, $apiKey);
+                $response = $this->canonicalDataForPeriod($variableId, $periodId, $apiKey, $title, (string) $year);
                 if ($response === null) {
                     continue;
                 }
@@ -243,14 +243,14 @@ class BpsWebApiService
 
     public function isDataQuestion(string $question): bool
     {
-        return preg_match('/\b(berapa|persen\w*|persentase|jumlah|total|warga|masyarakat|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|indikator|data|statistik)\b/i', $question) === 1;
+        return preg_match('/\b(berapa|persen\w*|persentase|jumlah|total|warga|masyarakat|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|rls|hls|sekolah|indikator|data|statistik)\b/i', $question) === 1;
     }
 
     private function hasDynamicDataIntent(string $question): bool
     {
         return $this->isDataQuestion($question)
             || $this->matchFallbackTopic($question) !== null
-            || preg_match('/\b(perikan\w*|ikan|tenaga|angkatan|pendidikan|kesehatan|pengeluaran|pendapatan|konsumsi|wisata\w*|hotel|transportasi|terbaru)\b/i', $question) === 1
+            || preg_match('/\b(perikan\w*|ikan|tenaga|angkatan|pendidikan|sekolah|rls|hls|kesehatan|pengeluaran|pendapatan|konsumsi|wisata\w*|hotel|transportasi|terbaru)\b/i', $question) === 1
             || $this->catalogVariableMatches($question);
     }
 
@@ -433,9 +433,21 @@ class BpsWebApiService
                 return '[WebAPI BPS] API tidak dapat dihubungi untuk mengambil '.$catalog['label'].'. Beri tahu pengguna bahwa data belum dapat diverifikasi dan jangan mengarang daftar atau jumlah.';
             }
 
+            if ($this->isDataQuestion($question)) {
+                return '[WebAPI BPS][DATA_BELUM_TERSEDIA] WebAPI BPS tidak dapat dihubungi untuk memeriksa variabel dan periode terbaru. Jangan mengganti dengan seri lama.';
+            }
+
             return $this->isMonthlyBpsTopic($question)
                 ? $this->monthlyReleaseUnavailableContext($question)
                 : null;
+        } catch (RuntimeException $exception) {
+            report($exception);
+
+            if ($this->isDataQuestion($question)) {
+                return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Variabel atau periode terbaru gagal diverifikasi melalui WebAPI BPS. Jangan mengganti dengan seri lama.';
+            }
+
+            throw $exception;
         }
     }
 
@@ -1197,7 +1209,15 @@ class BpsWebApiService
             ? "Data {$requestedYear} belum dirilis. Data terbaru ".(($region['kind'] ?? null) === 'region' ? $region['label'] : 'Provinsi Sumatera Selatan')." ({$year}):"
             : null;
         try {
-            $response = $this->dynamicData($variableId, (int) ($period['th_id'] ?? 0), null, '1600', $apiKey);
+            $response = $this->dynamicData(
+                $variableId,
+                (int) ($period['th_id'] ?? 0),
+                null,
+                '1600',
+                $apiKey,
+                (string) ($variable['title'] ?? $variable['label']),
+                $year
+            );
         } catch (ConnectionException) {
             return ['context' => null, 'reason' => 'WebAPI BPS tidak dapat dihubungi untuk mengambil nilai indikator.', 'year_notice' => $yearNotice];
         }
@@ -1760,10 +1780,7 @@ class BpsWebApiService
         }
 
         $curatedVariables = $this->curatedVariables($terms);
-        $cachedIndex = Cache::get(self::VARIABLE_INDEX_CACHE_PREFIX.$domain);
-        $searchVariables = (is_array($cachedIndex) && is_array($cachedIndex['variables'] ?? null)) || $curatedVariables === []
-            ? $this->matchingVariables($terms, $question, $domain, $apiKey)
-            : [];
+        $searchVariables = $this->matchingVariables($terms, $question, $domain, $apiKey);
         $variablesById = [];
         foreach (array_merge($curatedVariables, $searchVariables) as $variable) {
             $variableId = $variable['var_id'] ?? null;
@@ -1799,12 +1816,13 @@ class BpsWebApiService
             ? $yearMatch[1]
             : null;
         $requestedQuarter = $this->requestedQuarter($question);
-        $region = $this->regionMentioned($question);
+        $region = $this->regionScopeMentioned($question);
         $compatibleVariables = [];
         foreach ($variables as $variable) {
             $variable['level'] = $this->explicitVariableLevel((string) ($variable['title'] ?? '')) ?? 'unknown';
             if ($region !== null) {
-                if (in_array($variable['level'], ['province', 'subdistrict'], true)) {
+                if ($variable['level'] === 'subdistrict'
+                    || (($region['kind'] ?? null) !== 'province' && $variable['level'] === 'province')) {
                     continue;
                 }
                 $variable['_score'] = (float) ($variable['_score'] ?? 0) + $this->regionalVariableScore($variable, $region);
@@ -1865,8 +1883,20 @@ class BpsWebApiService
             return '[WebAPI BPS][DATA_BELUM_TERSEDIA][TAHUN_TIDAK_TERSEDIA] Indikator ditemukan, tetapi WebAPI BPS belum mengembalikan periode data yang dapat digunakan.';
         }
 
-        usort($candidates, fn (array $left, array $right) => ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0)
-            ?: ($right['_selected_year'] ?? 0) <=> ($left['_selected_year'] ?? 0));
+        $bestScore = max(array_map(fn (array $candidate) => (float) ($candidate['_score'] ?? 0), $candidates));
+        $nearBestCandidates = array_values(array_filter(
+            $candidates,
+            fn (array $candidate) => (float) ($candidate['_score'] ?? 0) >= $bestScore - 5
+        ));
+        usort($nearBestCandidates, fn (array $left, array $right) => ($right['_selected_year'] ?? 0) <=> ($left['_selected_year'] ?? 0)
+            ?: ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0));
+        $candidates = array_merge(
+            $nearBestCandidates,
+            array_values(array_filter(
+                $candidates,
+                fn (array $candidate) => (float) ($candidate['_score'] ?? 0) < $bestScore - 5
+            ))
+        );
         $best = $candidates[0];
         $ambiguous = array_values(array_filter($candidates, fn (array $candidate) => (float) ($candidate['_score'] ?? 0) === (float) ($best['_score'] ?? 0)
             && (int) ($candidate['_selected_year'] ?? 0) === (int) ($best['_selected_year'] ?? 0)));
@@ -1897,7 +1927,9 @@ class BpsWebApiService
                 (int) $period['th_id'],
                 $quarter['turth_id'] ?? null,
                 $domain,
-                $apiKey
+                $apiKey,
+                (string) $variable['title'],
+                (string) $period['th']
             );
             $values = $response?->json('datacontent');
             if (! is_array($values) || $values === []) {
@@ -2163,6 +2195,22 @@ class BpsWebApiService
         foreach ($this->regionsMentioned($question) as $region) {
             if (($region['kind'] ?? null) === 'region') {
                 return $region;
+            }
+        }
+
+        return null;
+    }
+
+    private function regionScopeMentioned(string $question): ?array
+    {
+        $region = $this->regionMentioned($question);
+        if ($region !== null) {
+            return $region;
+        }
+
+        foreach ($this->regionsMentioned($question) as $candidate) {
+            if (($candidate['kind'] ?? null) === 'province') {
+                return $candidate;
             }
         }
 
@@ -2572,7 +2620,7 @@ class BpsWebApiService
             if ($phrase !== '' && Str::contains($normalizedTitle, $phrase)) {
                 $score += 20;
             }
-            $score -= max(0, Str::length($title) - 50) / 10;
+            $score -= min(2, max(0, Str::length($title) - 80) / 20);
             if (preg_match('/\b(?:q|triwulan)\s*(?:[1-4]|i{1,3}|iv)\b/i', $question) && Str::contains($normalizedTitle, 'triwulan')) {
                 $score += 20;
             } elseif (preg_match('/\bpdrb\b/i', $question) && ! preg_match('/\btahunan\b/i', $question) && Str::contains($normalizedTitle, 'triwulan')) {
@@ -2586,6 +2634,15 @@ class BpsWebApiService
             }
             if (preg_match('/\badhb\b/i', $question) && Str::contains($normalizedTitle, 'berlaku')) {
                 $score += 10;
+            }
+            $requestsKabKota = preg_match('/\b(kabupaten|kab\.?|kota)\b/iu', $question) === 1;
+            $requestsGender = preg_match('/\b(jenis\s+kelamin|gender|laki[- ]laki|perempuan|pria|wanita)\b/iu', $question) === 1;
+            $hasGenderScope = preg_match('/\b(jenis\s+kelamin|gender|laki[- ]laki|perempuan)\b/iu', $title) === 1;
+            if ($requestsKabKota) {
+                $score += $this->explicitVariableLevel($title) === 'kab_kota' ? 15 : -10;
+            }
+            if ($hasGenderScope) {
+                $score += $requestsGender ? 8 : -3;
             }
 
             $variable['level'] = $this->explicitVariableLevel($title) ?? 'unknown';
@@ -2603,12 +2660,30 @@ class BpsWebApiService
         }
         uasort($variables, fn (array $left, array $right) => ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0));
 
-        return array_slice(array_values(array_filter($variables, fn (array $variable) => ($variable['_score'] ?? 0) >= 6)), 0, 10);
+        $minimumScore = count($requiredTerms) <= 1 ? 2 : 6;
+
+        return array_slice(
+            array_values(array_filter($variables, fn (array $variable) => ($variable['_score'] ?? 0) >= $minimumScore)),
+            0,
+            10
+        );
     }
 
     private function regionalVariableScore(array $variable, array $region): int
     {
-        $score = ($variable['level'] ?? null) === 'kab_kota' ? 50 : 0;
+        $level = $variable['level'] ?? null;
+        if (($region['kind'] ?? null) === 'province') {
+            if ($level === 'province') {
+                return 50;
+            }
+            if (in_array($level, ['kab_kota', 'subdistrict'], true)) {
+                return -35;
+            }
+
+            return 15;
+        }
+
+        $score = $level === 'kab_kota' ? 50 : 0;
         $namedRegions = $this->regionsMentionedIn((string) ($variable['title'] ?? ''));
         if (count($namedRegions) === 1) {
             return $score + ((string) ($namedRegions[0]['domain'] ?? '') === (string) ($region['domain'] ?? '') ? 30 : -35);
@@ -2667,16 +2742,13 @@ class BpsWebApiService
 
             foreach ($group['variables'] ?? [] as $variable) {
                 $catalogVariable = $catalogVariables[(string) ($variable['var_id'] ?? '')] ?? null;
-                if (! is_array($catalogVariable)) {
-                    continue;
-                }
                 if (array_intersect($terms, $variable['excludes'] ?? []) !== []) {
                     continue;
                 }
-                $variable['title'] = $catalogVariable['title'];
-                $variable['subject'] = $catalogVariable['subject'];
-                $variable['category'] = $catalogVariable['category'];
-                $variable['aliases'] = $catalogVariable['aliases'];
+                $variable['title'] = $catalogVariable['title'] ?? $variable['title'] ?? '';
+                $variable['subject'] = $catalogVariable['subject'] ?? $variable['subject'] ?? '';
+                $variable['category'] = $catalogVariable['category'] ?? $variable['category'] ?? '';
+                $variable['aliases'] = $catalogVariable['aliases'] ?? $this->variableAliases((string) $variable['title']);
                 $score = 0;
                 foreach ($terms as $term) {
                     if (in_array($term, $variable['terms'] ?? [], true)) {
@@ -2708,24 +2780,99 @@ class BpsWebApiService
         return null;
     }
 
+    private function variableSearchUrl(string $keyword, string $domain, string $apiKey, ?int $page = null): string
+    {
+        $segments = ['list', 'model', 'var', 'domain', $domain, 'keyword', rawurlencode($keyword)];
+        if ($page !== null) {
+            $segments = array_merge($segments, ['page', (string) $page]);
+        }
+        $segments = array_merge($segments, ['key', rawurlencode($apiKey)]);
+
+        return 'https://webapi.bps.go.id/v1/api/'.implode('/', $segments).'/';
+    }
+
     private function variablesForKeyword(string $keyword, string $domain, string $apiKey): array
     {
-        unset($apiKey);
-        $variables = $this->localCatalogIndex()['variables'];
+        $cacheKey = 'bps-webapi:variables:keyword:'.$domain.':'.sha1(Str::lower($keyword));
+        $apiVariables = Cache::remember($cacheKey, now()->addHours(6), function () use ($keyword, $domain, $apiKey): array {
+            $variables = [];
+            $firstPageUrl = $this->variableSearchUrl($keyword, $domain, $apiKey);
+            $page = 1;
+            $pageCount = 1;
+            do {
+                $url = $page === 1
+                    ? $firstPageUrl
+                    : $this->variableSearchUrl($keyword, $domain, $apiKey, $page);
+                $response = Http::timeout(8)->get($url);
+                if ($response->status() === 401 || $response->status() === 403) {
+                    throw new RuntimeException('API key WebAPI BPS tidak diterima saat mencari variabel.');
+                }
+                if ($response->status() === 404) {
+                    return [];
+                }
+                if (! $response->successful()) {
+                    throw new RuntimeException('WebAPI BPS gagal memuat indeks variabel.');
+                }
+
+                $payload = $response->json();
+                $items = $payload['data'][1] ?? null;
+                if (($payload['status'] ?? null) !== 'OK' || ! is_array($items)) {
+                    throw new RuntimeException('Format indeks variabel WebAPI BPS tidak dikenali.');
+                }
+                $pageCount = max(1, (int) ($payload['data'][0]['pages'] ?? 1));
+                if ($pageCount > 100) {
+                    throw new RuntimeException('Jumlah halaman indeks variabel WebAPI BPS di luar batas yang diizinkan.');
+                }
+
+                foreach ($items as $item) {
+                    if (! is_array($item)
+                        || ! is_scalar($item['var_id'] ?? null)
+                        || ! is_scalar($item['title'] ?? null)
+                        || trim((string) $item['title']) === '') {
+                        continue;
+                    }
+                    $title = trim((string) $item['title']);
+                    $variables[(string) $item['var_id']] = array_merge($item, [
+                        'var_id' => (string) $item['var_id'],
+                        'title' => $title,
+                        'subject_id' => $item['sub_id'] ?? null,
+                        'subject' => $item['sub_name'] ?? '',
+                        'category' => $item['subcsa_name'] ?? '',
+                        'unit' => $item['unit'] ?? null,
+                        'aliases' => $this->variableAliases($title),
+                        'level' => $this->explicitVariableLevel($title) ?? 'unknown',
+                    ]);
+                }
+                $page++;
+            } while ($page <= $pageCount);
+
+            return array_values($variables);
+        });
 
         $matches = array_values(array_filter(
-            $variables,
+            $apiVariables,
             fn (array $variable) => $this->titleTermScore(
                 $this->variableSearchText($variable),
                 $keyword
             ) > 0
         ));
-        usort($matches, fn (array $left, array $right) => $this->titleTermScore(
-            $this->variableSearchText($right),
-            $keyword
-        ) <=> $this->titleTermScore($this->variableSearchText($left), $keyword));
+        if ($matches !== []) {
+            return $matches;
+        }
 
-        return $matches;
+        $localMatches = array_values(array_filter(
+            $this->localCatalogIndex()['variables'],
+            fn (array $variable) => $this->titleTermScore(
+                $this->variableSearchText($variable),
+                $keyword
+            ) > 0
+        ));
+        foreach ($localMatches as &$variable) {
+            $variable['_local_catalog_fallback'] = true;
+        }
+        unset($variable);
+
+        return $localMatches;
     }
 
     private function localCatalogIndex(): array
@@ -2910,6 +3057,9 @@ class BpsWebApiService
         $synonyms = [
             'kemiskinan' => ['miskin'],
             'miskin' => ['kemiskinan'],
+            'rls' => ['lama', 'sekolah'],
+            'hls' => ['harapan', 'lama', 'sekolah'],
+            'ipm' => ['indeks', 'pembangunan', 'manusia'],
             'pengangguran' => ['penganggur'],
             'penganggur' => ['pengangguran'],
             'penduduk' => ['populasi', 'warga'],
@@ -3045,7 +3195,15 @@ class BpsWebApiService
                     $latestPeriod = $periods[0] ?? null;
                     $matchingRow = null;
                     if ($latestPeriod !== null) {
-                        $data = $this->dynamicData((int) $variable['var_id'], (int) ($latestPeriod['th_id'] ?? 0), null, '1600', $apiKey);
+                        $data = $this->dynamicData(
+                            (int) $variable['var_id'],
+                            (int) ($latestPeriod['th_id'] ?? 0),
+                            null,
+                            '1600',
+                            $apiKey,
+                            (string) $variable['title'],
+                            (string) $latestPeriod['th']
+                        );
                         $matchingRow = $data === null
                             ? null
                             : (($candidate['level'] === 'province')
@@ -3088,7 +3246,61 @@ class BpsWebApiService
 
     private function periodsForVariable(int $variableId, string $domain, string $apiKey): array
     {
-        unset($apiKey);
+        $cacheKey = 'bps-webapi:variables:periods:'.$domain.':'.$variableId;
+        $apiPeriods = Cache::remember($cacheKey, now()->addHours(1), function () use ($variableId, $domain, $apiKey): ?array {
+            $periods = [];
+            $page = 1;
+            $pageCount = 1;
+            do {
+                $segments = ['list', 'model', 'th', 'domain', $domain, 'var', (string) $variableId];
+                if ($page > 1) {
+                    $segments = array_merge($segments, ['page', (string) $page]);
+                }
+                $segments = array_merge($segments, ['key', rawurlencode($apiKey)]);
+                $url = 'https://webapi.bps.go.id/v1/api/'.implode('/', $segments).'/';
+                $response = Http::timeout(8)->get($url);
+                if ($response->status() === 404) {
+                    return null;
+                }
+                if ($response->status() === 401 || $response->status() === 403) {
+                    throw new RuntimeException('API key WebAPI BPS tidak diterima saat mencari periode.');
+                }
+                if (! $response->successful()) {
+                    throw new RuntimeException('WebAPI BPS gagal memuat daftar periode.');
+                }
+
+                $payload = $response->json();
+                $items = $payload['data'][1] ?? null;
+                if (($payload['status'] ?? null) !== 'OK' || ! is_array($items)) {
+                    throw new RuntimeException('Format daftar periode WebAPI BPS tidak dikenali.');
+                }
+                $pageCount = max(1, (int) ($payload['data'][0]['pages'] ?? 1));
+                if ($pageCount > 100) {
+                    throw new RuntimeException('Jumlah halaman periode WebAPI BPS di luar batas yang diizinkan.');
+                }
+                foreach ($items as $period) {
+                    if (! is_array($period)
+                        || ! ctype_digit((string) ($period['th'] ?? ''))
+                        || ! ctype_digit((string) ($period['th_id'] ?? ''))) {
+                        continue;
+                    }
+                    $periods[(string) $period['th_id']] = [
+                        'th_id' => (string) $period['th_id'],
+                        'th' => (string) $period['th'],
+                    ];
+                }
+                $page++;
+            } while ($page <= $pageCount);
+
+            $periods = array_values($periods);
+            usort($periods, fn (array $left, array $right) => (int) $right['th'] <=> (int) $left['th']);
+
+            return $periods;
+        });
+        if (is_array($apiPeriods)) {
+            return $apiPeriods;
+        }
+
         $periods = [];
         foreach ($this->csvCatalogRows() as $row) {
             if (($row['jenis_tabel'] ?? '') !== 'Tabel Dinamis'
@@ -3110,14 +3322,15 @@ class BpsWebApiService
         return $this->periodsForVariable($variableId, '1600', $apiKey);
     }
 
-    private function canonicalDataForPeriod(int $variableId, int $periodId, string $apiKey): ?\Illuminate\Http\Client\Response
+    private function canonicalDataForPeriod(
+        int $variableId,
+        int $periodId,
+        string $apiKey,
+        ?string $title = null,
+        ?string $year = null
+    ): ?\Illuminate\Http\Client\Response
     {
-        $row = $this->catalogRowForPeriod($variableId, $periodId, '1600');
-        if ($row === null) {
-            return null;
-        }
-
-        return $this->catalogResponse($row, $apiKey);
+        return $this->dynamicData($variableId, $periodId, null, '1600', $apiKey, $title, $year);
     }
 
     private function domainFor(string $question): string
@@ -3132,11 +3345,36 @@ class BpsWebApiService
         return [];
     }
 
-    private function dynamicData(int $variableId, int $periodId, mixed $derivedPeriodId, string $domain, string $apiKey): ?\Illuminate\Http\Client\Response
+    private function dynamicData(
+        int $variableId,
+        int $periodId,
+        mixed $derivedPeriodId,
+        string $domain,
+        string $apiKey,
+        ?string $title = null,
+        ?string $year = null
+    ): ?\Illuminate\Http\Client\Response
     {
         unset($derivedPeriodId);
         $row = $this->catalogRowForPeriod($variableId, $periodId, $domain);
-        return $row === null ? null : $this->catalogResponse($row, $apiKey);
+        if ($row === null) {
+            $period = collect($this->periodsForVariable($variableId, $domain, $apiKey))
+                ->first(fn (array $item) => (int) ($item['th_id'] ?? 0) === $periodId);
+            $year ??= is_array($period) ? (string) ($period['th'] ?? '') : null;
+            if ($year === null || $year === '') {
+                return null;
+            }
+            $row = [
+                'id_tabel' => (string) $variableId,
+                'jenis_tabel' => 'Tabel Dinamis',
+                'tahun' => $year,
+                'judul' => $title ?? 'Variabel BPS '.$variableId,
+                'link_json' => 'https://webapi.bps.go.id/v1/api/list/model/data/domain/'
+                    .$domain.'/var/'.$variableId.'/th/'.$periodId.'/key/',
+            ];
+        }
+
+        return $this->catalogResponse($row, $apiKey);
     }
 
     private function formatDynamicContext(
@@ -4052,6 +4290,8 @@ class BpsWebApiService
             'kemiskinan' => 'miskin',
             'ekonomi' => 'pdrb',
             'ipm' => 'indeks pembangunan manusia',
+            'rls' => 'rata-rata lama sekolah',
+            'hls' => 'harapan lama sekolah',
             'laki' => 'kelamin',
             'pria' => 'kelamin',
             'lelaki' => 'kelamin',

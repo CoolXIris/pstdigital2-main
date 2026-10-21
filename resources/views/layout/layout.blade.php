@@ -6,9 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Landing PST Digital - Badan Pusat Statistik</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    @if (request()->routeIs('/'))
+        @vite('resources/css/app.css')
+    @endif
     <link rel="stylesheet" href="{{ url('./bootstrap.min.css') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet" />
 
+    @unless (request()->routeIs('/'))
     <!-- STYLE CSS -->
     <link href="https://cdn.jsdelivr.net/npm/timepicker-ui@4.3.0/dist/css/index.min.css" rel="stylesheet" />
 
@@ -23,6 +27,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css"
         integrity="sha512-aOG0c6nPNzGk+5zjwyJaoRUgCdOrfSDhmMID2u4+OIslr0GjpLKo7Xm0Ao3xmpM4T8AmIouRkqwj1nrdVsLKEQ=="
         crossorigin="anonymous" referrerpolicy="no-referrer" />
+    @endunless
     {{-- <link href="{{ url('zanex/css/dark-style.css') }}" rel="stylesheet" />
     <link href="{{ url('zanex/css/skin-modes.css') }}" rel="stylesheet" />
     <link href="{{ url('zanex/css/transparent-style.css') }}" rel="stylesheet" /> --}}
@@ -42,6 +47,11 @@
             --accent-orange-nav: #eb891b;
         }
 
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: 100px;
+        }
+
         body {
             font-family: "Poppins", sans-serif;
         }
@@ -55,6 +65,14 @@
             top: 0;
             z-index: 1000;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.25s ease, box-shadow 0.25s ease, backdrop-filter 0.25s ease;
+        }
+
+        .header.is-scrolled {
+            background-color: rgba(4, 50, 119, 0.82) !important;
+            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 28px rgba(3, 21, 53, 0.2);
         }
 
         .nav-link {
@@ -521,6 +539,7 @@
 </head>
 
 <body>
+    @php($profileComplete = !Auth::check() || Auth::user()->hasRole('admin|super_admin') || Auth::user()->hasCompleteProfile())
     <nav class="navbar navbar-expand-lg header navbar-dark">
         <div class="container-fluid">
             <div class="logo-section d-flex align-items-center">
@@ -547,7 +566,11 @@
                             data-bs-toggle="dropdown">Layanan</a>
                         <ul class="dropdown-menu shadow">
                             <li>
-                                <a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>
+                                @if ($profileComplete)
+                                    <a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>
+                                @else
+                                    <span class="dropdown-item disabled" aria-disabled="true">Konsultasi Virtual (lengkapi profil)</span>
+                                @endif
                             </li>
                             <li><a class="dropdown-item" href="{{ url('chatbot') }}">Chatbot</a></li>
                             <li>
@@ -610,7 +633,11 @@
 
         <div class="sidebar-links">
             <a href="{{ url('/') }}" class="link-item">Landing page</a>
-            <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
+            @if ($profileComplete)
+                <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
+            @else
+                <span class="link-item text-muted" aria-disabled="true">Konsultasi (lengkapi profil)</span>
+            @endif
             <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
             <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
             <a href="{{ url('profile') }}" class="link-item active-link">Profil Saya</a>
@@ -692,8 +719,10 @@
         </div>
     </footer>
     <script src="{{ url('./bootstrap.bundle.min.js') }}"></script>
-    <script src="{{ url('zanex/js/jquery.min.js') }}"></script>
-    <script src="{{ url('zanex/plugins/select2/select2.full.min.js') }}"></script>
+    @unless (request()->routeIs('/'))
+        <script src="{{ url('zanex/js/jquery.min.js') }}"></script>
+        <script src="{{ url('zanex/plugins/select2/select2.full.min.js') }}"></script>
+    @endunless
     <script>
         // document.getElementById("sidebar-container").innerHTML = data;
         // Inisialisasi logika tombol setelah HTML berhasil dimuat
@@ -717,6 +746,14 @@
 
         closeBtn?.addEventListener("click", closeMenu);
         overlay?.addEventListener("click", closeMenu);
+        @if (request()->routeIs('/'))
+            const header = document.querySelector(".header");
+            if (header) {
+                const updateHeader = () => header.classList.toggle("is-scrolled", window.scrollY > 10);
+                window.addEventListener("scroll", updateHeader, { passive: true });
+                updateHeader();
+            }
+        @endif
         // Memanggil file sidebar.html
         // fetch("sidebar.html")
         //     .then((response) => response.text())

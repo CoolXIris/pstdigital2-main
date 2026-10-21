@@ -447,8 +447,8 @@ class AdminManagementPagesTest extends BaseTestCase
             }
             if (str_contains($url, '/model/th/')) {
                 $periods = str_contains($url, '/var/11/')
-                    ? [['th' => '2023', 'th_id' => 2023]]
-                    : [['th' => '2024', 'th_id' => 2024]];
+                    ? [['th' => '2023', 'th_id' => 123]]
+                    : [['th' => '2024', 'th_id' => 124]];
 
                 return Http::response(['status' => 'OK', 'data' => [[], $periods]]);
             }
@@ -468,6 +468,70 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertStringContainsString('"tahun":"2024"', $context);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/124/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/126/'));
+    }
+
+    public function test_dynamic_search_uses_newer_api_variable_instead_of_an_older_catalog_series(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/var/domain/1600/keyword/lama/')) {
+                if (str_contains($url, '/page/2/')) {
+                    return Http::response([
+                        'status' => 'OK',
+                        'data' => [['pages' => 2], [
+                            ['var_id' => 892, 'title' => 'Rata-rata Lama Sekolah (RLS) menurut jenis kelamin', 'unit' => 'Tahun'],
+                        ]],
+                    ]);
+                }
+
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 2], [
+                        ['var_id' => 254, 'title' => 'Angka Rata-Rata Lama Sekolah per kabupaten/kota se Sumatera Selatan', 'unit' => 'Tahun'],
+                    ]],
+                ]);
+            }
+            if (str_contains($url, '/model/var/domain/1600/keyword/sekolah/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 1], [
+                        ['var_id' => 254, 'title' => 'Angka Rata-Rata Lama Sekolah per kabupaten/kota se Sumatera Selatan', 'unit' => 'Tahun'],
+                        ['var_id' => 892, 'title' => 'Rata-rata Lama Sekolah (RLS) menurut jenis kelamin', 'unit' => 'Tahun'],
+                    ]],
+                ]);
+            }
+            if (str_contains($url, '/model/th/domain/1600/var/254/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2023', 'th_id' => 123]]]]);
+            }
+            if (str_contains($url, '/model/th/domain/1600/var/892/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 125]]]]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/892/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 892, 'label' => 'Rata-rata Lama Sekolah (RLS) menurut jenis kelamin', 'unit' => 'Tahun']],
+                    'vervar' => [['val' => 1600, 'label' => 'Sumatera Selatan']],
+                    'turvar' => [
+                        ['val' => 36, 'label' => 'Laki-Laki'],
+                        ['val' => 37, 'label' => 'Perempuan'],
+                        ['val' => 38, 'label' => 'Laki-Laki + Perempuan'],
+                    ],
+                    'datacontent' => ['160089236125' => 8.91],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $context = app(BpsWebApiService::class)->contextFor('RLS Sumsel terbaru');
+
+        $this->assertStringContainsString('"var_id":892', $context);
+        $this->assertStringContainsString('"tahun":"2025"', $context);
+        $this->assertStringContainsString('"nilai":{"160089236125":8.91}', $context);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/892/th/125/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/254/'));
     }
 
     public function test_dynamic_bps_context_asks_for_clarification_when_candidates_remain_tied(): void
@@ -496,7 +560,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $this->assertStringContainsString('[DATA_BELUM_TERSEDIA]', $context);
         $this->assertStringNotContainsString('Produksi Daging', $context);
-        Http::assertNothingSent();
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/'));
     }
 
     public function test_dynamic_bps_context_uses_latest_period_and_caches_period_list(): void
@@ -616,10 +680,13 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::fake(function ($request) {
             $url = $request->url();
             if (str_contains($url, '/model/th/domain/1600/var/959/')) {
-                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 2025]]]]);
+                return Http::response(['status' => 'OK', 'data' => [[], [['th' => '2025', 'th_id' => 125]]]]);
             }
             if (str_contains($url, '/model/data/domain/1600/var/959/')) {
                 return Http::response(['status' => 'OK', 'datacontent' => ['1600' => 75.5]]);
+            }
+            if (str_contains($url, '/model/th/domain/1600/var/')) {
+                return Http::response(['status' => 'OK', 'data' => [[], []]]);
             }
 
             return Http::response(['status' => 'ERROR'], 404);
@@ -629,7 +696,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $this->assertStringContainsString('Indeks Pembangunan Manusia', $context);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/959/th/125/'));
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/var/'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/894/'));
         Carbon::setTestNow();
     }
 
@@ -2087,6 +2154,33 @@ class AdminManagementPagesTest extends BaseTestCase
                 'Maaf, penjelasan konsep tersebut belum tersedia pada basis pengetahuan saat ini. Silakan coba lagi setelah referensi yang sesuai tersedia.'
             )
             ->assertJsonPath('knowledge_used', false);
+    }
+
+    public function test_follow_up_asking_what_a_statistical_value_means_does_not_search_bps_tables(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Cache::flush();
+        Http::fake();
+        $question = 'Maksudnya rata lama sekolah 3,91 itu apa';
+        $knowledge = \Mockery::mock(ChatbotKnowledgeService::class);
+        $knowledge->shouldReceive('contextFor')->once()->with($question)->andReturn(null);
+        $knowledge->shouldReceive('askWithContext')
+            ->once()
+            ->andReturn(new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(503, [], '{"error":"busy"}')));
+        $this->app->instance(ChatbotKnowledgeService::class, $knowledge);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => $question])
+            ->assertOk()
+            ->assertJsonPath(
+                'reply',
+                'Maaf, penjelasan konsep tersebut belum tersedia pada basis pengetahuan saat ini. Silakan coba lagi setelah referensi yang sesuai tersedia.'
+            );
+
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
     }
 
     public function test_chatbot_sends_wage_questions_to_ai_without_bps_api_key(): void
