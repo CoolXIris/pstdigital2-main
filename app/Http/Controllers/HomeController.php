@@ -19,12 +19,23 @@ class HomeController extends Controller
         $baseMeetings = Meeting::whereBetween('tanggal', [$rangeStart->toDateString(), $rangeEnd->toDateString()]);
 
         $monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-        $trendLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-        $trendCounts = array_fill(1, 12, 0);
-        foreach (Meeting::whereYear('tanggal', $year)->get(['tanggal']) as $meeting) {
-            $trendCounts[(int) Carbon::parse($meeting->tanggal)->format('n')]++;
+        if ($period === 'tahun') {
+            $trendLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+            $trendCounts = array_fill(1, 12, 0);
+        } else {
+            $daysInMonth = $rangeStart->daysInMonth;
+            $trendLabels = array_map(fn ($day) => (string) $day, range(1, $daysInMonth));
+            $trendCounts = array_fill(1, $daysInMonth, 0);
+        }
+        foreach ((clone $baseMeetings)->get(['tanggal']) as $meeting) {
+            $date = Carbon::parse($meeting->tanggal);
+            $bucket = $period === 'tahun' ? (int) $date->format('n') : (int) $date->format('j');
+            $trendCounts[$bucket]++;
         }
         $periodLabel = $period === 'tahun' ? "Tahun {$year}" : $monthNames[$month - 1]." {$year}";
+        $chartSubtitle = $period === 'tahun'
+            ? "Jumlah konsultasi per bulan selama {$year}."
+            : "Jumlah konsultasi per hari selama {$periodLabel}.";
 
         $ratingFilter = (int) $request->query('rating', 0);
         if ($ratingFilter < 1 || $ratingFilter > 5) {
@@ -87,6 +98,6 @@ class HomeController extends Controller
             'jobs' => ['labels' => $jobs->pluck('label'), 'data' => $jobs->pluck('value'), 'colors' => array_slice(['#0891b2', '#059669', '#d97706', '#64748b', '#2563eb'], 0, max(1, $jobs->count()))],
         ];
 
-        return view('admin.dashboard', compact('data', 'chart_data', 'donut_data', 'period', 'year', 'month', 'periodLabel', 'ratingFilter', 'reviewSort'));
+        return view('admin.dashboard', compact('data', 'chart_data', 'donut_data', 'period', 'year', 'month', 'periodLabel', 'chartSubtitle', 'ratingFilter', 'reviewSort'));
     }
 }

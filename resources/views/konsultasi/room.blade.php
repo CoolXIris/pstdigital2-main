@@ -25,10 +25,17 @@
         <aside class="portal-room-aside">
             <span class="portal-eyebrow">Detail sesi</span><h2>{{ $meeting->name }}</h2>
             <dl><div><dt>Pemohon</dt><dd>{{ $meeting->user?->name }}</dd></div><div><dt>Petugas</dt><dd>{{ $meeting->assigned_staff }}</dd></div><div><dt>Jadwal</dt><dd>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}<br>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</dd></div></dl>
+            <div class="portal-room-chat-entry">
+                <div><strong>Perlu mengirim pesan?</strong><small>Gunakan chat teks tanpa meninggalkan ruang konsultasi.</small></div>
+                <button class="portal-btn portal-btn-primary consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $isRequester ? ($meeting->assigned_staff ?: 'Petugas konsultasi') : ($meeting->user?->name ?? 'Pengguna') }}" aria-label="Buka chat konsultasi">
+                    <i class="bi bi-chat-dots-fill" aria-hidden="true"></i> Buka chat teks<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span>
+                </button>
+            </div>
             <div class="portal-chat-note"><i class="bi bi-shield-check me-1"></i>Koneksi audio/video dibuat antarperangkat. Server aplikasi hanya meneruskan metadata signaling.</div>
             <div class="portal-chat-note"><i class="bi bi-info-circle me-1"></i>Izinkan akses kamera dan mikrofon pada browser. Jika koneksi antarjaringan gagal, administrator server perlu mengonfigurasi TURN milik BPS.</div>
         </aside>
     </div>
+    @include('konsultasi.partials.text-chat-modal')
 @endsection
 
 @section('scripts')
@@ -271,4 +278,5 @@
         startRoom().catch((error) => { status.textContent = `Gagal bergabung: ${error.message}`; });
     })();
 </script>
+@include('konsultasi.partials.text-chat-script')
 @endsection

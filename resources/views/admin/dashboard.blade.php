@@ -61,7 +61,7 @@
     <div class="admin-panel-head">
         <div>
             <h2 class="admin-panel-title">Tren Aktivitas Layanan</h2>
-            <p class="admin-panel-subtitle">Jumlah konsultasi per bulan selama {{ $year }}.</p>
+            <p class="admin-panel-subtitle">{{ $chartSubtitle }}</p>
         </div>
     </div>
     <div class="admin-panel-body">

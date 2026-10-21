@@ -564,3 +564,15 @@ html[data-theme="dark"] .consultation-chat-header small, html[data-theme="dark"]
 .consultation-read-receipt { margin-left:7px; font-weight:600; }
 @media (max-width:575.98px) { .portal-meeting-presence-chat { align-items:flex-start; flex-direction:column; gap:10px; } }
 html[data-theme="dark"] .consultation-chat-unread-dot { border-color:#303b45; }
+
+.portal-room-chat-entry { display: grid; gap: 10px; margin: 14px 0 4px; padding: 13px; background: #f3f8fd; border: 1px solid #dbe7f2; border-radius: 8px; }
+.portal-room-chat-entry > div { display: grid; gap: 3px; }
+.portal-room-chat-entry strong { color: #294866; font-size: 11px; font-weight: 600; }
+.portal-room-chat-entry small { color: #6b7c90; font-size: 10px; line-height: 1.55; }
+.portal-room-chat-entry .portal-btn { position: relative; width: 100%; gap: 8px; }
+.portal-room-chat-entry .consultation-chat-unread-dot { top: 4px; right: 4px; }
+html[data-theme="dark"] .portal-room-chat-entry { background: #303d48; border-color: #46596c; }
+html[data-theme="dark"] .portal-room-chat-entry strong { color: #e4edf6; }
+html[data-theme="dark"] .portal-room-chat-entry small { color: #bac7d2; }
+html[data-theme="dark"] .portal-room-chat-entry .consultation-chat-unread-dot { border-color: #303d48; }
+@media (max-width: 1050px) { .portal-room-aside .portal-room-chat-entry { grid-column: 1 / -1; } }
