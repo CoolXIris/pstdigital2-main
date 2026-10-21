@@ -201,6 +201,35 @@ class KonsultasiAdminController extends Controller
         return (int) $meeting->status === 2 && now('Asia/Jakarta')->betweenIncluded($start, $end);
     }
 
+    private function roomIceServers(Meeting $meeting): array
+    {
+        $iceServers = config('pst.ice_servers', []);
+        $sharedSecret = trim((string) config('pst.turn_shared_secret', ''));
+        if ($sharedSecret === '') {
+            return $iceServers;
+        }
+
+        // Coturn REST credentials are time-limited and generated per room page load.
+        $expiresAt = now()->addSeconds((int) config('pst.turn_credential_ttl', 21600))->timestamp;
+        $username = $expiresAt . ':pst-' . $meeting->id . '-' . Auth::id() . '-' . Str::random(8);
+        $credential = base64_encode(hash_hmac('sha1', $username, $sharedSecret, true));
+
+        return array_map(static function (array $server) use ($username, $credential): array {
+            $urls = is_array($server['urls'] ?? null) ? $server['urls'] : [$server['urls'] ?? ''];
+            $hasTurnUrl = collect($urls)->contains(static fn ($url): bool =>
+                is_string($url) && preg_match('/^turns?:/i', $url) === 1
+            );
+
+            if ($hasTurnUrl) {
+                $server['username'] = $username;
+                $server['credential'] = $credential;
+                $server['credentialType'] = 'password';
+            }
+
+            return $server;
+        }, $iceServers);
+    }
+
     public function room(Meeting $meeting): View
     {
         $this->authorizeParticipant($meeting);
@@ -240,7 +269,7 @@ class KonsultasiAdminController extends Controller
             'returnUrl' => Auth::user()->hasRole(['admin', 'super_admin']) ? route('admin.konsultasi') : url('konsultasi'),
             'roomSessionId' => $sessionId,
             'peerPresent' => $peerPresent,
-            'iceServers' => config('pst.ice_servers', []),
+            'iceServers' => $this->roomIceServers($meeting),
         ]);
     }
 

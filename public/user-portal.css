@@ -152,6 +152,10 @@
 .portal-room-aside dl div { padding: 10px 0; border-bottom: 1px solid #edf1f5; }
 .portal-room-aside dt { margin-bottom: 3px; color: #8592a1; font-size: 8px; font-weight: 500; }
 .portal-room-aside dd { margin: 0; color: #42546a; font-size: 9px; font-weight: 600; }
+.portal-room-quality { display: grid; gap: 7px; margin-top: 13px; padding: 11px; background: #f3f8fd; border: 1px solid #dbe7f2; border-radius: 7px; }
+.portal-room-quality label { margin: 0; color: #294866; font-size: 11px; font-weight: 600; }
+.portal-room-quality .form-select { min-height: 36px; border-color: #dce4ed; font-size: 10px; }
+.portal-room-quality small { color: #6b7c90; font-size: 9px; line-height: 1.5; }
 .portal-chat-layout { display: grid; grid-template-columns: minmax(0,1fr) 240px; gap: 14px; align-items: start; }
 .portal-chat-card { display: grid; grid-template-rows: auto minmax(320px,1fr) auto auto; min-height: min(690px, calc(100vh - 155px)); overflow: hidden; background: #fff; border: 1px solid var(--portal-line); border-radius: 7px; box-shadow: 0 3px 12px rgba(24,48,79,.035); }
 .portal-chat-header { display: flex; align-items: center; gap: 10px; padding: 14px 17px; border-bottom: 1px solid var(--portal-line); }
@@ -575,4 +579,8 @@ html[data-theme="dark"] .portal-room-chat-entry { background: #303d48; border-co
 html[data-theme="dark"] .portal-room-chat-entry strong { color: #e4edf6; }
 html[data-theme="dark"] .portal-room-chat-entry small { color: #bac7d2; }
 html[data-theme="dark"] .portal-room-chat-entry .consultation-chat-unread-dot { border-color: #303d48; }
+html[data-theme="dark"] .portal-room-quality { background: #303d48; border-color: #46596c; }
+html[data-theme="dark"] .portal-room-quality label { color: #e4edf6; }
+html[data-theme="dark"] .portal-room-quality small { color: #bac7d2; }
+html[data-theme="dark"] .portal-room-quality .form-select { color: #edf3f8; background-color: #1e2831; border-color: #536372; }
 @media (max-width: 1050px) { .portal-room-aside .portal-room-chat-entry { grid-column: 1 / -1; } }
