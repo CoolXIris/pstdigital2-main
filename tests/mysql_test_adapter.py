@@ -27,6 +27,12 @@ class MySQLStorageTestConnection:
             CREATE TABLE IF NOT EXISTS editorial_cache (
                 cache_key TEXT PRIMARY KEY, isi_json TEXT, diambil_pada REAL
             );
+            CREATE TABLE IF NOT EXISTS log_gagal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, id_tabel TEXT, tahun TEXT,
+                waktu REAL, pesan TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_log_gagal_tabel_waktu
+                ON log_gagal(id_tabel, tahun, waktu);
             """
         )
 

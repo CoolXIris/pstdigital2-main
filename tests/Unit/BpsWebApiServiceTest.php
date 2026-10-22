@@ -3,6 +3,8 @@
 namespace Tests\Unit;
 
 use App\Services\BpsWebApiService;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class BpsWebApiServiceTest extends TestCase
@@ -91,6 +93,118 @@ class BpsWebApiServiceTest extends TestCase
         $this->assertStringNotContainsString('[KANDIDAT_TOPIK_TERKAIT]', $answer);
     }
 
+    public function test_latest_student_tables_are_matched_after_removing_question_filler_words(): void
+    {
+        $service = new BpsWebApiService;
+        $question = 'Apakah ada data terkait jumlah murid di Sumsel yang terbaru?';
+        $keywords = $this->invokePrivate($service, 'keywords', $question);
+        $tables = $this->invokePrivate(
+            $service,
+            'matchingTables',
+            $keywords,
+            '1600',
+            'test-api-key',
+            $question
+        );
+
+        $this->assertNotContains('apakah', $keywords);
+        $this->assertNotContains('terkait', $keywords);
+        $this->assertNotEmpty($tables);
+        $this->assertGreaterThanOrEqual(2025, max(array_map(
+            static fn (array $table) => (int) $table['year'],
+            $tables
+        )));
+        $this->assertFalse($this->invokePrivate($service, 'tablesNeedConfirmation', $tables, $question));
+    }
+
+    public function test_universitas_mahasiswa_and_dosen_match_the_latest_higher_education_simdasi_tables(): void
+    {
+        $service = new BpsWebApiService;
+        $question = 'Apakah ada data terkait jumlah universitas di Sumsel dan total per kabupaten/kota?';
+        $keywords = $this->invokePrivate($service, 'keywords', $question);
+        $tables = $this->invokePrivate(
+            $service,
+            'matchingTables',
+            $keywords,
+            '1600',
+            'test-api-key',
+            $question
+        );
+        $tablesById = [];
+        foreach ($tables as $table) {
+            $tablesById[$table['table_id']] = $table;
+        }
+
+        $this->assertSame([
+            'dnF4TTdwbEcwbTFHazAwZUtOMVRBQT09',
+            'cmdTdG5vU0IwKzBFR20rQnpuZEYzdz09',
+        ], array_keys($tablesById));
+        $this->assertSame('2025', $tablesById['dnF4TTdwbEcwbTFHazAwZUtOMVRBQT09']['year']);
+        $this->assertSame('2025', $tablesById['cmdTdG5vU0IwKzBFR20rQnpuZEYzdz09']['year']);
+        $this->assertFalse($this->invokePrivate($service, 'tablesNeedConfirmation', $tables, $question));
+
+        foreach (['mahasiswa', 'dosen'] as $topic) {
+            $topicQuestion = 'Apakah ada data terkait jumlah '.$topic.' di Sumsel?';
+            $topicTables = $this->invokePrivate(
+                $service,
+                'matchingTables',
+                $this->invokePrivate($service, 'keywords', $topicQuestion),
+                '1600',
+                'test-api-key',
+                $topicQuestion
+            );
+            $this->assertNotEmpty($topicTables, 'The catalog should match '.$topic.' in a higher-education table.');
+            $this->assertSame('2025', max(array_column($topicTables, 'year')));
+        }
+    }
+
+    public function test_requested_year_is_not_counted_as_a_topic_when_matching_simdasi_tables(): void
+    {
+        $service = new BpsWebApiService;
+        $question = 'bencana alam di Sumsel 2025';
+        $keywords = $this->invokePrivate($service, 'keywords', $question);
+        $coreKeywords = $this->invokePrivate($service, 'coreTableKeywords', $keywords);
+        $tables = $this->invokePrivate(
+            $service,
+            'matchingTables',
+            $keywords,
+            '1600',
+            'test-api-key',
+            $question
+        );
+        $disasterTable = collect($tables)->firstWhere(
+            'table_id',
+            'MFZ0emxUcHBxOTB2R2F4Sk5oT2hqQT09'
+        );
+
+        $this->assertSame(['bencana', 'alam'], $coreKeywords);
+        $this->assertNotNull($disasterTable);
+        $this->assertSame('2025', $disasterTable['year']);
+        $this->assertFalse($disasterTable['related_match']);
+        $this->assertFalse($this->invokePrivate($service, 'tablesNeedConfirmation', $tables, $question));
+    }
+
+    public function test_village_and_district_counts_are_not_routed_to_population_totals(): void
+    {
+        $service = new BpsWebApiService;
+
+        $this->assertFalse($this->invokePrivate(
+            $service,
+            'isPopulationTotalQuestion',
+            'jumlah desa dan kelurahan di Sumsel terbaru'
+        ));
+        $this->assertFalse($this->invokePrivate(
+            $service,
+            'isPopulationTotalQuestion',
+            'jumlah kecamatan di Lahat'
+        ));
+        $this->assertTrue($this->invokePrivate(
+            $service,
+            'isPopulationTotalQuestion',
+            'berapa total penduduk di PALI'
+        ));
+    }
+
     public function test_static_table_html_is_rendered_as_bounded_rows(): void
     {
         $service = new BpsWebApiService;
@@ -110,6 +224,37 @@ class BpsWebApiServiceTest extends TestCase
         $this->assertStringNotContainsString('<table>', $text);
         $this->assertStringNotContainsString('| Lahat 26 |', $text);
         $this->assertStringContainsString('dipotong setelah 25 baris', $text);
+    }
+
+    public function test_entity_encoded_static_table_is_decoded_before_rendering(): void
+    {
+        $service = new BpsWebApiService;
+        $html = '&lt;table&gt;&lt;tr&gt;&lt;th&gt;Wilayah&lt;/th&gt;&lt;th&gt;Jumlah&lt;/th&gt;&lt;/tr&gt;'
+            .'&lt;tr&gt;&lt;td&gt;Palembang&lt;/td&gt;&lt;td&gt;75&nbsp;orang&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;';
+        $text = $this->invokePrivate($service, 'formatStaticTableHtml', $html);
+
+        $this->assertStringContainsString('| Wilayah | Jumlah |', $text);
+        $this->assertStringContainsString('| Palembang | 75 orang |', $text);
+        $this->assertStringNotContainsString('&nbsp;', $text);
+    }
+
+    public function test_static_table_is_limited_to_the_requested_sumsel_aggregate(): void
+    {
+        $service = new BpsWebApiService;
+        $html = '<table><tr><th>Wilayah</th><th>Jumlah</th></tr>'
+            .'<tr><td>Lahat</td><td>12</td></tr>'
+            .'<tr><td>Sumatera Selatan</td><td>99</td></tr></table>';
+        $region = [
+            'label' => 'Provinsi Sumatera Selatan',
+            'aliases' => ['sumsel', 'sumatera selatan'],
+            'match' => ['sumatera selatan', 'sumsel'],
+            'kind' => 'province',
+        ];
+
+        $text = $this->invokePrivate($service, 'formatStaticTableHtml', $html, $region);
+
+        $this->assertStringContainsString('| Sumatera Selatan | 99 |', $text);
+        $this->assertStringNotContainsString('| Lahat |', $text);
     }
 
     public function test_simdasi_rows_are_rendered_as_bounded_markdown(): void
@@ -133,6 +278,112 @@ class BpsWebApiServiceTest extends TestCase
 
         $this->assertStringContainsString('| Wilayah | Pertanian | Jumlah |', $text);
         $this->assertStringContainsString('| Lahat | 2.500.000 | 2.800.000 |', $text);
+    }
+
+    public function test_simdasi_table_is_limited_to_the_requested_sumsel_aggregate(): void
+    {
+        $service = new BpsWebApiService;
+        $table = [
+            'kolom' => [
+                'count' => ['nama_variabel' => 'Jumlah bencana'],
+            ],
+            'data' => [
+                ['label' => 'Lahat', 'variables' => ['count' => ['value' => '12']]],
+                ['label' => 'Sumatera Selatan', 'variables' => ['count' => ['value' => '99']]],
+            ],
+        ];
+        $region = [
+            'label' => 'Provinsi Sumatera Selatan',
+            'aliases' => ['sumsel', 'sumatera selatan'],
+            'match' => ['sumatera selatan', 'sumsel'],
+            'kind' => 'province',
+        ];
+
+        $text = $this->invokePrivate($service, 'formatSimdasiTable', $table, $region);
+
+        $this->assertStringContainsString('| Sumatera Selatan | 99 |', $text);
+        $this->assertStringNotContainsString('| Lahat |', $text);
+    }
+
+    public function test_simdasi_table_does_not_substitute_district_rows_when_province_total_is_missing(): void
+    {
+        $service = new BpsWebApiService;
+        $table = [
+            'kolom' => [
+                'count' => ['nama_variabel' => 'Jumlah bencana'],
+            ],
+            'data' => [
+                ['label' => 'Lahat', 'variables' => ['count' => ['value' => '12']]],
+            ],
+        ];
+        $region = [
+            'label' => 'Provinsi Sumatera Selatan',
+            'aliases' => ['sumsel', 'sumatera selatan'],
+            'match' => ['sumatera selatan', 'sumsel'],
+            'kind' => 'province',
+        ];
+
+        $text = $this->invokePrivate($service, 'formatSimdasiTable', $table, $region);
+
+        $this->assertStringContainsString('tidak tersedia pada tabel SIMDASI', $text);
+        $this->assertStringNotContainsString('| Lahat |', $text);
+    }
+
+    public function test_explicit_district_breakdown_keeps_all_matching_regions(): void
+    {
+        $service = new BpsWebApiService;
+
+        $this->assertNull($this->invokePrivate(
+            $service,
+            'tableRegionFilterForQuestion',
+            'Jumlah fasilitas sekolah di Sumsel per kabupaten/kota'
+        ));
+        $this->assertSame(
+            'province',
+            $this->invokePrivate($service, 'tableRegionFilterForQuestion', 'Jumlah fasilitas sekolah di Sumsel')['kind']
+        );
+    }
+
+    public function test_simdasi_duplicate_leaf_headers_keep_their_topic_labels(): void
+    {
+        $service = new BpsWebApiService;
+        $table = [
+            'kolom' => [
+                'university' => ['nama_variabel' => 'Jumlah Perguruan Tinggi - Negeri'],
+                'lecturer' => ['nama_variabel' => 'Jumlah Tenaga Pendidik - Negeri'],
+            ],
+            'data' => [[
+                'label' => 'Palembang',
+                'variables' => [
+                    'university' => ['value' => '1'],
+                    'lecturer' => ['value' => '616'],
+                ],
+            ]],
+        ];
+
+        $text = $this->invokePrivate($service, 'formatSimdasiTable', $table);
+
+        $this->assertStringContainsString('| Wilayah | Jumlah Perguruan Tinggi - Negeri | Jumlah Tenaga Pendidik - Negeri |', $text);
+    }
+
+    public function test_empty_successful_variable_search_does_not_abort_simdasi_catalog_search(): void
+    {
+        $keyword = 'perguruan';
+        Cache::forget('bps-webapi:variables:keyword:1600:'.sha1($keyword));
+        Http::fake([
+            '*keyword/perguruan/*' => Http::response(['status' => 'OK', 'data' => '']),
+        ]);
+
+        $variables = $this->invokePrivate(
+            new BpsWebApiService,
+            'variablesForKeyword',
+            $keyword,
+            '1600',
+            'test-api-key'
+        );
+
+        $this->assertSame([], $variables);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/keyword/perguruan/'));
     }
 
     private function invokePrivate(BpsWebApiService $service, string $method, mixed ...$arguments): mixed

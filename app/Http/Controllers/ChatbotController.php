@@ -114,7 +114,7 @@ class ChatbotController extends Controller
 
         if ($safetyResult === null) {
             try {
-                $context = $this->knowledgeContextFor($knowledge, $validated['message']);
+                $context = $this->chatContextFor($knowledge, $bps, $validated['message']);
                 $history = $this->conversationHistory($conversation);
                 $aiReply = $this->askAi($knowledge, $validated['message'], $sessionKey, $context, $history);
             } catch (\Throwable $exception) {
@@ -199,7 +199,7 @@ class ChatbotController extends Controller
         }
 
         try {
-            $context = $this->knowledgeContextFor($knowledge, $message);
+            $context = $this->chatContextFor($knowledge, $bps, $message);
             $aiReply = $this->askAi($knowledge, $message, $sessionId, $context);
             $reply = $aiReply ?? $this->fallbackAnswer(
                 $bps,
@@ -224,7 +224,16 @@ class ChatbotController extends Controller
     private function askAi(ChatbotKnowledgeService $knowledge, string $message, string $sessionId, ?string $context, array $history = []): ?string
     {
         $this->lastAiReplyUnverified = false;
-        $cacheKey = 'chatbot:ai:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context).'|'.sha1(serialize($history)));
+        if ($this->isExplanatoryQuestion($message)) {
+            $context = trim(implode("\n\n", array_filter([
+                $context,
+                'Arahan untuk jawaban: Pengguna meminta penjelasan atau kemungkinan penyebab, bukan pencarian angka baru. '
+                    .'Jelaskan faktor umum secara informatif dan hati-hati; jangan menyatakan bahwa faktor tersebut '
+                    .'terbukti menyebabkan angka tertentu tanpa bukti. Jika pengguna sudah memberi angka, gunakan '
+                    .'angka itu sebagai konteks pertanyaan dan bedakan fakta dari kemungkinan penjelasan.',
+            ])));
+        }
+        $cacheKey = 'chatbot:ai:v2:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context).'|'.sha1(serialize($history)));
         try {
             $cached = Cache::get($cacheKey);
             if (is_string($cached) && trim($cached) !== '') {
@@ -232,7 +241,7 @@ class ChatbotController extends Controller
                     $this->isStatisticalDataQuestion($message)
                     && $this->isUnverifiedDataReply($cached)
                 )) {
-                    return $cached;
+                    return $this->cleanDataBearingReply($cached);
                 }
                 Cache::forget($cacheKey);
                 Log::warning('chatbot.cached_unverified_data_reply');
@@ -277,7 +286,18 @@ class ChatbotController extends Controller
 
             return null;
         }
+        if ($this->isStatisticalDataQuestion($message)
+            && is_string($context)
+            && str_contains($context, '[Sumber: BPS WebAPI')
+            && $this->hasConcreteDataEvidence($context)
+            && ! $this->hasConcreteDataEvidence($reply)) {
+            $this->lastAiReplyUnverified = true;
+            Log::warning('chatbot.ai_reply_omitted_verified_bps_data');
 
+            return null;
+        }
+
+        $reply = $this->cleanDataBearingReply($reply);
         try {
             Cache::put($cacheKey, $reply, now()->addMinutes(20));
         } catch (\Throwable $exception) {
@@ -289,26 +309,27 @@ class ChatbotController extends Controller
 
     private function isStatisticalDataQuestion(string $message): bool
     {
+        if ($this->isExplanatoryQuestion($message)) {
+            return false;
+        }
+
         $hasValueCue = preg_match(
-            '/\b(berapa|jumlah|nilai|angka|persen\w*|persentase|tingkat|laju|terbaru|terkini|tahun|periode)\b|\b20\d{2}\b/iu',
+            '/\b(berapa|jumlah|total|nilai|angka|persen\w*|persentase|tingkat|laju|terbaru|terkini|tahun|periode|data|indikator|statistik|informasi|katalog|bencana)\b|\b20\d{2}\b/iu',
             $message
         ) === 1;
         if ($this->isConceptQuestion($message) && ! $hasValueCue) {
             return false;
         }
 
-        return preg_match(
-            '/\b(pdrb|produk\s+domestik\s+regional\s+bruto|ipm|indeks\s+pembangunan\s+manusia|'
-            .'penganggur\w*|tpt|penduduk|warga|populasi|kemiskinan|miskin\w*|inflasi|'
-            .'kasus|penyakit|penderita|status\s+perkawinan|'
-            .'rasio\s+gini|gini|upah|gaji|ump|umk|umr|ntp|nilai\s+tukar\s+petani|'
-            .'ekspor|impor|produksi|padi|beras|kepadatan|harapan\s+hidup)\b/iu',
-            $message
-        ) === 1;
+        return $hasValueCue;
     }
 
     private function isUnverifiedDataReply(string $reply): bool
     {
+        if ($this->hasConcreteDataEvidence($reply)) {
+            return false;
+        }
+
         $requestedPeriodUnavailable = preg_match(
             '/\b20\d{2}\b[^.!?\n]{0,80}\b(?:belum\s+(?:dapat\s*)?(?:tersedia|dirilis|ditemukan)|'
             .'tidak\s+(?:dapat\s+)?(?:tersedia|dirilis|ditemukan))\b/iu',
@@ -331,6 +352,47 @@ class ChatbotController extends Controller
         ) === 1;
     }
 
+    private function hasConcreteDataEvidence(string $reply): bool
+    {
+        if (preg_match(
+            '/\b\d[\d.,]*\s*(?:%|\b(?:persen|jiwa|orang|unit|rupiah|miliar|juta|ribu)\b)/iu',
+            $reply
+        ) === 1) {
+            return true;
+        }
+
+        if (preg_match_all('/(?:^|[:|]\s*)(?:Rp\s*)?(\d[\d.,]*)\b/mi', $reply, $matches) === false) {
+            return false;
+        }
+
+        foreach ($matches[1] ?? [] as $number) {
+            $digits = preg_replace('/\D/u', '', $number) ?? '';
+            if ($digits === '' || (strlen($digits) === 4 && str_starts_with($digits, '20'))) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private function cleanDataBearingReply(string $reply): string
+    {
+        if (! $this->hasConcreteDataEvidence($reply)) {
+            return $reply;
+        }
+
+        $cleaned = preg_replace(
+            '/\A\s*Maaf,\s*saya\s+belum\s+menemukan\s+indikator\s+khusus\b.*?\bNamun,\s*(?:(?:ada|tersedia)\s+)?data\s*/isu',
+            'Data tersedia: ',
+            $reply,
+            1
+        );
+
+        return is_string($cleaned) ? trim($cleaned) : $reply;
+    }
+
     private function knowledgeContextFor(ChatbotKnowledgeService $knowledge, string $message): ?string
     {
         try {
@@ -340,6 +402,31 @@ class ChatbotController extends Controller
 
             return null;
         }
+    }
+
+    private function chatContextFor(
+        ChatbotKnowledgeService $knowledge,
+        BpsWebApiService $bps,
+        string $message
+    ): ?string {
+        $contexts = array_filter([
+            $this->knowledgeContextFor($knowledge, $message),
+        ], static fn (?string $context) => filled($context));
+
+        if (! $this->isConceptQuestion($message)
+            && ! $this->isExplanatoryQuestion($message)
+            && $bps->isDataQuestion($message)) {
+            $bpsContext = $bps->contextFor($message);
+            if (filled($bpsContext)) {
+                $contexts[] = $bpsContext;
+            }
+        }
+
+        if ($contexts === []) {
+            return null;
+        }
+
+        return Str::limit(implode("\n\n", $contexts), 18000, '...');
     }
 
     private function conversationHistory(?ChatbotConversation $conversation): array
@@ -376,6 +463,10 @@ class ChatbotController extends Controller
                     .Str::limit(trim($context), 4000, '...');
             }
 
+            if ($this->isExplanatoryQuestion($message)) {
+                return $this->explanatoryFallbackAnswer($message);
+            }
+
             return 'Maaf, penjelasan konsep tersebut belum tersedia pada basis pengetahuan saat ini. '
                 .'Silakan coba lagi setelah referensi yang sesuai tersedia.';
         }
@@ -398,8 +489,30 @@ class ChatbotController extends Controller
         }
     }
 
+    private function explanatoryFallbackAnswer(string $message): string
+    {
+        if (preg_match('/\b(penganggur\w*|tpt|ketenagakerjaan|tenaga\s+kerja)\b/iu', $message) === 1) {
+            return 'Beberapa kemungkinan yang dapat ditelaah antara lain ketidaksesuaian keterampilan '
+                .'pencari kerja dengan lowongan, terbatasnya kesempatan kerja di sektor atau wilayah tertentu, '
+                .'perubahan musiman dan struktur ekonomi, serta masa transisi dari pendidikan ke pekerjaan. '
+                .'TPT mengukur proporsi penganggur dalam angkatan kerja; angka 3,69 persen yang disebutkan '
+                .'tidak dengan sendirinya menjelaskan penyebabnya atau membuktikan faktor tertentu. '
+                .'Untuk menyimpulkan penyebab khusus Sumatera Selatan pada 2025, diperlukan data tambahan '
+                .'seperti karakteristik penganggur, sektor pekerjaan, pendidikan, dan tren antarperiode.';
+        }
+
+        return 'Angka statistik menunjukkan besaran suatu indikator, tetapi tidak dengan sendirinya '
+            .'membuktikan penyebabnya. Kemungkinan faktor perlu ditelaah bersama karakteristik kelompok '
+            .'yang diukur, kondisi wilayah, perubahan antarperiode, dan definisi indikator. '
+            .'Penjelasan tersebut merupakan kemungkinan untuk diuji, bukan kesimpulan kausal dari satu angka.';
+    }
+
     private function isConceptQuestion(string $message): bool
     {
+        if ($this->isExplanatoryQuestion($message)) {
+            return true;
+        }
+
         if (preg_match(
             '/\b(apa\s+itu|apa\s+artinya|apa\s+makna|apa\s+perbedaan|perbedaan|pengertian|definisi|arti|makna|'
             .'maksud(?:nya)?|konsep|cara\s+membaca|cara\s+menghitung|cara\s+menafsir\w*|rumus|jelaskan|itu\s+apa)\b/iu',
@@ -411,6 +524,14 @@ class ChatbotController extends Controller
             return false;
         }
         return true;
+        return true;
+    }
+    private function isExplanatoryQuestion(string $message): bool
+    {
+        return preg_match(
+            '/\b(mengapa|kenapa|penyebab|alasan|faktor|dampak|implikasi)\b/iu',
+            $message
+        ) === 1;
     }
 
     /**

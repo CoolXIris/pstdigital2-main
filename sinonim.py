@@ -5,6 +5,7 @@ yang di ke dari untuk dan atau pada dengan apa saja ada tolong tampilkan
 sebutkan ini itu berapa bagaimana tentang sekarang terbaru terakhir saat sih dong
 apakah ada apakahkah mohon minta carikan cari tunjukkan tunjuk
 tersebut dengan agar sebagai berdasarkan mengenai menyebutkan
+menurut mereka
 """.split())
 
 GENERIC = set("""
@@ -18,6 +19,13 @@ SYN = {
     "upah": ("upah", "gaji"),
     "penghasilan": ("upah", "gaji", "pendapatan"),
     "pendapatan": ("pendapatan", "upah", "gaji"),
+    "pns": ("pns", "pegawai negeri sipil", "asn", "aparatur sipil negara"),
+    "pegawai negeri sipil": ("pegawai negeri sipil", "pns", "asn", "aparatur sipil negara"),
+    "asn": ("asn", "aparatur sipil negara", "pns", "pegawai negeri sipil"),
+    "aparatur sipil negara": ("aparatur sipil negara", "asn", "pns", "pegawai negeri sipil"),
+    "tpt": ("tpt", "tingkat pengangguran terbuka"),
+    "tingkat pengangguran terbuka": ("tingkat pengangguran terbuka", "tpt", "pengangguran terbuka"),
+    "umk": ("umk", "upah minimum kabupaten", "upah minimum kota"),
     "pekerja": ("pekerja", "buruh", "karyawan", "pegawai"),
     "karyawan": ("buruh", "karyawan", "pegawai", "pekerja"),
     "buruh": ("buruh", "pekerja", "karyawan", "pegawai"),
@@ -30,13 +38,16 @@ SYN = {
     "penganguran": ("pengangguran", "penganggur", "tpt"),
     "penduduk": ("penduduk", "populasi"),
     "populasi": ("populasi", "penduduk"),
-    "pria": ("pria", "laki-laki", "lelaki", "jenis kelamin"),
-    "laki": ("laki", "laki-laki", "pria", "jenis kelamin"),
-    "wanita": ("wanita", "perempuan", "jenis kelamin"),
-    "perempuan": ("perempuan", "wanita", "jenis kelamin"),
-    "perempu": ("perempuan", "wanita", "jenis kelamin"),
-    "jenis kelamin": ("jenis kelamin", "gender", "sex"),
+    "pria": ("pria", "laki-laki", "lelaki"),
+    "laki": ("laki", "laki-laki", "pria"),
+    "wanita": ("wanita", "perempuan"),
+    "perempuan": ("perempuan", "wanita"),
+    "perempu": ("perempuan", "wanita"),
+    "jenis kelamin": ("jenis kelamin",),
     "pdrb": ("pdrb", "produk domestik regional bruto"),
+    "produk domestik regional bruto": ("produk domestik regional bruto", "pdrb"),
+    "ipm": ("ipm", "indeks pembangunan manusia"),
+    "indeks pembangunan manusia": ("indeks pembangunan manusia", "ipm"),
     "inflasi": ("inflasi", "ihk", "indeks harga konsumen"),
     "ntp": ("ntp", "nilai tukar petani persen", "nilai tukar petani"),
     "sekolah": ("sekolah", "pendidikan"),
@@ -45,6 +56,10 @@ SYN = {
     "puskesmas": ("puskesmas", "fasilitas kesehatan"),
     "posyandu": ("posyandu", "fasilitas kesehatan"),
     "klinik": ("klinik", "fasilitas kesehatan"),
+    "perpustakaan": ("perpustakaan", "pustaka"),
+    "pustaka": ("pustaka", "perpustakaan"),
+    "bencana alam": ("bencana alam", "bencana"),
+    "korban": ("korban", "korban bencana"),
 }
 
 RELATED = {
@@ -56,4 +71,7 @@ RELATED = {
     "tahanan": ("penjara", "tindak pidana", "narapidana"),
     "kejahatan": ("tindak pidana", "kriminalitas"),
     "kriminalitas": ("tindak pidana", "kejahatan"),
+    "korban": ("meninggal", "hilang", "terluka", "terdampak"),
+    "bencana": ("bencana alam",),
+    "jenis kelamin": ("gender", "sex"),
 }

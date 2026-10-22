@@ -25,10 +25,27 @@
         <aside class="portal-room-aside">
             <span class="portal-eyebrow">Detail sesi</span><h2>{{ $meeting->name }}</h2>
             <dl><div><dt>Pemohon</dt><dd>{{ $meeting->user?->name }}</dd></div><div><dt>Petugas</dt><dd>{{ $meeting->assigned_staff }}</dd></div><div><dt>Jadwal</dt><dd>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}<br>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</dd></div></dl>
-            <div class="portal-chat-note"><i class="bi bi-shield-check me-1"></i>Koneksi audio/video dibuat antarperangkat. Server aplikasi hanya meneruskan metadata signaling.</div>
-            <div class="portal-chat-note"><i class="bi bi-info-circle me-1"></i>Izinkan akses kamera dan mikrofon pada browser. Jika koneksi antarjaringan gagal, administrator server perlu mengonfigurasi TURN milik BPS.</div>
+            <div class="portal-room-chat-entry">
+                <div><strong>Perlu mengirim pesan?</strong><small>Gunakan chat teks tanpa meninggalkan ruang konsultasi.</small></div>
+                <button class="portal-btn portal-btn-primary consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $isRequester ? ($meeting->assigned_staff ?: 'Petugas konsultasi') : ($meeting->user?->name ?? 'Pengguna') }}" aria-label="Buka chat konsultasi">
+                    <i class="bi bi-chat-dots-fill" aria-hidden="true"></i> Buka chat teks<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span>
+                </button>
+            </div>
+            <div class="portal-chat-note"><i class="bi bi-shield-check me-1"></i>Media dikirim langsung antarperangkat jika memungkinkan, atau melalui TURN saat jaringan membatasi koneksi. Laravel menangani signaling.</div>
+            <div class="portal-room-quality">
+                <label for="screen-share-quality"><i class="bi bi-display me-1"></i>Kualitas berbagi layar</label>
+                <select id="screen-share-quality" class="form-select" aria-describedby="screen-share-quality-status">
+                    <option value="auto" selected>Otomatis · 720p–1080p, 30–60 FPS</option>
+                    <option value="720p30">Hemat jaringan · 720p, 30 FPS</option>
+                    <option value="1080p30">Tinggi · 1080p, 30 FPS</option>
+                    <option value="1080p60">Gerakan halus · 1080p, 60 FPS</option>
+                </select>
+                <small id="screen-share-quality-status" aria-live="polite">Mode otomatis memilih kualitas sesuai kondisi koneksi saat berbagi layar aktif.</small>
+            </div>
+            <div class="portal-chat-note" id="turn-configuration-note"><i class="bi bi-info-circle me-1"></i>Izinkan akses kamera dan mikrofon pada browser. Koneksi lintas jaringan memerlukan konfigurasi STUN/TURN pada server hosting.</div>
         </aside>
     </div>
+    @include('konsultasi.partials.text-chat-modal')
 @endsection
 
 @section('scripts')
@@ -42,16 +59,170 @@
         const requester = room.dataset.isRequester === 'true';
         const roomSession = room.dataset.roomSession;
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-        const peer = new RTCPeerConnection({ iceServers: JSON.parse(room.dataset.iceServers || '[]') });
+        const iceServers = JSON.parse(room.dataset.iceServers || '[]');
+        const turnNote = document.getElementById('turn-configuration-note');
+        const hasTurnServer = iceServers.some((server) => {
+            const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+            return urls.some((url) => typeof url === 'string' && /^turns?:/i.test(url));
+        });
+        turnNote.innerHTML = hasTurnServer
+            ? '<i class="bi bi-shield-check me-1"></i>Server TURN tersedia sebagai jalur relay jika koneksi langsung terhalang jaringan.'
+            : '<i class="bi bi-info-circle me-1"></i>TURN belum dikonfigurasi. Beberapa jaringan dapat memblokir koneksi; hosting perlu menyediakan STUN/TURN agar koneksi lintas jaringan lebih andal.';
+        const peer = new RTCPeerConnection({ iceServers, iceCandidatePoolSize: 2, bundlePolicy: 'max-bundle' });
         let videoTransceiver;
         let localStream;
         let screenStream;
+        let screenQualityTimer = null;
+        let screenQualityBusy = false;
+        let selectedScreenQuality = 'auto';
+        let automaticScreenProfile = '1080p30';
+        let goodNetworkSamples = 0;
+        let iceRestartTimer = null;
+        let iceRestartAttempts = 0;
         let lastSignal = 0;
         let polling = true;
         let remoteDescriptionReady = false;
         let signalChain = Promise.resolve();
         const pendingCandidates = [];
         const remoteStream = new MediaStream();
+        const screenQualitySelect = document.getElementById('screen-share-quality');
+        const screenQualityStatus = document.getElementById('screen-share-quality-status');
+        const screenProfiles = {
+            '720p30': { width: 1280, height: 720, fps: 30, maxBitrate: 1400000, label: '720p · 30 FPS' },
+            '1080p30': { width: 1920, height: 1080, fps: 30, maxBitrate: 3000000, label: '1080p · 30 FPS' },
+            '1080p60': { width: 1920, height: 1080, fps: 60, maxBitrate: 5500000, label: '1080p · 60 FPS' }
+        };
+
+        const updateScreenQualityLabel = () => {
+            const profile = screenProfiles[selectedScreenQuality === 'auto' ? automaticScreenProfile : selectedScreenQuality];
+            screenQualityStatus.textContent = selectedScreenQuality === 'auto'
+                ? `Otomatis${screenStream ? ` · saat ini ${profile.label}` : ' · aktif saat berbagi layar'}`
+                : `${profile.label}${screenStream ? ' · kualitas tetap' : ' · diterapkan saat berbagi layar'}`;
+        };
+
+        const applyScreenQuality = async () => {
+            const activeStream = screenStream;
+            const track = activeStream?.getVideoTracks()[0];
+            if (!track || !videoTransceiver?.sender) return;
+
+            const profile = screenProfiles[selectedScreenQuality === 'auto' ? automaticScreenProfile : selectedScreenQuality];
+            try {
+                await track.applyConstraints({
+                    width: { max: profile.width },
+                    height: { max: profile.height },
+                    frameRate: { ideal: profile.fps, max: profile.fps }
+                });
+            } catch {
+                // Some browsers do not support applying every display-capture constraint.
+                // Sender limits below still cap the encoded stream where supported.
+            }
+            if (screenStream !== activeStream) return;
+
+            try {
+                const parameters = videoTransceiver.sender.getParameters();
+                parameters.encodings ??= [{}];
+                if (parameters.encodings?.length) {
+                    parameters.encodings[0].maxBitrate = profile.maxBitrate;
+                    parameters.encodings[0].maxFramerate = profile.fps;
+                    const settings = track.getSettings();
+                    const sourceWidth = settings.width || profile.width;
+                    const sourceHeight = settings.height || profile.height;
+                    parameters.encodings[0].scaleResolutionDownBy = Math.max(
+                        1,
+                        sourceWidth / profile.width,
+                        sourceHeight / profile.height
+                    );
+                    await videoTransceiver.sender.setParameters(parameters);
+                }
+            } catch {
+                // Capture constraints remain in place if an encoder parameter is unsupported.
+            }
+            updateScreenQualityLabel();
+        };
+
+        const adaptScreenQuality = async () => {
+            if (!screenStream || selectedScreenQuality !== 'auto' || screenQualityBusy) return;
+            screenQualityBusy = true;
+            try {
+                const reports = await peer.getStats();
+                const stats = Array.from(reports.values());
+                const selectedPairId = stats.find((item) => item.type === 'transport' && item.selectedCandidatePairId)
+                    ?.selectedCandidatePairId;
+                const candidatePair = stats.find((item) => item.type === 'candidate-pair' && item.id === selectedPairId)
+                    || stats.find((item) => item.type === 'candidate-pair'
+                        && item.state === 'succeeded'
+                        && (item.selected || item.nominated))
+                    || stats.find((item) => item.type === 'candidate-pair' && item.selected);
+                const outboundVideo = stats.find((item) => item.type === 'outbound-rtp'
+                    && (item.kind === 'video' || item.mediaType === 'video')
+                    && !item.isRemote);
+                const remoteInbound = outboundVideo
+                    ? stats.find((item) => item.type === 'remote-inbound-rtp'
+                        && (item.id === outboundVideo.remoteId || item.localId === outboundVideo.id))
+                    : null;
+                const availableBitrate = Number(candidatePair?.availableOutgoingBitrate);
+                const roundTripTime = Number(candidatePair?.currentRoundTripTime ?? remoteInbound?.roundTripTime);
+                const packetLoss = Number(remoteInbound?.fractionLost);
+                const bandwidthLimited = outboundVideo?.qualityLimitationReason === 'bandwidth';
+                const cpuLimited = outboundVideo?.qualityLimitationReason === 'cpu';
+                const poorNetwork = bandwidthLimited
+                    || cpuLimited
+                    || (Number.isFinite(packetLoss) && packetLoss > 0.06)
+                    || (Number.isFinite(roundTripTime) && roundTripTime > 0.65)
+                    || (Number.isFinite(availableBitrate) && availableBitrate < 1800000);
+
+                let nextProfile = automaticScreenProfile;
+                if (poorNetwork) {
+                    nextProfile = '720p30';
+                    goodNetworkSamples = 0;
+                } else if (Number.isFinite(availableBitrate) && availableBitrate >= 5500000
+                    && (!Number.isFinite(packetLoss) || packetLoss < 0.02)
+                    && (!Number.isFinite(roundTripTime) || roundTripTime < 0.4)) {
+                    goodNetworkSamples += 1;
+                    if (goodNetworkSamples >= 2) nextProfile = '1080p60';
+                } else if (Number.isFinite(availableBitrate)) {
+                    goodNetworkSamples = 0;
+                    nextProfile = '1080p30';
+                }
+
+                if (nextProfile !== automaticScreenProfile) {
+                    automaticScreenProfile = nextProfile;
+                    await applyScreenQuality();
+                }
+            } catch {
+                // Keep the current bounded profile if network statistics are unavailable.
+            } finally {
+                screenQualityBusy = false;
+            }
+        };
+
+        screenQualitySelect.addEventListener('change', async () => {
+            selectedScreenQuality = screenQualitySelect.value;
+            goodNetworkSamples = 0;
+            if (selectedScreenQuality === 'auto') automaticScreenProfile = '1080p30';
+            updateScreenQualityLabel();
+            await applyScreenQuality();
+        });
+
+        const scheduleIceRestart = (delay) => {
+            if (!requester || iceRestartTimer || iceRestartAttempts >= 3) return;
+            iceRestartTimer = window.setTimeout(async () => {
+                iceRestartTimer = null;
+                if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') return;
+                if (peer.signalingState !== 'stable') {
+                    scheduleIceRestart(1500);
+                    return;
+                }
+                iceRestartAttempts += 1;
+                try {
+                    status.textContent = 'Koneksi terganggu; mencoba menyambungkan kembali...';
+                    await peer.setLocalDescription(await peer.createOffer({ iceRestart: true }));
+                    await sendSignal('description', peer.localDescription.toJSON());
+                } catch {
+                    status.textContent = 'Koneksi belum pulih. Periksa jaringan dan konfigurasi TURN.';
+                }
+            }, delay);
+        };
 
         const refreshRemotePlayback = () => {
             const tracks = peer.getReceivers()
@@ -93,7 +264,30 @@
         };
         peer.onconnectionstatechange = () => {
             if (peer.connectionState === 'connected') status.textContent = 'Terhubung';
-            if (peer.connectionState === 'disconnected' || peer.connectionState === 'failed') status.textContent = 'Koneksi terputus';
+            if (peer.connectionState === 'disconnected' || peer.connectionState === 'failed') status.textContent = 'Koneksi terganggu; mencoba menyambungkan kembali...';
+        };
+        peer.oniceconnectionstatechange = () => {
+            const state = peer.iceConnectionState;
+            if (state === 'connected' || state === 'completed') {
+                iceRestartAttempts = 0;
+                if (iceRestartTimer) window.clearTimeout(iceRestartTimer);
+                iceRestartTimer = null;
+                status.textContent = 'Terhubung';
+            } else if (state === 'failed') {
+                if (iceRestartAttempts >= 3) {
+                    status.textContent = 'Koneksi belum pulih. Periksa jaringan atau minta administrator memeriksa TURN.';
+                } else {
+                    status.textContent = 'Koneksi gagal; mencoba jalur koneksi ulang...';
+                    scheduleIceRestart(1000);
+                }
+            } else if (state === 'disconnected') {
+                if (iceRestartAttempts >= 3) {
+                    status.textContent = 'Koneksi belum pulih. Periksa jaringan atau minta administrator memeriksa TURN.';
+                } else {
+                    status.textContent = 'Koneksi tidak stabil; mencoba menyambungkan kembali...';
+                    scheduleIceRestart(6000);
+                }
+            }
         };
 
         const consumeSignals = async () => {
@@ -139,7 +333,7 @@
                                 while (pendingCandidates.length) {
                                     await peer.addIceCandidate(pendingCandidates.shift());
                                 }
-                                if (signal.payload.type === 'offer' && !peer.localDescription) {
+                                if (signal.payload.type === 'offer' && peer.signalingState === 'have-remote-offer') {
                                     await peer.setLocalDescription(await peer.createAnswer());
                                     await sendSignal('description', peer.localDescription.toJSON());
                                 }
@@ -162,6 +356,10 @@
         const startRoom = async () => {
             if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
                 status.textContent = 'Browser ini tidak mendukung WebRTC.';
+                return;
+            }
+            if (!window.isSecureContext) {
+                status.textContent = 'Ruang meeting memerlukan HTTPS agar kamera, mikrofon, dan screen share dapat digunakan.';
                 return;
             }
             const mediaParts = await Promise.allSettled([
@@ -211,14 +409,28 @@
             const activeScreen = screenStream;
             if (!activeScreen) return;
             screenStream = null;
+            if (screenQualityTimer) window.clearInterval(screenQualityTimer);
+            screenQualityTimer = null;
             activeScreen.getTracks().forEach((track) => track.stop());
             const cameraTrack = localStream?.getVideoTracks()[0] || null;
             await videoTransceiver.sender.replaceTrack(cameraTrack);
+            try {
+                const parameters = videoTransceiver.sender.getParameters();
+                if (parameters.encodings?.length) {
+                    delete parameters.encodings[0].maxBitrate;
+                    delete parameters.encodings[0].maxFramerate;
+                    delete parameters.encodings[0].scaleResolutionDownBy;
+                    await videoTransceiver.sender.setParameters(parameters);
+                }
+            } catch {
+                // Restoring the camera track still succeeds when encoder parameters are immutable.
+            }
             sendSignal('media-state', { source: 'camera' }).catch(() => {});
             localVideo.srcObject = localStream || null;
             const shareButton = document.getElementById('share-screen');
             shareButton.classList.remove('is-muted');
             shareButton.setAttribute('aria-label', 'Bagikan layar');
+            updateScreenQualityLabel();
         };
         document.getElementById('share-screen').addEventListener('click', async (event) => {
             const shareButton = event.currentTarget;
@@ -231,19 +443,37 @@
                     status.textContent = 'Aktifkan kamera sebelum membagikan layar.';
                     return;
                 }
-                screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                try {
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: {
+                            width: { ideal: 1920, max: 1920 },
+                            height: { ideal: 1080, max: 1080 },
+                            frameRate: { ideal: 30, max: 60 }
+                        },
+                        audio: false
+                    });
+                } catch (captureError) {
+                    if (captureError.name !== 'OverconstrainedError') throw captureError;
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                }
                 const screenTrack = screenStream.getVideoTracks()[0];
                 await videoTransceiver.sender.replaceTrack(screenTrack);
+                if (selectedScreenQuality === 'auto') automaticScreenProfile = '1080p30';
+                await applyScreenQuality();
+                screenQualityTimer = window.setInterval(adaptScreenQuality, 5000);
                 sendSignal('media-state', { source: 'screen' }).catch(() => {});
                 localVideo.srcObject = screenStream;
                 shareButton.classList.add('is-muted');
                 shareButton.setAttribute('aria-label', 'Hentikan berbagi layar');
+                updateScreenQualityLabel();
                 screenTrack.addEventListener('ended', () => {
                     stopScreenShare().catch((error) => {
                         status.textContent = 'Gagal kembali ke kamera: ' + error.message;
                     });
                 }, { once: true });
             } catch (error) {
+                screenStream?.getTracks().forEach((track) => track.stop());
+                screenStream = null;
                 status.textContent = error.name === 'NotAllowedError' ? 'Izin berbagi layar dibatalkan.' : 'Berbagi layar tidak tersedia.';
             }
         });
@@ -257,6 +487,8 @@
         });
         document.getElementById('leave-room').addEventListener('click', async () => {
             polling = false;
+            if (screenQualityTimer) window.clearInterval(screenQualityTimer);
+            if (iceRestartTimer) window.clearTimeout(iceRestartTimer);
             await sendSignal('leave', null).catch(() => {});
             localStream?.getTracks().forEach((track) => track.stop());
             screenStream?.getTracks().forEach((track) => track.stop());
@@ -266,9 +498,13 @@
         window.addEventListener('beforeunload', () => {
             localStream?.getTracks().forEach((track) => track.stop());
             screenStream?.getTracks().forEach((track) => track.stop());
+            if (screenQualityTimer) window.clearInterval(screenQualityTimer);
+            if (iceRestartTimer) window.clearTimeout(iceRestartTimer);
             peer.close();
         });
+        updateScreenQualityLabel();
         startRoom().catch((error) => { status.textContent = `Gagal bergabung: ${error.message}`; });
     })();
 </script>
+@include('konsultasi.partials.text-chat-script')
 @endsection

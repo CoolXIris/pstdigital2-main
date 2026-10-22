@@ -141,6 +141,17 @@ class BpsCsvCatalogTests(unittest.TestCase):
         row = self._row(
             "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/262/th/125/key/"
         )
+        def clear_failure_log():
+            connection = bps_data_store.init_db()
+            try:
+                connection.execute(
+                    "DELETE FROM log_gagal WHERE id_tabel=? AND tahun=?",
+                    ("262", "2025"),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
         with patch.dict("os.environ", {"BPS_API_KEY": "test-key"}):
             with patch.object(
                 bps_csv_catalog._http,
@@ -152,6 +163,7 @@ class BpsCsvCatalogTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(bps_csv_catalog.CatalogError, "tidak dapat diakses"):
                     bps_csv_catalog.fetch_json(row)
+            clear_failure_log()
 
             invalid_json = httpx.Response(
                 200,
@@ -161,6 +173,7 @@ class BpsCsvCatalogTests(unittest.TestCase):
             with patch.object(bps_csv_catalog._http, "get", return_value=invalid_json):
                 with self.assertRaisesRegex(bps_csv_catalog.CatalogError, "JSON yang tidak valid"):
                     bps_csv_catalog.fetch_json(row)
+            clear_failure_log()
 
             denied = httpx.Response(
                 401,

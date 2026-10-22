@@ -1,11 +1,12 @@
 <?php
 
 return [
-    'notice' => 'Mohon maaf, layanan asisten AI sedang tidak tersedia. Sebagai gantinya, kami menampilkan informasi terbaru dari WebAPI BPS secara otomatis.',
+    'notice' => 'Mohon maaf, layanan asisten AI sedang tidak tersedia. Sebagai gantinya, kami menampilkan informasi dari WebAPI BPS secara otomatis.',
     'topic_intro' => 'Berita Resmi Statistik terbaru tentang {topic}:',
     'regional_brs_intro' => 'Berita Resmi Statistik dari BPS {region} tentang {topic}:',
     'regional_province_brs_intro' => 'Berita Resmi Statistik Provinsi Sumatera Selatan yang memuat {region} terkait {topic}:',
     'general_intro' => 'Pertanyaan Anda tidak cocok dengan topik template, sehingga yang ditampilkan adalah Berita Resmi Statistik terbaru secara umum:',
+    'data_intro' => 'Berikut data BPS yang ditemukan pada katalog dan WebAPI BPS:',
     'closing' => 'Silakan coba lagi beberapa saat lagi untuk mendapat jawaban dari asisten AI, atau kunjungi https://sumsel.bps.go.id.',
     'region_note' => 'Catatan: data berikut berlaku untuk tingkat Provinsi Sumatera Selatan, bukan untuk {region}.',
     'topics' => [

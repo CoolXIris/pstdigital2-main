@@ -6,6 +6,7 @@ use App\Exports\ConsultationHistoryExport;
 use App\Models\Meeting;
 use App\Models\TelegramBot;
 use App\Services\ConsultationDocumentationService;
+use App\Services\ConsultationGoogleCalendarService;
 use App\Services\ConsultationMeetingNotificationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
@@ -82,7 +83,7 @@ class KonsultasiAdminController extends Controller
         );
     }
 
-    public function updateStatus(Request $request, Meeting $meeting, ConsultationDocumentationService $documentation, ConsultationMeetingNotificationService $notifications): RedirectResponse
+    public function updateStatus(Request $request, Meeting $meeting, ConsultationDocumentationService $documentation, ConsultationMeetingNotificationService $notifications, ConsultationGoogleCalendarService $calendar): RedirectResponse
     {
         $validated = $request->validate([
             'action' => ['required', Rule::in(['confirm', 'complete', 'cancel'])],
@@ -100,7 +101,7 @@ class KonsultasiAdminController extends Controller
                 throw ValidationException::withMessages(['documentation' => 'Video maksimal 10 MB. Unggah versi yang sudah diperkecil atau gunakan tautan dokumentasi.']);
             }
             try {
-                $storedDocumentation = $documentation->store($file, $meeting->id);
+                $storedDocumentation = $documentation->store($file, $meeting->id, Auth::user());
             } catch (\RuntimeException $exception) {
                 throw ValidationException::withMessages(['documentation' => $exception->getMessage()]);
             }
@@ -167,13 +168,13 @@ class KonsultasiAdminController extends Controller
         } catch (QueryException $exception) {
             report($exception);
             if ($storedDocumentation) {
-                Storage::disk('local')->delete($storedDocumentation);
+                $documentation->delete($storedDocumentation, Auth::user());
             }
 
             return back()->with('error', 'Tidak dapat memperbarui konsultasi. Silakan coba kembali.');
         } catch (\Throwable $exception) {
             if ($storedDocumentation) {
-                Storage::disk('local')->delete($storedDocumentation);
+                $documentation->delete($storedDocumentation, Auth::user());
             }
             throw $exception;
         }
@@ -182,6 +183,7 @@ class KonsultasiAdminController extends Controller
             $confirmedMeeting = $meeting->fresh();
             $this->notifyConfirmed($confirmedMeeting);
             $notifications->sendApprovalNotifications($confirmedMeeting);
+            $calendarStatus = $calendar->createForApprover($confirmedMeeting);
         }
 
         $message = match ($validated['action']) {
@@ -189,6 +191,14 @@ class KonsultasiAdminController extends Controller
             'complete' => 'Konsultasi ditandai selesai dan dipindahkan ke riwayat.',
             default => 'Permintaan konsultasi berhasil dibatalkan.',
         };
+
+        if ($validated['action'] === 'confirm') {
+            $message .= match ($calendarStatus) {
+                'created' => ' Pengingat Google Calendar berhasil dibuat untuk petugas yang menyetujui.',
+                'already_created' => ' Pengingat Google Calendar untuk sesi ini sudah tersedia.',
+                default => ' Pengingat Google Calendar belum dapat dibuat. Pastikan akun Google petugas yang menyetujui sudah terhubung dan memiliki akses kalender.',
+            };
+        }
 
         return back()->with('message', $message);
     }
@@ -199,6 +209,35 @@ class KonsultasiAdminController extends Controller
         $end = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->end_time);
 
         return (int) $meeting->status === 2 && now('Asia/Jakarta')->betweenIncluded($start, $end);
+    }
+
+    private function roomIceServers(Meeting $meeting): array
+    {
+        $iceServers = config('pst.ice_servers', []);
+        $sharedSecret = trim((string) config('pst.turn_shared_secret', ''));
+        if ($sharedSecret === '') {
+            return $iceServers;
+        }
+
+        // Coturn REST credentials are time-limited and generated per room page load.
+        $expiresAt = now()->addSeconds((int) config('pst.turn_credential_ttl', 21600))->timestamp;
+        $username = $expiresAt . ':pst-' . $meeting->id . '-' . Auth::id() . '-' . Str::random(8);
+        $credential = base64_encode(hash_hmac('sha1', $username, $sharedSecret, true));
+
+        return array_map(static function (array $server) use ($username, $credential): array {
+            $urls = is_array($server['urls'] ?? null) ? $server['urls'] : [$server['urls'] ?? ''];
+            $hasTurnUrl = collect($urls)->contains(static fn ($url): bool =>
+                is_string($url) && preg_match('/^turns?:/i', $url) === 1
+            );
+
+            if ($hasTurnUrl) {
+                $server['username'] = $username;
+                $server['credential'] = $credential;
+                $server['credentialType'] = 'password';
+            }
+
+            return $server;
+        }, $iceServers);
     }
 
     public function room(Meeting $meeting): View
@@ -240,7 +279,7 @@ class KonsultasiAdminController extends Controller
             'returnUrl' => Auth::user()->hasRole(['admin', 'super_admin']) ? route('admin.konsultasi') : url('konsultasi'),
             'roomSessionId' => $sessionId,
             'peerPresent' => $peerPresent,
-            'iceServers' => config('pst.ice_servers', []),
+            'iceServers' => $this->roomIceServers($meeting),
         ]);
     }
 
@@ -459,7 +498,15 @@ class KonsultasiAdminController extends Controller
 
     public function documentation(Meeting $meeting)
     {
-        $this->authorizeParticipant($meeting);
+        abort_unless(Auth::user()->hasRole(['admin', 'super_admin']), 403);
+
+        if ($meeting->documentation_path && Str::startsWith($meeting->documentation_path, 'gdrive:')) {
+            $fileId = substr($meeting->documentation_path, strlen('gdrive:'));
+            abort_if($fileId === '', 404);
+
+            return redirect()->away('https://drive.google.com/file/d/'.rawurlencode($fileId).'/view');
+        }
+
         abort_unless($meeting->documentation_path && Storage::disk('local')->exists($meeting->documentation_path), 404);
 
         return Storage::disk('local')->download(

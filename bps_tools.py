@@ -225,7 +225,20 @@ def _remove_region_names(keyword: str) -> str:
 
 
 def _clean_search_keyword(keyword: str) -> str:
-    result = str(keyword or "").casefold()
+    raw_keyword = str(keyword or "")
+    raw_keyword = re.sub(
+        r"\b([A-Z][A-Z0-9-]{1,9})\s*\([^()]{4,80}\)",
+        r"\1",
+        raw_keyword,
+        flags=re.IGNORECASE,
+    )
+    raw_keyword = re.sub(
+        r"\b[^()]{4,80}\s*\(([A-Z][A-Z0-9-]{1,9})\)",
+        r"\1",
+        raw_keyword,
+        flags=re.IGNORECASE,
+    )
+    result = raw_keyword.casefold()
     for canonical, aliases in _VARIABLE_SYNONYM_PHRASES:
         for alias in sorted(aliases, key=len, reverse=True):
             result = re.sub(
@@ -270,16 +283,7 @@ def _token_match_score(term: str, tokens: set[str]) -> float:
 
 
 def _stem_keyword(word: str) -> str:
-    stem = word
-    for prefix in ("meng", "meny", "mem", "men", "peng", "peny", "pem", "pen", "per", "ber", "ter", "ke", "se", "pe", "me"):
-        if stem.startswith(prefix) and len(stem) - len(prefix) >= 4:
-            stem = stem[len(prefix):]
-            break
-    for suffix in ("kan", "nya", "an", "i"):
-        if stem.endswith(suffix) and len(stem) - len(suffix) >= 4:
-            stem = stem[:-len(suffix)]
-            break
-    return stem
+    return bps_csv_search.stem(word)
 
 
 def _search_keyword_variants(keyword: str) -> list[str]:
@@ -350,8 +354,9 @@ def _load_variable_index() -> dict:
             "category": subject.get("category", ""),
             "category_id": "",
             "years": [],
-            "aliases": list(dict.fromkeys([
-                *_variable_aliases(title),
+            "_status_by_year": {},
+            "aliases": _variable_aliases(title),
+            "context_aliases": list(dict.fromkeys([
                 row.get("subjek", ""),
                 row.get("kategori_subjek", ""),
             ])),
@@ -359,11 +364,18 @@ def _load_variable_index() -> dict:
         year = row.get("tahun", "")
         if year.isdigit() and year not in variable["years"]:
             variable["years"].append(year)
+        if year.isdigit() and row.get("status_tarik"):
+            variable["_status_by_year"][year] = row.get("status_tarik")
     variables = list(variables_by_id.values())
     for variable in variables:
         variable["years"].sort(key=int, reverse=True)
         variable["latest_year"] = variable["years"][0] if variable["years"] else None
         variable["year_count"] = len(variable["years"])
+        variable["status_tarik"] = variable["_status_by_year"].get(
+            variable["latest_year"],
+            "belum_diaudit",
+        )
+        variable.pop("_status_by_year", None)
     return {
         "variables": sorted(
             variables,
@@ -410,6 +422,10 @@ def _combine_variable_indexes(remote: dict, catalog: dict) -> dict:
                 variable[key] = value
         variable["aliases"] = list(dict.fromkeys(
             list(variable.get("aliases") or []) + list(catalog_variable.get("aliases") or [])
+        ))
+        variable["context_aliases"] = list(dict.fromkeys(
+            list(variable.get("context_aliases") or [])
+            + list(catalog_variable.get("context_aliases") or [])
         ))
 
     subjects_by_id = {
@@ -485,6 +501,82 @@ def catalog_variable_matches(question: str) -> bool:
         for index, variable in enumerate(catalog["variables"])
     ]
     return bool(_rank_local_variables(keyword, variables))
+
+
+def cari_tabel_katalog(
+    kata_kunci: str,
+    tahun_diminta: Optional[str] = None,
+    jumlah: int = 10,
+) -> dict:
+    """Search all catalog table types without fetching values."""
+    keyword = _clean_search_keyword(kata_kunci or "")
+    if not keyword:
+        return {"hasil": [], "kata_inti": [], "status_hasil": "kosong"}
+    try:
+        rows = _catalog_rows()
+        search = bps_csv_search.Pencari(rows, corpus_rows=rows).cari(
+            keyword,
+            tahun_diminta=tahun_diminta,
+            top=max(1, min(int(jumlah or 10), 25)),
+        )
+    except BpsError as exc:
+        return {"error": str(exc), "status_hasil": "gagal_teknis"}
+    except (KeyError, TypeError, ValueError):
+        logger.exception("Pencarian katalog BPS gagal memproses struktur katalog.")
+        return {"error": "Format katalog BPS tidak dikenali.", "status_hasil": "gagal_teknis"}
+
+    results = []
+    current_year = datetime.now(WIB).year
+    for match in search["hasil"]:
+        source_rows = match.get("rows") or []
+        if not source_rows:
+            continue
+        years = sorted(
+            {str(row.get("tahun") or "") for row in source_rows if str(row.get("tahun") or "").isdigit()},
+            key=int,
+        )
+        selected_year = str(tahun_diminta or "")
+        if selected_year not in years:
+            available_years = [year for year in years if int(year) <= current_year] or years
+            selected_year = available_years[-1] if available_years else ""
+        selected_row = next(
+            (row for row in source_rows if str(row.get("tahun") or "") == selected_year),
+            source_rows[-1],
+        )
+        results.append({
+            "id_tabel": match["id"],
+            "judul": match["judul"],
+            "jenis_tabel": match.get("jenis", ""),
+            "subjek": match.get("subjek", ""),
+            "tahun_tersedia": years,
+            "tahun_terpilih": selected_year or None,
+            "status_tarik": selected_row.get("status_tarik") or "belum_diaudit",
+            "status_detail": selected_row.get("status_detail") or "",
+            "link_json": selected_row.get("link_json") or "",
+            "link_tabel": next(
+                (
+                    selected_row.get(field)
+                    for field in ("link_tabel", "url_tabel", "url", "tautan")
+                    if selected_row.get(field)
+                ),
+                "",
+            ),
+            "skor": match["skor"],
+            "skor_kemiripan": match["skor_kemiripan"],
+            "kata_inti_cocok": match["kata_inti_cocok"],
+            "sinonim_digunakan": match["sinonim_digunakan"],
+            "jenis_kecocokan": match["jenis_kecocokan"],
+        })
+    return {
+        "kata_inti": search["kata_inti"],
+        "hasil": results,
+        "kandidat_terdekat": search["saran"],
+        "status_hasil": "ditemukan" if results else "kosong",
+    }
+
+
+def catalog_table_matches(question: str) -> bool:
+    return bool(cari_tabel_katalog(question, jumlah=1).get("hasil"))
 
 
 def cari_variabel(
@@ -569,6 +661,9 @@ def cari_variabel(
             "alias": variable.get("aliases") or [],
             "skor_kemiripan": variable.get("similarity_score"),
             "jenis_kecocokan": variable.get("match_type"),
+            "kata_inti_cocok": variable.get("core_terms") or [],
+            "sinonim_digunakan": variable.get("synonyms_used") or {},
+            "status_tarik": variable.get("status_tarik") or "belum_diaudit",
         })
     newest = max((int(item["tahun_terbaru"]) for item in hasil if item["tahun_terbaru"]), default=0)
     for item in hasil:
@@ -654,6 +749,7 @@ def _simdasi_tables() -> list[dict]:
             "bab": row.get("kategori_subjek", ""),
             "ketersediaan_tahun": [],
             "baris_tahun": {},
+            "status_tarik": row.get("status_tarik", ""),
         })
         year = row.get("tahun", "")
         if year.isdigit():
@@ -723,6 +819,7 @@ def simdasi_cari_data(
     kata_kunci: str,
     tahun: Optional[str] = None,
     wilayah: Optional[str] = None,
+    id_tabel: Optional[str] = None,
 ) -> dict:
     """Mencari judul dan mengambil data tabel SIMDASI Sumatera Selatan.
 
@@ -755,31 +852,56 @@ def simdasi_cari_data(
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
 
-    ranked = []
-    for table in tables:
-        searchable = " ".join(
-            str(table.get(field) or "")
-            for field in ("judul", "subject", "bab", "mms_subject")
-        )
-        tokens = set(re.findall(r"[a-z0-9]+", searchable.casefold()))
-        score = sum(_token_match_score(term, tokens) for term in terms)
-        if score > 0:
-            ranked.append((score, table))
-    ranked.sort(key=lambda item: (item[0], str(item[1].get("judul", "")).casefold()), reverse=True)
+    if id_tabel:
+        ranked = [
+            (100.0, table)
+            for table in tables
+            if str(table.get("id_tabel")) == str(id_tabel)
+        ]
+    else:
+        search_rows = [
+            {
+                "id_tabel": table["id_tabel"],
+                "judul": table["judul"],
+                "subjek": " ".join((table.get("subject", ""), table.get("bab", ""))),
+                "jenis_tabel": "SIMDASI",
+                "tahun": table.get("ketersediaan_tahun", []),
+                "status_tarik": table.get("status_tarik", ""),
+            }
+            for table in tables
+        ]
+        search = bps_csv_search.Pencari(
+            search_rows,
+            corpus_rows=_catalog_rows(),
+        ).cari(keyword, tahun_diminta=tahun, top=5)
+        table_by_id = {str(table["id_tabel"]): table for table in tables}
+        ranked = [
+            (match["skor"], table_by_id[match["id"]])
+            for match in search["hasil"]
+            if match["id"] in table_by_id
+        ]
     if not ranked:
         return {
             "judul": "Tabel SIMDASI",
             "hasil": [],
             "status_hasil": "kosong",
         }
-    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+    if (
+        not id_tabel
+        and len(ranked) > 1
+        and abs(float(ranked[0][0]) - float(ranked[1][0])) <= 4
+    ):
         return {
             "judul": "Kandidat tabel SIMDASI",
             "kandidat": [
-                {"judul": table.get("judul"), "tahun_tersedia": table.get("ketersediaan_tahun") or []}
-                for _, table in ranked[:5]
+                {
+                    "id_tabel": table.get("id_tabel"),
+                    "judul": table.get("judul"),
+                    "tahun_tersedia": table.get("ketersediaan_tahun") or [],
+                }
+                for _, table in ranked[:3]
             ],
-            "status_hasil": "kosong",
+            "status_hasil": "kandidat_mirip",
         }
 
     table = ranked[0][1]
@@ -812,7 +934,31 @@ def simdasi_cari_data(
             "tahun_diminta_tidak_tersedia": requested_year,
             "status_hasil": "kosong",
         }
-    selected_year = requested_year if requested_year is not None else available_years[-1]
+    if requested_year is not None:
+        selected_year = requested_year
+    else:
+        status_by_year = {
+            year: str(table["baris_tahun"].get(str(year), {}).get("status_tarik") or "").casefold()
+            for year in available_years
+        }
+        usable_years = [
+            year for year in available_years
+            if status_by_year[year] not in {"gagal", "kosong"}
+        ]
+        if not usable_years:
+            return {
+                "judul": table.get("judul"),
+                "status_tarik": "gagal",
+                "status_hasil": "gagal_teknis",
+                "error": "Semua tahun yang tersedia ditandai gagal atau kosong pada audit WebAPI.",
+            }
+        selected_year = max(
+            usable_years,
+            key=lambda year: (
+                status_by_year[year] == "ok",
+                year,
+            ),
+        )
 
     try:
         selected_row = table["baris_tahun"].get(str(selected_year))
@@ -823,6 +969,15 @@ def simdasi_cari_data(
                 "tahun_diminta_tidak_tersedia": requested_year,
                 "status_hasil": "kosong",
             }
+        audit_status = str(selected_row.get("status_tarik") or "").casefold()
+        if audit_status in {"gagal", "kosong"}:
+            return {
+                "judul": table.get("judul"),
+                "tahun": selected_year,
+                "status_tarik": audit_status,
+                "status_hasil": "gagal_teknis" if audit_status == "gagal" else "kosong",
+                "error": str(selected_row.get("status_detail") or "Tautan ini gagal atau kosong pada audit terakhir."),
+            }
         detail = _fetch_catalog_row(selected_row)
     except BpsError as exc:
         return {"error": str(exc), "status_hasil": "gagal_teknis"}
@@ -830,12 +985,30 @@ def simdasi_cari_data(
     data = detail.get("data")
     table_data = data[1] if isinstance(data, list) and len(data) > 1 else None
     if not isinstance(table_data, dict):
-        return {"judul": table.get("judul"), "hasil": [], "status_hasil": "kosong"}
+        logger.warning(
+            "SIMDASI response structure is not recognized for table %s year %s.",
+            table.get("id_tabel"),
+            selected_year,
+        )
+        return {
+            "judul": table.get("judul"),
+            "error": "Struktur respons SIMDASI tidak dikenali; nilai tidak dapat dipastikan.",
+            "status_hasil": "gagal_teknis",
+        }
 
     columns = table_data.get("kolom")
     rows = table_data.get("data")
     if not isinstance(columns, dict) or not isinstance(rows, list):
-        return {"judul": table.get("judul"), "hasil": [], "status_hasil": "kosong"}
+        logger.warning(
+            "SIMDASI response fields are not recognized for table %s year %s.",
+            table.get("id_tabel"),
+            selected_year,
+        )
+        return {
+            "judul": table.get("judul"),
+            "error": "Kolom atau baris pada respons SIMDASI tidak dikenali.",
+            "status_hasil": "gagal_teknis",
+        }
 
     generic_terms = _SEARCH_FILLER_WORDS | {
         "tingkat", "rasio", "persentase", "persen", "indikator", "variabel", "statistik",
@@ -855,7 +1028,15 @@ def simdasi_cari_data(
         if month_terms and not any(_token_match_score(month, column_tokens) > 0 for month in month_terms):
             continue
         if not indicator_terms or any(_token_match_score(term, column_tokens) > 0 for term in indicator_terms):
-            matching_columns[str(column_id)] = name
+            matching_columns[str(column_id)] = {
+                "name": name,
+                "unit": str(
+                    column.get("satuan")
+                    or column.get("satuan_data")
+                    or column.get("unit")
+                    or ""
+                ).strip(),
+            }
     if not matching_columns:
         return {
             "judul": table_data.get("judul_tabel") or table.get("judul"),
@@ -892,18 +1073,38 @@ def simdasi_cari_data(
     for row in rows[:150]:
         if not isinstance(row, dict):
             continue
-        for column_id, name in matching_columns.items():
+        for column_id, column_info in matching_columns.items():
             cell = row.get("variables", {}).get(column_id)
             value = cell.get("value") if isinstance(cell, dict) else cell
-            if value is None or str(value).strip() in {"", "...", "NA"}:
+            if value is None or str(value).strip().casefold() in {
+                "", "...", "..", "na", "n/a", "n.a.", "-", "—", "�",
+            }:
                 continue
             results.append({
                 "wilayah": row.get("label"),
-                "variabel": name,
+                "variabel": column_info["name"],
                 "nilai": value,
+                **({"satuan": column_info["unit"]} if column_info["unit"] else {}),
             })
 
     if not results:
+        if requested_year is None:
+            older_years = [
+                year for year in available_years
+                if year < selected_year
+                and str(table["baris_tahun"].get(str(year), {}).get("status_tarik") or "").casefold()
+                not in {"gagal", "kosong"}
+            ]
+            if older_years:
+                fallback = simdasi_cari_data(
+                    kata_kunci,
+                    tahun=str(max(older_years)),
+                    wilayah=wilayah,
+                    id_tabel=str(table["id_tabel"]),
+                )
+                if fallback.get("status_hasil") == "ditemukan":
+                    fallback["tahun_terbaru_kosong"] = selected_year
+                    return fallback
         return {
             "judul": table_data.get("judul_tabel") or table.get("judul"),
             "wilayah_ditafsirkan": resolved_region,
@@ -919,6 +1120,13 @@ def simdasi_cari_data(
         "subjek": table_data.get("subject") or table.get("subject"),
         "wilayah_ditafsirkan": resolved_region or "Provinsi Sumatera Selatan",
         "jumlah_baris": len(results),
+        "satuan": next(
+            (
+                row["satuan"] for row in results
+                if row.get("satuan")
+            ),
+            None,
+        ),
         "terpotong": len(rows) > 150,
         "data": results,
         "status_hasil": "ditemukan",
@@ -1703,8 +1911,9 @@ def _static_table_rows(keyword: str, domain: str) -> list[dict]:
             "domain": domain,
             "jenis_tabel": "Tabel Statis",
             "years": set(),
-            "aliases": list(dict.fromkeys([
-                *_variable_aliases(title),
+            "status_by_year": {},
+            "aliases": _variable_aliases(title),
+            "context_aliases": list(dict.fromkeys([
                 row.get("subjek", ""),
                 row.get("kategori_subjek", ""),
             ])),
@@ -1713,6 +1922,19 @@ def _static_table_rows(keyword: str, domain: str) -> list[dict]:
         year = str(row.get("tahun") or "").strip()
         if year:
             table["years"].add(year[:4])
+            if row.get("status_tarik"):
+                table["status_by_year"][year[:4]] = row["status_tarik"]
+            if not table.get("catalog_row") or row.get("status_tarik") == "ok":
+                table["catalog_row"] = row
+    current_year = datetime.now(WIB).year
+    for table in tables.values():
+        available_years = sorted(table["years"], key=int)
+        relevant_years = [year for year in available_years if int(year) <= current_year] or available_years
+        table["status_tarik"] = table["status_by_year"].get(
+            relevant_years[-1] if relevant_years else "",
+            "belum_diaudit",
+        )
+        table.pop("status_by_year", None)
     return list(tables.values())
 
 
@@ -1828,13 +2050,11 @@ def _static_region_key(value: str) -> str:
 
 
 def _static_table_fallback_text(table_html: str) -> str:
-    text = html.unescape(table_html)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[:1500] + (" ..." if len(text) > 1500 else "")
+    del table_html
+    return "Isi tabel tidak dapat dibaca dengan aman dari format respons yang diterima."
 
 
-def _static_table_markdown(frame: pd.DataFrame) -> str:
+def _static_table_plain_text(frame: pd.DataFrame) -> str:
     display = frame.copy()
     for column in display.columns:
         if _YEAR_PATTERN.fullmatch(str(column).strip()):
@@ -1853,7 +2073,17 @@ def _static_table_markdown(frame: pd.DataFrame) -> str:
             return formatted.replace(",", "_").replace(".", ",").replace("_", ".")
 
         display[column] = display[column].map(format_number)
-    return display.to_markdown(index=False, disable_numparse=True)
+    headers = [str(column).strip() or "Nilai" for column in display.columns]
+    lines = []
+    for values in display.itertuples(index=False, name=None):
+        fields = [
+            f"{header}: {str(value).strip()}"
+            for header, value in zip(headers, values)
+            if str(value).strip() not in {"", "nan", "None"}
+        ]
+        if fields:
+            lines.append("- " + "; ".join(fields))
+    return "\n".join(lines)
 
 
 def tabel_statis_ke_teks(
@@ -1861,7 +2091,7 @@ def tabel_statis_ke_teks(
     wilayah: Optional[str | list[str]] = None,
     maks_baris: int = 25,
 ) -> str:
-    """Convert BPS static-table HTML into bounded Markdown, with safe text fallback."""
+    """Convert BPS static-table HTML into concise plain text."""
     frame, info = _static_table_dataframe(table_html, wilayah)
     if frame is None:
         return _static_table_fallback_text(table_html)
@@ -1869,7 +2099,7 @@ def tabel_statis_ke_teks(
         return f"Tidak ada baris tabel untuk wilayah {wilayah}."
     if frame.empty:
         return "Tabel statis tidak memuat baris data."
-    return _static_table_markdown(frame.head(max(1, maks_baris)))
+    return _static_table_plain_text(frame.head(max(1, maks_baris)))
 
 
 def _static_table_text(
@@ -1890,7 +2120,7 @@ def _static_table_text(
         return "Tabel statis tidak memuat baris data.", info
     info["baris_ditampilkan"] = min(len(frame), 25)
     info["terpotong"] = len(frame) > 25
-    return _static_table_markdown(frame.head(25)), info
+    return _static_table_plain_text(frame.head(25)), info
 
 
 def _static_excel_link(payload: dict) -> Optional[str]:
@@ -1943,7 +2173,20 @@ def tabel_statis(
             static_rows,
             tahun_diminta=tahun_diminta,
         )
+        ranked.sort(
+            key=lambda table: (
+                {"ok": 2, "belum_diaudit": 1, "kosong": 0, "gagal": 0}.get(
+                    str(table.get("status_tarik") or "").casefold(),
+                    1,
+                ),
+                int(table.get("similarity_score") or 0),
+                int(table.get("latest_year") or 0),
+            ),
+            reverse=True,
+        )
         for table in ranked[:count]:
+            if str(table.get("status_tarik") or "").casefold() in {"gagal", "kosong"}:
+                continue
             payload = _fetch_catalog_row(table["catalog_row"])
             text, table_info = _static_table_text(
                 payload,

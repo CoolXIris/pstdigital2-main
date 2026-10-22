@@ -291,6 +291,44 @@ class BpsDataStoreTests(unittest.TestCase):
         self.assertEqual(result["data"], [{"source": "stored"}])
         self.assertIn("mungkin bukan yang terbaru", result["_catatan"])
 
+    def test_fetch_failure_is_logged_without_secrets_and_retried_after_cooldown(self):
+        connection = bps_data_store.init_db()
+        row = {
+            "id_tabel": "failure-table",
+            "jenis_tabel": "SIMDASI",
+            "tahun": "2025",
+            "judul": "Tabel contoh",
+            "link_json": "https://webapi.bps.go.id/v1/api/test/key/",
+        }
+        calls = []
+        with patch.dict(os.environ, {"BPS_API_KEY": "test-secret"}):
+            with self.assertRaises(RuntimeError):
+                bps_data_store.ambil_data(
+                    connection,
+                    row,
+                    lambda: calls.append("first") or (_ for _ in ()).throw(
+                        RuntimeError("request failed test-secret https://example.test/key")
+                    ),
+                    RuntimeError,
+                )
+            with self.assertRaisesRegex(RuntimeError, "ditunda selama enam jam"):
+                bps_data_store.ambil_data(
+                    connection,
+                    row,
+                    lambda: calls.append("retry") or {"status": "OK"},
+                    RuntimeError,
+                )
+            failure = connection.execute(
+                "SELECT pesan FROM log_gagal WHERE id_tabel=? AND tahun=?",
+                ("failure-table", "2025"),
+            ).fetchone()
+        connection.close()
+
+        self.assertEqual(calls, ["first"])
+        self.assertIsNotNone(failure)
+        self.assertNotIn("test-secret", failure["pesan"])
+        self.assertNotIn("https://", failure["pesan"])
+
     def test_ttl_uses_seven_ninety_and_thirty_days(self):
         self.assertEqual(bps_data_store.ttl_detik("Tabel Statis", ""), 30 * 86400)
         self.assertEqual(bps_data_store.ttl_detik("Tabel Dinamis", "2026", 2026), 7 * 86400)

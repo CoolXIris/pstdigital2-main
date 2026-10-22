@@ -120,6 +120,58 @@ class BpsToolsTests(unittest.TestCase):
         }])
         fetch.assert_called_once_with(catalog_rows[1])
 
+    def test_simdasi_latest_placeholder_falls_back_to_latest_year_with_real_values(self):
+        catalog_rows = [
+            {
+                "id_tabel": "disaster-id",
+                "judul": "Jumlah Korban yang Diakibatkan Bencana Alam",
+                "jenis_tabel": "SIMDASI",
+                "subjek": "Lingkungan",
+                "kategori_subjek": "Bencana",
+                "tahun": str(year),
+                "link_json": (
+                    "https://webapi.bps.go.id/v1/api/interoperabilitas/datasource/"
+                    f"simdasi/id/25/wilayah/1600000/tahun/{year}/id_tabel/disaster-id/key/"
+                ),
+            }
+            for year in (2024, 2025)
+        ]
+
+        def fetch(row):
+            value = "�" if row["tahun"] == "2025" else "12"
+            return {
+                "data": [{
+                    "page": 1,
+                    "pages": 1,
+                }, {
+                    "judul_tabel": f"Jumlah Korban Bencana Alam, {row['tahun']}",
+                    "tahun_data": int(row["tahun"]),
+                    "kolom": {
+                        "korban": {
+                            "nama_variabel": "Jumlah Korban",
+                            "satuan": "Orang",
+                        },
+                    },
+                    "data": [{
+                        "label": "Sumatera Selatan",
+                        "kode_wilayah": "1600000",
+                        "variables": {"korban": {"value": value}},
+                    }],
+                }],
+            }
+
+        with (
+            patch.object(bps_tools, "_catalog_rows", return_value=catalog_rows),
+            patch.object(bps_tools, "_fetch_catalog_row", side_effect=fetch) as api_fetch,
+        ):
+            result = bps_tools.simdasi_cari_data("korban bencana alam")
+
+        self.assertEqual(result["status_hasil"], "ditemukan")
+        self.assertEqual(result["tahun"], 2024)
+        self.assertEqual(result["data"][0]["nilai"], "12")
+        self.assertEqual(result["data"][0]["satuan"], "Orang")
+        self.assertEqual(api_fetch.call_count, 2)
+
     def test_variable_search_strips_region_and_uses_synonym_fallback(self):
         with (
             patch.object(
@@ -752,6 +804,81 @@ class BpsToolsTests(unittest.TestCase):
         self.assertLessEqual(len(result["saran"]), 3)
         self.assertTrue(result["saran"])
 
+    def test_csv_catalog_search_handles_stems_acronyms_partial_terms_and_audit_status(self):
+        rows = [
+            {
+                "id_tabel": "disaster",
+                "judul": "Jumlah Korban yang Diakibatkan Bencana Alam Menurut Kabupaten/Kota",
+                "subjek": "Lingkungan",
+                "jenis_tabel": "SIMDASI",
+                "tahun": "2025",
+                "status_tarik": "ok",
+            },
+            {
+                "id_tabel": "post-office",
+                "judul": "Jumlah Desa/Kelurahan yang Memiliki Kantor Pos Menurut Kabupaten/Kota",
+                "subjek": "Masyarakat Informasi",
+                "jenis_tabel": "SIMDASI",
+                "tahun": "2025",
+            },
+            {
+                "id_tabel": "pns-education",
+                "judul": "Jumlah PNS Menurut Pendidikan Tertinggi",
+                "subjek": "Kepegawaian",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+                "status_tarik": "ok",
+            },
+            {
+                "id_tabel": "pns-rank",
+                "judul": "Jumlah PNS Menurut Golongan Kepangkatan",
+                "subjek": "Kepegawaian",
+                "jenis_tabel": "Tabel Dinamis",
+                "tahun": "2025",
+                "status_tarik": "gagal",
+            },
+            {
+                "id_tabel": "library",
+                "judul": "Jumlah Perpustakaan Terakreditasi Menurut Kabupaten/Kota",
+                "subjek": "Pendidikan",
+                "jenis_tabel": "SIMDASI",
+                "tahun": "2025",
+            },
+            {
+                "id_tabel": "librarian",
+                "judul": "Jumlah Pejabat Fungsional Pustakawan dan Asisten Perpustakaan",
+                "subjek": "Pendidikan",
+                "jenis_tabel": "SIMDASI",
+                "tahun": "2025",
+            },
+        ]
+        with patch.object(bps_tools, "_catalog_rows", return_value=rows):
+            disaster = bps_tools.cari_tabel_katalog(
+                "Jumlah Korban yang Diakibatkan Bencana Alam di Sumsel terbaru"
+            )
+            postal = bps_tools.cari_tabel_katalog(
+                "jumlah desa yang memiliki kantor pos di Muara Enim"
+            )
+            pns = bps_tools.cari_tabel_katalog(
+                "berapa jumlah PNS (pegawai negeri sipil)"
+            )
+            libraries = bps_tools.cari_tabel_katalog("total perpustakaan di Palembang")
+            unrelated = bps_tools.cari_tabel_katalog("harga mobil listrik di Lahat")
+
+        self.assertEqual(disaster["hasil"][0]["id_tabel"], "disaster")
+        self.assertEqual(postal["hasil"][0]["id_tabel"], "post-office")
+        self.assertEqual(pns["hasil"][0]["id_tabel"], "pns-education")
+        self.assertEqual(
+            {item["id_tabel"] for item in pns["hasil"]},
+            {"pns-education", "pns-rank"},
+        )
+        self.assertEqual(libraries["hasil"][0]["id_tabel"], "library")
+        self.assertEqual(libraries["hasil"][0]["jenis_kecocokan"], "direct")
+        self.assertEqual(unrelated["hasil"], [])
+        self.assertEqual(bps_csv_search.stem("diakibatkan"), "akibat")
+        self.assertEqual(bps_csv_search.stem("perpustakaan"), "pustaka")
+        self.assertEqual(bps_csv_search.stem("memiliki"), "milik")
+
     def test_static_table_parser_deduplicates_filters_year_and_bounds_rows(self):
         rows = "".join(
             f"<tr><td>Kabupaten Lahat</td><td>{index}</td><td>{index}</td>"
@@ -782,6 +909,7 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(list(latest_frame.columns), ["Wilayah", "2025"])
         rendered = bps_tools.tabel_statis_ke_teks(table_html, wilayah="Lahat")
         self.assertLessEqual(rendered.count("\n"), 26)
+        self.assertNotIn("|", rendered)
 
 
 if __name__ == "__main__":

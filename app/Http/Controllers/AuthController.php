@@ -32,11 +32,12 @@ class AuthController extends Controller
         return Socialite::driver('google')
             ->scopes([
                 'https://www.googleapis.com/auth/calendar',
+                'https://www.googleapis.com/auth/drive.file',
                 // 'https://www.googleapis.com/auth/meetings',
             ])
             ->with([
                 'access_type' => 'offline', // Minta refresh_token
-                // 'include_granted_scopes' => 'true', // Ini akan di-set melalui custom provider
+                'include_granted_scopes' => 'true',
             ])->redirect();
     }
 

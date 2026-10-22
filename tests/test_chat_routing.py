@@ -36,6 +36,9 @@ class ChatRoutingTests(unittest.TestCase):
             ("RLS Sumatera Selatan", "nilai"),
             ("perkawinan di Sumsel 2026?", "nilai"),
             ("harga mobil listrik di Lahat", "nilai"),
+            ("berapa jumlah PNS (pegawai negeri sipil)", "nilai"),
+            ("perpustakaan di Palembang", "nilai"),
+            ("apa itu PNS?", "definisi"),
             ("Jelaskan IPM tahun 2025", "nilai"),
             ("Apa itu IPM di Palembang?", "nilai"),
             ("cara membaca inflasi", "definisi"),
@@ -58,6 +61,16 @@ class ChatRoutingTests(unittest.TestCase):
                 [],
             )
         search.assert_not_called()
+
+    def test_markdown_table_output_is_converted_to_plain_bullets(self):
+        rendered = main._plain_text_markdown_tables(
+            "Data terbaru:\n| Wilayah | Tahun | Jumlah |\n|---|---:|---:|\n"
+            "| Palembang | 2025 | 20 |\n| Muara Enim | 2025 | 25 |"
+        )
+
+        self.assertIn("- Wilayah: Palembang; Tahun: 2025; Jumlah: 20", rendered)
+        self.assertIn("- Wilayah: Muara Enim; Tahun: 2025; Jumlah: 25", rendered)
+        self.assertNotIn("|", rendered)
 
     def test_multi_topic_parser_keeps_ambiguous_topics_and_alternatives(self):
         candidates = {
@@ -2472,6 +2485,9 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("Jika status_hasil='gagal_teknis'", instructions)
         self.assertIn("jangan menyatakan data tidak ada di BPS", instructions)
         self.assertIn("Jangan menolak pertanyaan statistik umum", instructions)
+        self.assertIn("Jangan membuat tabel", instructions)
+        self.assertIn("daftar berpoin", instructions)
+        self.assertIn("mudah dipahami orang awam", instructions)
 
     def test_tool_logs_redact_api_keys(self):
         with (

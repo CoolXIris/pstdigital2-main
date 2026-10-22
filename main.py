@@ -19,6 +19,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import bps_tools
+import bps_csv_search
 
 load_dotenv()
 
@@ -53,9 +54,10 @@ _rate_lock = threading.Lock()
 MAX_CHATS_PER_MINUTE = int(os.getenv("GEMINI_MAX_CHATS_PER_MINUTE", "4"))
 
 DATA_QUESTION = re.compile(
-    r"\b(berapa|persen\w*|jumlah|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|tpt|"
+    r"\b(berapa|persen\w*|jumlah|total|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|tpt|"
     r"\w*miskin\w*|penduduk|warga|jiwa|populasi|pdrb|ekspor|impor|upah|harga|penganggur\w*|"
     r"ntp|terbaru|produksi|kasus|penyakit|penderita|gaji|penghasilan|pendapatan|minimum|ump|umk|umr|padi|beras|"
+    r"korban|bencana|desa|kantor|pos|perpustakaan|pns|asn|pegawai|"
     r"luas|panen|pertanian|perkebunan|perikanan|konsumsi|rls|hls|rata-rata\s+lama\s+sekolah|"
     r"harapan\s+lama\s+sekolah)\b",
     re.IGNORECASE,
@@ -173,6 +175,11 @@ def build_instructions() -> str:
     return (
         f"Kamu adalah asisten chatbot resmi BPS Provinsi Sumatera Selatan. Tanggal hari ini: {today} (WIB). "
         "Jawab dalam Bahasa Indonesia yang jelas, sopan, ringkas, dan profesional; jangan memperkenalkan diri berulang.\n\n"
+        "FORMAT JAWABAN:\n"
+        "Gunakan paragraf dan kalimat yang mudah dipahami orang awam. Jangan membuat tabel. "
+        "Jawab dengan kalimat atau daftar berpoin; jangan gunakan format tabel Markdown. "
+        "Sajikan perbandingan atau beberapa angka sebagai kalimat singkat dengan nama indikator, wilayah, periode, dan satuan yang jelas. "
+        "Gunakan daftar singkat hanya jika membantu pembaca.\n\n"
         "ATURAN DATA:\n"
         "1. Semua angka statistik WAJIB berasal dari sumber terverifikasi. Jangan menjawab angka dari ingatan. "
         "Jika referensi file pengetahuan yang relevan menjadi sumber utama, angka hanya boleh dikutip jika "
@@ -1101,7 +1108,11 @@ def _classify_question_intent(question: str) -> str:
             or resolved_region is not None
         )
         return "nilai"
-    if DATA_QUESTION.search(text) or bps_tools.catalog_variable_matches(text):
+    if (
+        DATA_QUESTION.search(text)
+        or bps_tools.catalog_variable_matches(text)
+        or bps_tools.catalog_table_matches(text)
+    ):
         return "nilai"
     return "umum"
 
@@ -1161,6 +1172,7 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
 
     region, _ = bps_tools.resolve_region_from_text(question)
     original_text = question.lower()
+    keyword_source = question
     if re.search(
         r"\b(guru|murid|siswa|tenaga pendidik|tenaga pengajar)\b",
         original_text,
@@ -1171,6 +1183,7 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
             " ",
             original_text,
         )
+        keyword_source = original_text
     all_regions = re.search(
         r"\b(?:(?:menurut|per|tiap|seluruh)\s+)?"
         r"(?:kab(?:upaten)?\s*/?\s*kota|kabupaten dan kota)\b",
@@ -1178,7 +1191,7 @@ def _dynamic_variable_intent(question: str) -> tuple[str, str, Optional[str]] | 
     ) is not None
     year_match = re.search(r"\b(20\d{2})\b", original_text)
     year = year_match.group(1) if year_match else ""
-    keyword = bps_tools._clean_search_keyword(original_text)
+    keyword = bps_tools._clean_search_keyword(keyword_source)
     for measure in ("jumlah", "total", "persentase", "persen", "tingkat", "rasio"):
         if re.search(rf"\b{measure}\b", original_text) and measure not in keyword.split():
             keyword = f"{measure} {keyword}"
@@ -1285,16 +1298,7 @@ def _followup_data_intent(
 
 
 def _stem_indonesian(word: str) -> str:
-    stem = word
-    for prefix in ("meng", "meny", "mem", "men", "peng", "peny", "pem", "pen", "per", "ber", "ter", "ke", "se", "pe", "me"):
-        if stem.startswith(prefix) and len(stem) - len(prefix) >= 4:
-            stem = stem[len(prefix):]
-            break
-    for suffix in ("kan", "nya", "an", "i"):
-        if stem.endswith(suffix) and len(stem) - len(suffix) >= 4:
-            stem = stem[:-len(suffix)]
-            break
-    return stem
+    return bps_csv_search.stem(word)
 
 
 def _rank_variable_candidate_options(
@@ -1323,7 +1327,7 @@ def _rank_variable_candidate_options(
         terms.extend(("jenis", "kelamin"))
     if not terms:
         return []
-    ranked: list[tuple[int, int, int, int, int, int, dict]] = []
+    ranked: list[tuple[int, int, int, int, int, int, int, dict]] = []
     regional_question = region is None or region != "Provinsi Sumatera Selatan"
     requests_detail = re.search(
         r"\b(menurut|berdasarkan|jenis kelamin|gender|laki-laki|perempuan|kelompok|golongan)\b",
@@ -1423,6 +1427,12 @@ def _rank_variable_candidate_options(
                 if detailed_variant or methodology_mismatch or dimension_mismatch
                 else 0
             )
+            audit_score = {
+                "ok": 2,
+                "belum_diaudit": 1,
+                "kosong": 0,
+                "gagal": 0,
+            }.get(str(candidate.get("status_tarik") or "").casefold(), 1)
             latest_year = int(candidate.get("tahun_terbaru") or 0)
             ranked.append((
                 similarity_score,
@@ -1430,6 +1440,7 @@ def _rank_variable_candidate_options(
                 variant_score,
                 specificity_score,
                 level_score,
+                audit_score,
                 latest_year,
                 candidate,
             ))
@@ -1437,8 +1448,8 @@ def _rank_variable_candidate_options(
         return []
 
     ranked.sort(key=lambda item: item[:5], reverse=True)
-    top_score = ranked[0][:5]
-    top_candidates = [item[6] for item in ranked if item[:5] == top_score]
+    top_score = ranked[0][:6]
+    top_candidates = [item[7] for item in ranked if item[:6] == top_score]
     if prefer_latest and len(top_candidates) > 1:
         latest_year = max(int(candidate.get("tahun_terbaru") or 0) for candidate in top_candidates)
         latest_candidates = [
@@ -1451,13 +1462,14 @@ def _rank_variable_candidate_options(
     if len(terms) >= 2 and len(top_candidates) == 1:
         top_similarity = int(top_candidates[0].get("skor_kemiripan") or 0)
         close_candidates = [
-            item[6]
+            item[7]
             for item in ranked
             if item[1] == ranked[0][1]
             and item[2] == ranked[0][2]
             and item[3] == ranked[0][3]
             and item[4] == ranked[0][4]
-            and 0 <= top_similarity - int(item[6].get("skor_kemiripan") or 0) <= 3
+            and item[5] == ranked[0][5]
+            and 0 <= top_similarity - int(item[7].get("skor_kemiripan") or 0) <= 3
         ]
         if len(close_candidates) > 1:
             return close_candidates[:3]
@@ -1645,7 +1657,9 @@ def _format_simdasi_fallback(
             continue
         scope = str(row.get("wilayah") or wilayah or "Sumatera Selatan")
         variable = str(row.get("variabel") or data.get("judul") or "Indikator BPS")
-        lines.append(f"{scope} — {variable}: {row['nilai']}")
+        unit = str(row.get("satuan") or data.get("satuan") or "").strip()
+        unit_text = unit or "satuan tidak dicantumkan pada tabel"
+        lines.append(f"- {scope}: {variable} sebesar {row['nilai']} {unit_text}.")
     if not lines:
         return "Tabel SIMDASI ditemukan, tetapi tidak memuat nilai untuk wilayah dan indikator yang diminta."
 
@@ -1657,9 +1671,82 @@ def _format_simdasi_fallback(
     )
     title = str(data.get("judul") or "Data BPS")
     return (
-        f"{year_notice}{title} tahun {actual_year} (sumber: SIMDASI BPS):\n"
+        f"{year_notice}{title} tahun {actual_year} (sumber: BPS Provinsi Sumatera Selatan melalui SIMDASI):\n"
         + "\n".join(lines)
     )
+
+
+def _format_catalog_choices(candidates: list[dict]) -> str:
+    lines = ["Saya menemukan beberapa judul tabel yang mungkin sesuai:"]
+    for index, candidate in enumerate(candidates[:3], start=1):
+        title = str(candidate.get("judul") or "Tabel BPS")
+        years = candidate.get("tahun_tersedia") or []
+        latest = max((int(value) for value in years if str(value).isdigit()), default=0)
+        year_text = f" (tahun terbaru tersedia: {latest})" if latest else ""
+        lines.append(f"{index}. {title}{year_text}.")
+    lines.append("Silakan pilih judul atau rincian yang Anda maksud.")
+    return "\n".join(lines)
+
+
+def _format_catalog_failure(candidate: dict) -> str:
+    title = str(candidate.get("judul") or "Tabel BPS")
+    link = next(
+        (
+            str(candidate.get(field)).strip()
+            for field in ("link_tabel", "url_tabel", "url", "tautan")
+            if str(candidate.get(field) or "").startswith("https://sumsel.bps.go.id/")
+        ),
+        "",
+    )
+    message = (
+        f"Data untuk tabel “{title}” tercantum di katalog BPS, tetapi saat ini "
+        "tidak dapat diambil melalui API. Saya tidak akan menebak nilainya."
+    )
+    return f"{message}\nTautan: {link}" if link else message
+
+
+def _plain_text_markdown_tables(text: str) -> str:
+    lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip().startswith("|") or "|" not in line.strip()[1:]:
+            output.append(line)
+            index += 1
+            continue
+
+        table_lines = []
+        while index < len(lines) and lines[index].strip().startswith("|"):
+            table_lines.append(lines[index])
+            index += 1
+        rows = [
+            [cell.strip() for cell in row.strip().strip("|").split("|")]
+            for row in table_lines
+        ]
+        if rows and all(
+            cell and re.fullmatch(r":?-{3,}:?", cell.replace(" ", ""))
+            for cell in rows[min(1, len(rows) - 1)]
+        ):
+            headers = rows.pop(0)
+            rows.pop(0)
+        else:
+            headers = []
+        for row in rows:
+            if not row or all(not cell for cell in row):
+                continue
+            if headers and len(row) == len(headers):
+                fields = [
+                    f"{header}: {value}"
+                    for header, value in zip(headers, row)
+                    if header and value
+                ]
+                output.append("- " + "; ".join(fields))
+            else:
+                output.append("- " + "; ".join(cell for cell in row if cell))
+        if index < len(lines) and lines[index].strip():
+            output.append("")
+    return "\n".join(output).strip()
 
 
 def _format_indicator_fallback(
@@ -2018,6 +2105,14 @@ def _fetch_candidate_data(
     year_range: tuple[int, int] | None,
     kategori: str | None = None,
 ) -> dict:
+    audited_status = str(candidate.get("status_tarik") or "").casefold()
+    if audited_status in {"gagal", "kosong"}:
+        return {
+            "judul": candidate.get("judul"),
+            "status_tarik": audited_status,
+            "status_hasil": "gagal_teknis" if audited_status == "gagal" else "kosong",
+            "error": "Tautan tabel gagal atau kosong pada audit terakhir.",
+        }
     variable_id = int(candidate["var_id"])
     category_args = {"kategori": kategori} if kategori else {}
     if year_range:
@@ -3118,6 +3213,12 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                     region,
                     prefer_latest=not requested_year and year_range is None,
                 )
+                query_core_count = len(search_result.get("kata_inti") or [])
+                if query_core_count:
+                    candidate_options = [
+                        item for item in candidate_options
+                        if len(item.get("kata_inti_cocok") or []) / query_core_count >= 0.75
+                    ]
                 variable = candidate_options[0] if len(candidate_options) == 1 else None
                 if search_result.get("status_hasil") == "gagal_teknis":
                     canonical_data = search_result
@@ -3183,26 +3284,159 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         )
                         force_deterministic_fallback = True
                 elif not candidate_options:
-                    suggestions = [
-                        str(item.get("judul") or "").strip()
-                        for item in search_result.get("kandidat_terdekat") or []
-                        if item.get("judul")
-                    ]
-                    canonical_data = {
-                        "hasil": [],
-                        "kata_inti": search_result.get("kata_inti") or [],
-                        "kandidat_terdekat": search_result.get("kandidat_terdekat") or [],
-                        "status_hasil": "kosong",
-                    }
-                    canonical_tool_call = f"cari_variabel(kata_kunci='{keyword}')"
-                    canonical_fallback = (
-                        f"Data untuk topik '{keyword}' belum ditemukan pada katalog BPS."
-                        + (
-                            " Judul terdekat: " + "; ".join(suggestions[:3]) + "."
-                            if suggestions else ""
-                        )
+                    catalog_search = bps_tools.cari_tabel_katalog(
+                        keyword,
+                        tahun_diminta=requested_year or None,
+                        jumlah=8,
                     )
-                    force_deterministic_fallback = True
+                    catalog_candidates = catalog_search.get("hasil") or []
+                    if catalog_candidates:
+                        best_core_count = len(
+                            catalog_candidates[0].get("kata_inti_cocok") or []
+                        )
+                        usable_alternatives = [
+                            item for item in catalog_candidates
+                            if item.get("status_tarik") not in {"gagal", "kosong"}
+                            and len(item.get("kata_inti_cocok") or []) == best_core_count
+                        ]
+                        if usable_alternatives:
+                            catalog_candidates = usable_alternatives
+                        best = catalog_candidates[0]
+                        tied_candidates = [
+                            item for item in catalog_candidates
+                            if len(item.get("kata_inti_cocok") or [])
+                            == len(best.get("kata_inti_cocok") or [])
+                            and float(best.get("skor") or 0) - float(item.get("skor") or 0) <= 5
+                        ][:3]
+                        if len(tied_candidates) > 1:
+                            canonical_data = {
+                                "hasil": tied_candidates,
+                                "status_hasil": "kandidat_mirip",
+                            }
+                            canonical_fallback = _format_catalog_choices(tied_candidates)
+                            canonical_tool_call = f"cari_tabel_katalog(kata_kunci={keyword!r})"
+                            force_deterministic_fallback = True
+                        elif (
+                            int(best.get("skor_kemiripan") or 0) < 75
+                            or best.get("jenis_kecocokan") == "related"
+                        ):
+                            canonical_data = {
+                                "hasil": [best],
+                                "kata_inti": catalog_search.get("kata_inti") or [],
+                                "status_hasil": "kandidat_mirip",
+                            }
+                            canonical_fallback = (
+                                f"Saya belum menemukan tabel yang secara khusus memuat “{keyword}”. "
+                                f"Judul terdekat yang tersedia adalah “{best['judul']}”. "
+                                "Tabel ini mungkin mengukur hal yang berbeda, jadi saya belum akan "
+                                "menggunakannya sebagai jawaban angka."
+                            )
+                            canonical_tool_call = f"cari_tabel_katalog(kata_kunci={keyword!r})"
+                            force_deterministic_fallback = True
+                        elif best.get("status_tarik") in {"gagal", "kosong"}:
+                            canonical_data = {
+                                "hasil": [best],
+                                "status_hasil": "gagal_teknis" if best["status_tarik"] == "gagal" else "kosong",
+                            }
+                            canonical_fallback = _format_catalog_failure(best)
+                            canonical_tool_call = f"cari_tabel_katalog(kata_kunci={keyword!r})"
+                            force_deterministic_fallback = True
+                        elif best.get("jenis_tabel") == "SIMDASI":
+                            canonical_data = bps_tools.simdasi_cari_data(
+                                kata_kunci=keyword,
+                                tahun=requested_year or None,
+                                wilayah=region,
+                                id_tabel=str(best["id_tabel"]),
+                            )
+                            canonical_tool_call = (
+                                f"simdasi_cari_data(kata_kunci={keyword!r}, "
+                                f"tahun={requested_year or 'terbaru'!r}, wilayah={region!r}, "
+                                f"id_tabel={best['id_tabel']!r})"
+                            )
+                            if canonical_data.get("status_hasil") == "ditemukan":
+                                canonical_fallback = _format_simdasi_fallback(
+                                    canonical_data,
+                                    region,
+                                    requested_year,
+                                )
+                            elif canonical_data.get("status_hasil") == "kandidat_mirip":
+                                canonical_fallback = _format_catalog_choices(
+                                    canonical_data.get("kandidat") or []
+                                )
+                            elif canonical_data.get("status_hasil") == "gagal_teknis":
+                                canonical_fallback = _format_catalog_failure(best)
+                            else:
+                                canonical_fallback = (
+                                    f"Tabel “{best['judul']}” ditemukan, tetapi tidak memuat "
+                                    "nilai yang dapat dipastikan untuk wilayah, tahun, dan indikator "
+                                    "yang diminta."
+                                )
+                            force_deterministic_fallback = True
+                        elif best.get("jenis_tabel") == "Tabel Statis":
+                            static_table_result = bps_tools.tabel_statis(
+                                keyword,
+                                jumlah=1,
+                                wilayah=region,
+                                tahun_diminta=requested_year or None,
+                            )
+                            static_table_checked = True
+                            canonical_data = static_table_result
+                            canonical_tool_call = f"tabel_statis(kata_kunci={keyword!r})"
+                            canonical_fallback = _format_static_table_fallback(
+                                static_table_result,
+                                keyword,
+                            )
+                            force_deterministic_fallback = True
+                        else:
+                            variable_id = int(best["id_tabel"])
+                            canonical_data = (
+                                bps_tools.ambil_data(
+                                    variable_id,
+                                    tahun_mulai=str(year_range[0]),
+                                    tahun_akhir=str(year_range[1]),
+                                    wilayah=region,
+                                )
+                                if year_range
+                                else bps_tools.ambil_data(
+                                    variable_id,
+                                    tahun=requested_year or None,
+                                    wilayah=region,
+                                )
+                            )
+                            canonical_data["judul"] = canonical_data.get("judul") or best["judul"]
+                            canonical_data.setdefault("satuan", None)
+                            canonical_tool_call = (
+                                f"cari_tabel_katalog(kata_kunci={keyword!r}) -> "
+                                f"ambil_data(var_id={variable_id}, wilayah={region!r})"
+                            )
+                            canonical_fallback = _format_indicator_fallback(
+                                canonical_data,
+                                region,
+                                requested_year,
+                                minta_total=_requests_total_aggregate(question),
+                            )
+                            force_deterministic_fallback = True
+                    else:
+                        suggestions = [
+                            str(item.get("judul") or "").strip()
+                            for item in search_result.get("kandidat_terdekat") or []
+                            if item.get("judul")
+                        ]
+                        canonical_data = {
+                            "hasil": [],
+                            "kata_inti": search_result.get("kata_inti") or [],
+                            "kandidat_terdekat": search_result.get("kandidat_terdekat") or [],
+                            "status_hasil": "kosong",
+                        }
+                        canonical_tool_call = f"cari_variabel(kata_kunci='{keyword}')"
+                        canonical_fallback = (
+                            f"Data untuk topik '{keyword}' belum ditemukan pada katalog BPS."
+                            + (
+                                " Judul terdekat: " + "; ".join(suggestions[:3]) + "."
+                                if suggestions else ""
+                            )
+                        )
+                        force_deterministic_fallback = True
                 elif variable is not None:
                     variable_id = int(variable["var_id"])
                     if include_categories:
@@ -3250,11 +3484,21 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             f"cari_variabel(kata_kunci='{keyword}') -> "
                             f"ambil_data(var_id={variable_id}, tahun='{requested_year or 'terbaru'}', wilayah='{region}')"
                         )
+                    if str(variable.get("status_tarik") or "").casefold() in {"gagal", "kosong"}:
+                        canonical_fallback = _format_catalog_failure({
+                            "judul": variable.get("judul"),
+                            "status_tarik": variable.get("status_tarik"),
+                        })
+                        force_deterministic_fallback = True
                     approximate = (
                         int(variable.get("skor_kemiripan") or 0) < 80
                         or variable.get("jenis_kecocokan") == "related"
                     )
-                    if approximate:
+                    if (
+                        str(variable.get("status_tarik") or "").casefold()
+                        not in {"gagal", "kosong"}
+                        and approximate
+                    ):
                         canonical_data = {
                             "judul": "Kandidat indikator BPS",
                             "hasil": [{
@@ -3274,7 +3518,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             question,
                         )
                         force_deterministic_fallback = True
-                    else:
+                    elif str(variable.get("status_tarik") or "").casefold() not in {"gagal", "kosong"}:
                         canonical_fallback = _format_indicator_fallback(
                             canonical_data,
                             region,
@@ -3481,6 +3725,12 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     if not reply:
         logger.warning("Jawaban kosong: finish_reason=%s", finish_info(response))
         raise HTTPException(status_code=502, detail="Gemini tidak menghasilkan jawaban.")
+    reply = _plain_text_markdown_tables(reply)
+    if not reply:
+        raise HTTPException(
+            status_code=502,
+            detail="Jawaban model tidak memuat teks yang dapat ditampilkan.",
+        )
 
     if requires_tool and not prefer_knowledge and not tool_records:
         logger.error("Intent %s selesai tanpa hasil tool terverifikasi", intent_kind)

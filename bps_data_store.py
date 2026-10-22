@@ -118,7 +118,7 @@ def init_db() -> BpsConnection:
             cursorclass=DictCursor,
         )
         connection = BpsConnection(raw_connection)
-        for table in ("data_tabel", "tabel_meta", "nilai_data", "editorial_cache"):
+        for table in ("data_tabel", "tabel_meta", "nilai_data", "editorial_cache", "log_gagal"):
             connection.execute(f"SELECT 1 FROM {table} LIMIT 0").close()
         return connection
     except BpsDatabaseError as exc:
@@ -187,9 +187,37 @@ def ambil_data(
             if now - float(cached["diambil_pada"]) < ttl:
                 return payload
 
+    last_failure = con.execute(
+        "SELECT waktu, pesan FROM log_gagal WHERE id_tabel=? AND tahun=? "
+        "ORDER BY waktu DESC LIMIT 1",
+        (table_id, year),
+    ).fetchone()
+    if last_failure is not None and now - float(last_failure["waktu"]) < 6 * 60 * 60:
+        if cached is not None:
+            try:
+                stale_payload = _json_payload(cached["isi_json"])
+            except (json.JSONDecodeError, ValueError):
+                stale_payload = None
+            if stale_payload is not None:
+                stale_payload["_catatan"] = (
+                    "Data berasal dari penyimpanan sebelumnya. Percobaan ulang ke WebAPI "
+                    "ditunda selama enam jam setelah kegagalan terakhir."
+                )
+                return stale_payload
+        raise fetch_error(
+            "Percobaan ulang WebAPI BPS untuk tabel ini ditunda selama enam jam."
+        )
+
     try:
         payload = fetcher()
     except fetch_error as exc:
+        catat_gagal(
+            con,
+            table_id,
+            year,
+            _pesan_gagal_aman(exc),
+            waktu=now,
+        )
         if cached is not None:
             try:
                 stale_payload = _json_payload(cached["isi_json"])
@@ -236,6 +264,41 @@ def ambil_data(
         simpan_nilai(con, payload, table_id=table_id, fetched_at=now)
     con.commit()
     return payload
+
+
+def _pesan_gagal_aman(error: Exception) -> str:
+    message = str(error)
+    api_key = os.getenv("BPS_API_KEY", "").strip()
+    if api_key:
+        message = message.replace(api_key, "[REDACTED]")
+    message = re.sub(
+        r"https?://\S+",
+        "[URL_REDACTED]",
+        message,
+        flags=re.IGNORECASE,
+    )
+    message = re.sub(r"[\r\n\t]+", " ", message).strip()
+    return message[:255] or type(error).__name__
+
+
+def catat_gagal(
+    con: BpsConnection,
+    id_tabel: str,
+    tahun: str,
+    pesan: str,
+    *,
+    waktu: Optional[float] = None,
+) -> None:
+    con.execute(
+        "INSERT INTO log_gagal (id_tabel, tahun, waktu, pesan) VALUES (?, ?, ?, ?)",
+        (
+            str(id_tabel)[:191],
+            str(tahun)[:32],
+            waktu if waktu is not None else time.time(),
+            _pesan_gagal_aman(Exception(str(pesan))),
+        ),
+    )
+    con.commit()
 
 
 def _dimensions(values: Any, default_label: str = "") -> list[dict[str, str]]:

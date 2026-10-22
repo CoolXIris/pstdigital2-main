@@ -11,7 +11,7 @@ use RuntimeException;
 
 class BpsWebApiService
 {
-    private const GENERIC_TERMS = ['rata', 'rata-rata', 'jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia', 'status'];
+    private const GENERIC_TERMS = ['rata', 'rata-rata', 'jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia', 'status', 'terkait', 'apakah', 'total', 'kabupaten', 'kota', 'produksi', 'produks'];
 
     private const VARIABLE_INDEX_CACHE_PREFIX = 'bps-webapi:variables:index:';
 
@@ -243,14 +243,14 @@ class BpsWebApiService
 
     public function isDataQuestion(string $question): bool
     {
-        return preg_match('/\b(berapa|persen\w*|persentase|jumlah|total|warga|masyarakat|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|rls|hls|sekolah|indikator|data|statistik)\b/i', $question) === 1;
+        return preg_match('/\b(berapa|persen\w*|persentase|jumlah|total|warga|masyarakat|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|rls|hls|sekolah|murid|mahasiswa|dosen|universitas|perguruan|indikator|data|statistik|bencana|korban|kerusakan|lingkungan)\b/i', $question) === 1;
     }
 
     private function hasDynamicDataIntent(string $question): bool
     {
         return $this->isDataQuestion($question)
             || $this->matchFallbackTopic($question) !== null
-            || preg_match('/\b(perikan\w*|ikan|tenaga|angkatan|pendidikan|sekolah|rls|hls|kesehatan|pengeluaran|pendapatan|konsumsi|wisata\w*|hotel|transportasi|terbaru)\b/i', $question) === 1
+            || preg_match('/\b(perikan\w*|ikan|tenaga|angkatan|pendidikan|sekolah|murid|mahasiswa|dosen|universitas|perguruan|rls|hls|kesehatan|pengeluaran|pendapatan|konsumsi|wisata\w*|hotel|transportasi|bencana|korban|kerusakan|lingkungan|terbaru)\b/i', $question) === 1
             || $this->catalogVariableMatches($question);
     }
 
@@ -346,7 +346,10 @@ class BpsWebApiService
             }
 
             $dynamicContext = $this->dynamicContextFor($question, $keywords, $domain, $apiKey);
-            if ($dynamicContext !== null && ! $this->isUnavailableDataContext($dynamicContext)) {
+            $dynamicIndicatorNotFound = is_string($dynamicContext)
+                && str_contains($dynamicContext, '[INDIKATOR_TIDAK_DITEMUKAN]');
+            if ($dynamicContext !== null
+                && ! $this->isUnavailableDataContext($dynamicContext)) {
                 return $dynamicContext;
             }
 
@@ -363,16 +366,18 @@ class BpsWebApiService
                 if ($provinceContext !== null) {
                     return $this->provinceScopeFallbackContext($provinceContext, $this->regionMentioned($question));
                 }
-                if ($dynamicContext !== null) {
+                if ($dynamicContext !== null && ! $dynamicIndicatorNotFound) {
                     return $dynamicContext;
                 }
             }
 
-            if ($dynamicContext !== null) {
+            if ($dynamicContext !== null && ! $dynamicIndicatorNotFound) {
                 return $dynamicContext;
             }
 
-            if ($this->isDataQuestion($question) && $this->isCurrentPeriodRequest($question)) {
+            if (! $dynamicIndicatorNotFound
+                && $this->isDataQuestion($question)
+                && $this->isCurrentPeriodRequest($question)) {
                 return '[WebAPI BPS][DATA_BELUM_TERSEDIA] Data untuk periode terbaru/tahun berjalan belum ditemukan. Jangan gunakan periode lama atau variabel yang kurang relevan sebagai pengganti.';
             }
 
@@ -401,7 +406,8 @@ class BpsWebApiService
                         $tableDomain,
                         $apiKey,
                         (string) ($table['type'] ?? 'Tabel Statis'),
-                        (string) ($table['year'] ?? '')
+                        (string) ($table['year'] ?? ''),
+                        $this->tableRegionFilterForQuestion($question)
                     );
                 if ($detail !== null) {
                     $context[] = '[Sumber: BPS WebAPI, '.$table['title'].'] '.$detail;
@@ -421,6 +427,10 @@ class BpsWebApiService
                 return $regionalFallbackQuestion
                     ? $this->provinceScopeFallbackContext($tableContext, $this->regionMentioned($question))
                     : $tableContext;
+            }
+
+            if ($dynamicIndicatorNotFound) {
+                return $dynamicContext;
             }
 
             if ($regionalFallbackQuestion) {
@@ -549,6 +559,8 @@ class BpsWebApiService
                 return $notice."\n\n".$tableContext."\n\n".$closing;
             }
         }
+        $relatedTables = [];
+        $catalogVariableQuestion = false;
         if ($apiKey !== null) {
             $canonicalAnswer = $this->canonicalIndicatorFallback($question, $apiKey, $notice, $closing);
             if ($canonicalAnswer !== null) {
@@ -561,8 +573,22 @@ class BpsWebApiService
                 $apiKey,
                 $question
             );
-            if ($this->tablesNeedConfirmation($relatedTables, $question)) {
-                return $this->formatRelatedTableAnswer($relatedTables);
+            $catalogVariableQuestion = $this->catalogVariableMatches($question);
+            if (! $catalogVariableQuestion) {
+                if ($this->tablesNeedConfirmation($relatedTables, $question)) {
+                    return $this->formatRelatedTableAnswer($relatedTables);
+                }
+                $tableAnswer = $this->templateCatalogTableAnswer(
+                    $relatedTables,
+                    '1600',
+                    $apiKey,
+                    $notice,
+                    $closing,
+                    $this->tableRegionFilterForQuestion($question)
+                );
+                if ($tableAnswer !== null) {
+                    return $tableAnswer;
+                }
             }
         }
 
@@ -599,7 +625,6 @@ class BpsWebApiService
         $region = $this->regionMentioned($question);
         $populationQuestion = $this->isPopulationTotalQuestion($question);
         $regionalDataQuestion = $this->isRegionalDataQuestion($question);
-        $catalogVariableQuestion = $this->catalogVariableMatches($question);
         if ($regionalDataQuestion || $populationQuestion || $catalogVariableQuestion) {
             $label = $region['label'] ?? 'Provinsi Sumatera Selatan';
             if ($apiKey === null) {
@@ -607,9 +632,36 @@ class BpsWebApiService
             }
 
             try {
-                $context = $this->contextFor($question);
-                $details = $this->dynamicFallbackDetails($question, $region, $populationQuestion, $context);
-                if ($details === null && $catalogVariableQuestion) {
+                $details = null;
+                $hasDynamicCatalogMatch = $catalogVariableQuestion || $populationQuestion;
+                if ($populationQuestion) {
+                    $variable = [
+                        'var_id' => 262,
+                        'title' => 'Jumlah Penduduk Menurut Kabupaten/Kota',
+                        'label' => 'Jumlah Penduduk Menurut Kabupaten/Kota',
+                    ];
+                    $lookup = $this->fallbackVariableLookup(
+                        $variable,
+                        $question,
+                        $region ?? $this->provinceFallbackRegion(),
+                        $apiKey
+                    );
+                    if ($lookup['context'] !== null) {
+                        $details = $this->dynamicFallbackDetails(
+                            $question,
+                            $region,
+                            true,
+                            $lookup['context']
+                        );
+                        if ($details !== null && $lookup['year_notice'] !== null) {
+                            $details = $lookup['year_notice']."\n".$details;
+                        }
+                    }
+                } elseif ($catalogVariableQuestion) {
+                    $context = $this->contextFor($question);
+                    $details = $this->dynamicFallbackDetails($question, $region, false, $context);
+                }
+                if ($details === null && $catalogVariableQuestion && ! $populationQuestion) {
                     $details = $this->catalogVariableFallback(
                         $question,
                         $region ?? $this->provinceFallbackRegion(),
@@ -623,11 +675,40 @@ class BpsWebApiService
                 return $notice."\n\n".$details."\n\nDitampilkan pada ".now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.'."\n\n".$closing;
             }
 
+            if (! $hasDynamicCatalogMatch) {
+                $tableAnswer = $this->templateCatalogTableAnswer(
+                    $relatedTables,
+                    '1600',
+                    $apiKey,
+                    $notice,
+                    $closing,
+                    $this->tableRegionFilterForQuestion($question)
+                );
+                if ($tableAnswer !== null) {
+                    return $tableAnswer;
+                }
+            }
+            if ($this->tablesNeedConfirmation($relatedTables, $question)) {
+                return $this->formatRelatedTableAnswer($relatedTables);
+            }
+
             return $notice."\n\nData statistik yang diminta belum ditemukan atau belum tersedia dalam katalog CSV BPS untuk {$label}.\n\n".$closing;
         }
 
         if ($apiKey === null) {
             return $notice."\n\nData terbaru belum dapat diambil karena API key WebAPI BPS belum dikonfigurasi.\n\n".$closing;
+        }
+
+        $tableAnswer = $this->templateCatalogTableAnswer(
+            $relatedTables,
+            '1600',
+            $apiKey,
+            $notice,
+            $closing,
+            $this->tableRegionFilterForQuestion($question)
+        );
+        if ($tableAnswer !== null) {
+            return $tableAnswer;
         }
 
         $items = [];
@@ -645,6 +726,47 @@ class BpsWebApiService
         $regionLabel = $region['label'] ?? (preg_match('/\b(kabupaten|kab|kota)\b/iu', $question) ? 'kabupaten/kota' : null);
 
         return $this->formatFallbackPressReleases($items, $notice, $intro, $closing, $regionLabel);
+    }
+
+    private function templateCatalogTableAnswer(
+        array $tables,
+        string $domain,
+        string $apiKey,
+        string $notice,
+        string $closing,
+        ?array $region = null
+    ): ?string {
+        if ($tables === []) {
+            return null;
+        }
+
+        $sections = [];
+        foreach ($tables as $table) {
+            $tableId = $table['table_id'] ?? null;
+            $title = $table['title'] ?? null;
+            if (! is_scalar($tableId) || ! is_string($title)) {
+                continue;
+            }
+            $details = $this->tableDetail(
+                (string) $tableId,
+                $domain,
+                $apiKey,
+                (string) ($table['type'] ?? 'Tabel Statis'),
+                (string) ($table['year'] ?? ''),
+                $region
+            );
+            if ($details !== null) {
+                $sections[] = '[Sumber: BPS WebAPI, '
+                    .html_entity_decode(strip_tags($title), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                    .'] '.$details;
+            }
+        }
+        if ($sections === []) {
+            return null;
+        }
+
+        return $notice."\n\n".config('chatbot_fallback.data_intro')."\n\n".implode("\n\n", $sections)."\n\n"
+            .'Ditampilkan pada '.now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.'."\n\n".$closing;
     }
 
     private function catalogVariableFallback(string $question, array $region, string $apiKey): ?string
@@ -2217,6 +2339,18 @@ class BpsWebApiService
         return null;
     }
 
+    private function tableRegionFilterForQuestion(string $question): ?array
+    {
+        if (preg_match(
+            '/\b(?:per|menurut|setiap|masing-masing|daftar|rincian|detail)\s+(?:kabupaten(?:\/kota)?|kab\.?|kota)\b|\bkabupaten(?:\/kota)?\s+dan\s+kota\b/iu',
+            $question
+        ) === 1) {
+            return null;
+        }
+
+        return $this->regionScopeMentioned($question);
+    }
+
     private function regionsMentioned(string $question): array
     {
         $index = [];
@@ -2307,7 +2441,7 @@ class BpsWebApiService
 
     private function isPopulationTotalQuestion(string $question): bool
     {
-        return preg_match('/\b(total|jumlah|penduduk|warga|masyarakat)\b/i', $question) === 1
+        return preg_match('/\b(penduduk|warga|masyarakat|populasi)\b/i', $question) === 1
             && preg_match('/\b(miskin\w*|kemiskinan|angkatan\s+kerja|ketenagakerjaan|penganggur\w*|tpt|'
                 .'pria|lelaki|cowok|laki[- ]laki|wanita|perempuan|cewek|gender|jenis\s+kelamin)\b/i', $question) !== 1;
     }
@@ -2815,6 +2949,10 @@ class BpsWebApiService
                 }
 
                 $payload = $response->json();
+                if (($payload['status'] ?? null) === 'OK'
+                    && in_array($payload['data'] ?? null, [[], ''], true)) {
+                    return [];
+                }
                 $items = $payload['data'][1] ?? null;
                 if (($payload['status'] ?? null) !== 'OK' || ! is_array($items)) {
                     throw new RuntimeException('Format indeks variabel WebAPI BPS tidak dikenali.');
@@ -3023,7 +3161,7 @@ class BpsWebApiService
             $titleAndAliases = $this->variableSearchText($variable);
             $matchesAllTerms = true;
             foreach ($terms as $term) {
-                if ($this->titleTermScore($titleAndAliases, $term) === 0.0) {
+                if (! $this->titleHasExactTerm($titleAndAliases, $term)) {
                     $matchesAllTerms = false;
                     break;
                 }
@@ -3069,6 +3207,8 @@ class BpsWebApiService
             'gaji' => ['upah', 'pendapatan'],
             'pendapatan' => ['penghasilan', 'upah', 'gaji'],
             'penghasilan' => ['pendapatan', 'upah', 'gaji'],
+            'universitas' => ['perguruan tinggi', 'kampus'],
+            'kampus' => ['universitas', 'perguruan tinggi'],
             'pertumbuhan' => ['tumbuh', 'kenaikan'],
             'tumbuh' => ['pertumbuhan'],
             'presentase' => ['persentase'],
@@ -3099,7 +3239,8 @@ class BpsWebApiService
 
     private function titleTermScore(string $title, string $term, bool $allowFuzzy = true): float
     {
-        $normalizedTitle = Str::lower(Str::ascii($title));
+        $plainTitle = preg_replace('/<sup\b[^>]*>.*?<\/sup>/iu', ' ', $title) ?? $title;
+        $normalizedTitle = Str::lower(Str::ascii(html_entity_decode(strip_tags($plainTitle), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
         $variants = $this->keywordVariants($term);
         foreach ($variants as $variant) {
             if ($variant !== '' && preg_match(
@@ -3270,6 +3411,10 @@ class BpsWebApiService
                 }
 
                 $payload = $response->json();
+                if (($payload['status'] ?? null) === 'OK'
+                    && in_array($payload['data'] ?? null, [[], ''], true)) {
+                    return null;
+                }
                 $items = $payload['data'][1] ?? null;
                 if (($payload['status'] ?? null) !== 'OK' || ! is_array($items)) {
                     throw new RuntimeException('Format daftar periode WebAPI BPS tidak dikenali.');
@@ -3837,6 +3982,12 @@ class BpsWebApiService
 
         uasort($matches, fn (array $left, array $right) => $right['score'] <=> $left['score']);
         $ranked = array_values($matches);
+        if (count($coreKeywords) > 1) {
+            $ranked = array_values(array_filter(
+                $ranked,
+                fn (array $match) => $match['matched_core_terms'] / count($coreKeywords) >= 0.5
+            ));
+        }
         $best = $ranked[0] ?? null;
         $runnerUp = $ranked[1] ?? null;
         $requiredScore = count($coreKeywords) > 1
@@ -3887,6 +4038,7 @@ class BpsWebApiService
             'pekerja' => ['pekerja', 'buruh', 'karyawan', 'pegawai'],
             'miskin' => ['miskin', 'kemiskinan'],
             'penduduk' => ['penduduk', 'populasi', 'warga', 'masyarakat', 'rakyat'],
+            'universitas' => ['universitas', 'perguruan', 'tinggi', 'kampus'],
         ];
         $canonical = [];
         foreach ($synonymGroups as $term => $members) {
@@ -3898,7 +4050,9 @@ class BpsWebApiService
         $core = [];
         foreach ($keywords as $keyword) {
             $keyword = Str::lower(trim((string) $keyword));
-            if ($keyword === '' || in_array($keyword, self::GENERIC_TERMS, true)) {
+            if ($keyword === ''
+                || ctype_digit($keyword)
+                || in_array($keyword, self::GENERIC_TERMS, true)) {
                 continue;
             }
             $term = $canonical[$keyword] ?? $keyword;
@@ -3936,7 +4090,7 @@ class BpsWebApiService
     private function tablesNeedConfirmation(array $tables, string $question): bool
     {
         if (count($tables) > 1) {
-            return true;
+            return collect($tables)->contains(fn (array $table) => ! empty($table['related_match']));
         }
 
         return ! empty($tables[0]['related_match'])
@@ -4005,7 +4159,8 @@ class BpsWebApiService
                     $tableDomain,
                     $apiKey,
                     (string) ($table['type'] ?? 'Tabel Statis'),
-                    (string) ($table['year'] ?? '')
+                    (string) ($table['year'] ?? ''),
+                    $this->tableRegionFilterForQuestion($question)
                 );
             if ($detail !== null) {
                 $scope = $tableDomain === '0000' ? 'domain nasional' : 'domain Sumatera Selatan';
@@ -4050,7 +4205,8 @@ class BpsWebApiService
         string $domain,
         string $apiKey,
         string $type = 'Tabel Statis',
-        string $year = ''
+        string $year = '',
+        ?array $region = null
     ): ?string
     {
         $row = $this->catalogRowForTable(
@@ -4065,7 +4221,7 @@ class BpsWebApiService
         $response = $this->catalogResponse($row, $apiKey);
 
         if ($type === 'SIMDASI') {
-            return $this->formatSimdasiTable($response->json('data.1'));
+            return $this->formatSimdasiTable($response->json('data.1'), $region);
         }
 
         $table = $response->json('data.table');
@@ -4073,7 +4229,7 @@ class BpsWebApiService
             return null;
         }
 
-        $text = $this->formatStaticTableHtml($table);
+        $text = $this->formatStaticTableHtml($table, $region);
 
         $stalenessNote = $response->json('_catatan');
         if (is_string($stalenessNote) && trim($stalenessNote) !== '') {
@@ -4083,8 +4239,10 @@ class BpsWebApiService
         return Str::limit($text, 5000, '...');
     }
 
-    private function formatStaticTableHtml(string $table): string
+    private function formatStaticTableHtml(string $table, ?array $region = null): string
     {
+        $table = html_entity_decode($table, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $table = str_replace("\u{00A0}", ' ', $table);
         $previousErrorMode = libxml_use_internal_errors(true);
         $document = new \DOMDocument('1.0', 'UTF-8');
         try {
@@ -4120,12 +4278,12 @@ class BpsWebApiService
             if ($cells === []) {
                 continue;
             }
-            if (count($rows) >= 25) {
+            if (count($rows) >= ($region === null ? 25 : 5000)) {
                 $truncated = true;
                 break;
             }
 
-            $rows[] = '| '.implode(' | ', $cells).' |';
+            $rows[] = $cells;
         }
 
         if ($rows === []) {
@@ -4135,7 +4293,25 @@ class BpsWebApiService
             return Str::limit($text, 2500, '...');
         }
 
-        $text = Str::limit(implode("\n", $rows), 2300, '...');
+        if ($region !== null) {
+            $matchingRows = array_values(array_filter(
+                $rows,
+                fn (array $row) => $this->tableRowMatchesRegion((string) ($row[0] ?? ''), $region)
+            ));
+            if ($matchingRows !== []) {
+                $rows = array_values(array_unique([$rows[0], ...$matchingRows], SORT_REGULAR));
+            } elseif ($this->staticTableHasGeographicRows($rows)) {
+                return '[Baris untuk '.$region['label'].' tidak tersedia pada tabel BPS ini.]';
+            }
+        }
+
+        if (count($rows) > 25) {
+            $rows = array_slice($rows, 0, 25);
+            $truncated = true;
+        }
+
+        $lines = array_map(static fn (array $row) => '| '.implode(' | ', $row).' |', $rows);
+        $text = Str::limit(implode("\n", $lines), 2300, '...');
         if ($truncated) {
             $text .= "\n[Data tabel dipotong setelah 25 baris.]";
         }
@@ -4143,7 +4319,7 @@ class BpsWebApiService
         return $text;
     }
 
-    private function formatSimdasiTable(mixed $table): ?string
+    private function formatSimdasiTable(mixed $table, ?array $region = null): ?string
     {
         if (! is_array($table) || ! is_array($table['kolom'] ?? null) || ! is_array($table['data'] ?? null)) {
             return null;
@@ -4160,21 +4336,43 @@ class BpsWebApiService
                 'UTF-8'
             );
             if (preg_match('/\s+-\s*(.+)$/u', $label, $match) === 1) {
-                $label = trim($match[1]);
+                $shortLabel = trim($match[1]);
             } else {
-                $label = trim($label);
+                $shortLabel = trim($label);
             }
-            $columns[(string) $key] = $label;
+            $columns[(string) $key] = [
+                'full' => trim($label),
+                'short' => $shortLabel,
+            ];
         }
         if ($columns === []) {
             return null;
         }
 
-        $headers = ['Wilayah', ...array_values($columns)];
+        $shortLabelCounts = array_count_values(array_column($columns, 'short'));
+        foreach ($columns as &$column) {
+            $column['label'] = ($shortLabelCounts[$column['short']] ?? 0) > 1
+                ? $column['full']
+                : $column['short'];
+        }
+        unset($column);
+
+        $headers = ['Wilayah', ...array_column($columns, 'label')];
         $lines = ['| '.implode(' | ', $headers).' |'];
         $lines[] = '| '.implode(' | ', array_fill(0, count($headers), '---')).' |';
         $truncated = false;
-        foreach ($table['data'] as $row) {
+        $dataRows = array_values(array_filter($table['data'], 'is_array'));
+        if ($region !== null) {
+            $dataRows = array_values(array_filter(
+                $dataRows,
+                fn (array $row) => $this->tableRowMatchesRegion((string) ($row['label'] ?? ''), $region)
+            ));
+            if ($dataRows === []) {
+                return '[Baris untuk '.$region['label'].' tidak tersedia pada tabel SIMDASI ini.]';
+            }
+        }
+
+        foreach ($dataRows as $row) {
             if (! is_array($row) || ! is_array($row['variables'] ?? null)) {
                 continue;
             }
@@ -4183,7 +4381,7 @@ class BpsWebApiService
                 break;
             }
             $cells = [trim((string) ($row['label'] ?? ''))];
-            foreach ($columns as $key => $_label) {
+            foreach ($columns as $key => $_column) {
                 $value = $row['variables'][$key]['value'] ?? '';
                 $cells[] = is_scalar($value) ? trim((string) $value) : '';
             }
@@ -4203,6 +4401,43 @@ class BpsWebApiService
         return Str::limit(implode("\n", $lines), 4500, '...');
     }
 
+    private function tableRowMatchesRegion(string $label, array $region): bool
+    {
+        $normalize = static function (string $value): string {
+            $value = Str::lower(Str::ascii(trim($value)));
+            $value = preg_replace('/^(provinsi|kabupaten|kab\\.?|kota)\\s+/u', '', $value) ?? $value;
+
+            return trim(preg_replace('/\\s+/u', ' ', $value) ?? $value);
+        };
+        $normalizedLabel = $normalize($label);
+        $regionNames = array_merge($region['match'] ?? [], $region['aliases'] ?? []);
+
+        foreach ($regionNames as $name) {
+            if (is_string($name) && $normalizedLabel === $normalize($name)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function staticTableHasGeographicRows(array $rows): bool
+    {
+        foreach ($rows as $row) {
+            $label = trim((string) ($row[0] ?? ''));
+            if (preg_match('/\\b(wilayah|provinsi|kabupaten|kab\\.?|kota)\\b/iu', $label) === 1) {
+                return true;
+            }
+            foreach (config('sumsel_regions', []) as $candidate) {
+                if ($this->tableRowMatchesRegion($label, $candidate)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private function keywords(string $question): array
     {
         $normalizedQuestion = Str::lower(Str::ascii($question));
@@ -4211,6 +4446,8 @@ class BpsWebApiService
             'rumah sakit' => 'fasilitas kesehatan',
             'rsud' => 'fasilitas kesehatan',
             'faskes' => 'fasilitas kesehatan',
+            'universitas' => 'perguruan tinggi',
+            'kampus' => 'perguruan tinggi',
             'gender' => 'jenis kelamin',
             'sex' => 'jenis kelamin',
         ];
@@ -4223,7 +4460,7 @@ class BpsWebApiService
             ) ?? $normalizedQuestion;
         }
         preg_match_all('/[\pL\pN]{3,}/u', $normalizedQuestion, $matches);
-        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
+        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'apakah', 'data', 'terkait', 'sebutkan', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
         $region = $this->regionMentioned($question);
         if ($region !== null) {
             $regionWords = ['kabupaten', 'kab', 'kota'];
@@ -4273,6 +4510,8 @@ class BpsWebApiService
             'rumah sakit' => 'fasilitas kesehatan',
             'rsud' => 'fasilitas kesehatan',
             'faskes' => 'fasilitas kesehatan',
+            'universitas' => 'perguruan tinggi',
+            'kampus' => 'perguruan tinggi',
             'gender' => 'jenis kelamin',
             'sex' => 'jenis kelamin',
         ] as $alias => $canonical) {
@@ -4285,6 +4524,7 @@ class BpsWebApiService
         foreach ([
             'total' => 'jumlah',
             'masyarakat' => 'penduduk',
+            'warga' => 'penduduk',
             'rakyat' => 'penduduk',
             'laju' => 'pertumbuhan',
             'kemiskinan' => 'miskin',
@@ -4319,7 +4559,7 @@ class BpsWebApiService
         preg_match_all('/[\pL\pN]{3,}/u', $normalizedQuestion, $matches);
         $stopWords = [
             'yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah',
-            'berapa', 'bagaimana', 'apa', 'data', 'saya', 'kami', 'bisa', 'tolong',
+            'berapa', 'bagaimana', 'apa', 'apakah', 'data', 'terkait', 'sebutkan', 'saya', 'kami', 'bisa', 'tolong',
             'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi',
             'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada',
             'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih', 'kabupaten', 'kab',

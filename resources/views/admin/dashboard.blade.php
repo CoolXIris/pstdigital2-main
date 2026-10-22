@@ -101,9 +101,17 @@
 
 <section class="admin-panel admin-dashboard-reviews">
     <div class="admin-panel-head admin-review-heading">
-        <div>
-            <h2 class="admin-panel-title">Kritik dan Saran Pengguna</h2>
-            <div class="admin-dashboard-rating"><span>★</span><strong>{{ $data['average_rating'] !== null ? number_format($data['average_rating'], 1) : '-' }}</strong><small>rata-rata dari {{ number_format($data['review_total']) }} ulasan</small></div>
+        <div class="admin-review-heading-main">
+            <span class="admin-review-heading-icon" aria-hidden="true"><i class="fe fe-message-square"></i></span>
+            <div>
+                <h2 class="admin-panel-title">Kritik dan Saran Pengguna</h2>
+                <p class="admin-review-heading-description">Ulasan pada {{ $periodLabel }}. Gunakan filter rating dan urutan untuk menelusuri masukan.</p>
+                <div class="admin-dashboard-rating">
+                    <span class="admin-review-score-star" aria-hidden="true">★</span>
+                    <strong>{{ $data['average_rating'] !== null ? number_format($data['average_rating'], 1) : '-' }}</strong>
+                    <small>rata-rata dari {{ number_format($data['review_total']) }} ulasan</small>
+                </div>
+            </div>
         </div>
         <div class="admin-review-actions">
             <form method="GET" action="{{ route('dashboard') }}" class="admin-review-sort">
@@ -126,13 +134,53 @@
         <div class="admin-review-list">
             @forelse ($data['reviews'] as $review)
             <article class="admin-review">
-                <div class="admin-review-meta"><span>{{ \Illuminate\Support\Carbon::parse($review->tanggal)->translatedFormat('d M Y') }} · {{ $review->user?->name ?? 'Pengguna' }}</span><span class="admin-stars">{{ str_repeat('★', (int) $review->rating) }}{{ str_repeat('☆', max(0, 5 - (int) $review->rating)) }}</span></div>
+                <div class="admin-review-meta">
+                    <div class="admin-review-author">
+                        <strong>{{ $review->user?->name ?? 'Pengguna' }}</strong>
+                        <time datetime="{{ \Illuminate\Support\Carbon::parse($review->tanggal)->toDateString() }}">{{ \Illuminate\Support\Carbon::parse($review->tanggal)->translatedFormat('d M Y') }}</time>
+                    </div>
+                    <span class="admin-stars" aria-label="Rating {{ (int) $review->rating }} dari 5">{{ str_repeat('★', (int) $review->rating) }}{{ str_repeat('☆', max(0, 5 - (int) $review->rating)) }}</span>
+                </div>
                 <p>{{ $review->kritik_saran }}</p>
             </article>
             @empty
             <div class="admin-empty"><i class="fe fe-message-circle"></i><strong>Belum ada ulasan pada filter ini</strong><span>Ulasan akan muncul setelah konsultasi dinilai oleh pengguna.</span></div>
             @endforelse
         </div>
+        @if ($data['reviews']->total() > 0)
+        <div class="admin-review-pagination">
+            <p class="admin-review-count">Menampilkan <strong>{{ $data['reviews']->firstItem() }}–{{ $data['reviews']->lastItem() }}</strong> dari <strong>{{ number_format($data['reviews']->total()) }}</strong> ulasan</p>
+            @if ($data['reviews']->hasPages())
+            <nav class="admin-pagination" aria-label="Navigasi halaman ulasan">
+                <ul class="pagination">
+                    <li class="page-item {{ $data['reviews']->onFirstPage() ? 'disabled' : '' }}">
+                        @if ($data['reviews']->onFirstPage())
+                        <span class="page-link" aria-hidden="true">&lsaquo;</span>
+                        @else
+                        <a class="page-link" href="{{ $data['reviews']->previousPageUrl() }}" rel="prev" aria-label="Halaman sebelumnya">&lsaquo;</a>
+                        @endif
+                    </li>
+                    @foreach ($data['reviews']->getUrlRange(max(1, $data['reviews']->currentPage() - 1), min($data['reviews']->lastPage(), $data['reviews']->currentPage() + 1)) as $page => $url)
+                    <li class="page-item {{ $page === $data['reviews']->currentPage() ? 'active' : '' }}">
+                        @if ($page === $data['reviews']->currentPage())
+                        <span class="page-link" aria-current="page">{{ $page }}</span>
+                        @else
+                        <a class="page-link" href="{{ $url }}">{{ $page }}</a>
+                        @endif
+                    </li>
+                    @endforeach
+                    <li class="page-item {{ $data['reviews']->hasMorePages() ? '' : 'disabled' }}">
+                        @if ($data['reviews']->hasMorePages())
+                        <a class="page-link" href="{{ $data['reviews']->nextPageUrl() }}" rel="next" aria-label="Halaman berikutnya">&rsaquo;</a>
+                        @else
+                        <span class="page-link" aria-hidden="true">&rsaquo;</span>
+                        @endif
+                    </li>
+                </ul>
+            </nav>
+            @endif
+        </div>
+        @endif
     </div>
 </section>
 @endsection

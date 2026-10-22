@@ -36,12 +36,19 @@ _EDITORIAL_DETAIL_TTL = 24 * 60 * 60
 _EDITORIAL_MODELS = {"pressrelease", "publication", "news"}
 _http = httpx.Client(timeout=8.0)
 _lock = threading.Lock()
-_catalog_cache: tuple[tuple[str, int, int], list[dict[str, str]]] | None = None
+_catalog_cache: tuple[tuple[str, int, int, int, int], list[dict[str, str]]] | None = None
 
 
 def _catalog_path() -> Path:
     configured = os.getenv("BPS_CATALOG_CSV")
     return Path(configured).expanduser() if configured else Path(__file__).resolve().parent / "tabel_bps_sumsel.csv"
+
+
+def _audit_path(catalog_path: Path) -> Path:
+    configured = os.getenv("BPS_AUDIT_CSV", "").strip()
+    return Path(configured).expanduser() if configured else (
+        catalog_path.with_name(f"{catalog_path.stem}_audit{catalog_path.suffix}")
+    )
 
 
 def load_catalog() -> list[dict[str, str]]:
@@ -53,7 +60,13 @@ def load_catalog() -> list[dict[str, str]]:
     except OSError:
         raise CatalogError("File katalog CSV BPS tidak dapat ditemukan atau dibaca.") from None
 
-    signature = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    audit_path = _audit_path(path)
+    try:
+        audit_stat = audit_path.stat()
+        audit_signature = (audit_stat.st_mtime_ns, audit_stat.st_size)
+    except OSError:
+        audit_signature = (0, 0)
+    signature = (str(path.resolve()), stat.st_mtime_ns, stat.st_size, *audit_signature)
     with _lock:
         cached = _catalog_cache
         if cached is not None and cached[0] == signature:
@@ -77,9 +90,41 @@ def load_catalog() -> list[dict[str, str]]:
     except (OSError, UnicodeError, csv.Error):
         raise CatalogError("File katalog CSV BPS tidak dapat dibaca.") from None
 
+    _merge_audit_status(rows, path)
     with _lock:
         _catalog_cache = (signature, rows)
     return [dict(row) for row in rows]
+
+
+def _merge_audit_status(rows: list[dict[str, str]], catalog_path: Path) -> None:
+    audit_path = _audit_path(catalog_path)
+    if not audit_path.is_file() or audit_path.resolve() == catalog_path.resolve():
+        return
+    try:
+        with audit_path.open(encoding="utf-8-sig", newline="") as source:
+            audited = csv.DictReader(source)
+            status_by_row = {
+                (
+                    str(row.get("id_tabel") or "").strip(),
+                    str(row.get("tahun") or "").strip(),
+                    str(row.get("link_json") or "").strip(),
+                ): row
+                for row in audited
+                if row.get("status_tarik")
+            }
+    except (OSError, UnicodeError, csv.Error):
+        logger.warning("File status audit katalog BPS tidak dapat dibaca.")
+        return
+
+    for row in rows:
+        audited_row = status_by_row.get((
+            row.get("id_tabel", ""),
+            row.get("tahun", ""),
+            row.get("link_json", ""),
+        ))
+        if audited_row:
+            for field in ("status_tarik", "status_detail", "dicek_pada"):
+                row[field] = str(audited_row.get(field) or "")
 
 
 def fetch_json(row: dict[str, str]) -> dict[str, Any]:

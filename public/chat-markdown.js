@@ -138,25 +138,44 @@
         const container = document.createElement('div');
         parsed.body.childNodes.forEach((node) => container.append(sanitizeNode(node)));
         container.querySelectorAll('table').forEach((table) => {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'chat-md-table';
-            table.replaceWith(wrapper);
-            wrapper.append(table);
+            const rows = [...table.querySelectorAll('tr')];
+            const headerRow = table.querySelector('thead tr') || (rows[0]?.querySelector('th') ? rows[0] : null);
+            const headers = headerRow
+                ? [...headerRow.querySelectorAll('th, td')].map((cell) => cell.textContent.trim())
+                : [];
+            const replacement = document.createDocumentFragment();
+
+            rows.filter((row) => row !== headerRow).forEach((row) => {
+                const paragraph = document.createElement('p');
+                [...row.querySelectorAll('th, td')].forEach((cell, index) => {
+                    if (!cell.textContent.trim()) return;
+                    if (paragraph.childNodes.length) paragraph.append(document.createTextNode('; '));
+                    if (headers[index]) {
+                        const label = document.createElement('strong');
+                        label.textContent = headers[index];
+                        paragraph.append(label, document.createTextNode(': '));
+                    }
+                    cell.childNodes.forEach((child) => paragraph.append(child.cloneNode(true)));
+                });
+                if (paragraph.childNodes.length) replacement.append(paragraph);
+            });
+
+            table.replaceWith(replacement);
         });
         return container.innerHTML;
     };
 
     const render = (source) => {
         const markdown = String(source ?? '');
-        if (window.marked && typeof window.marked.parse === 'function') {
-            return sanitizeHtml(window.marked.parse(markdown, {
+        const html = window.marked && typeof window.marked.parse === 'function'
+            ? window.marked.parse(markdown, {
                 breaks: true,
                 gfm: true,
                 headerIds: false,
                 mangle: false,
-            }));
-        }
-        return renderBasic(markdown);
+            })
+            : renderBasic(markdown);
+        return sanitizeHtml(html);
     };
 
     window.renderChatMarkdown = render;
