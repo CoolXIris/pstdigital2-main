@@ -11,6 +11,7 @@
             <p>Kelola akun, informasi instansi, dan tingkat akses pengguna layanan PST Digital.</p>
         </div>
         <div class="admin-heading-actions">
+            <button class="admin-btn admin-btn-outline" type="button" data-bs-toggle="modal" data-bs-target="#consultationStaffModal"><i class="fe fe-user-check"></i> Edit petugas</button>
             <a class="admin-btn admin-btn-outline" href="{{ route('users_export') }}"><i class="fe fe-download"></i> Ekspor XLSX</a>
             <button class="admin-btn admin-btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#createUserModal"><i class="fe fe-user-plus"></i> Tambah pengguna</button>
         </div>
@@ -117,6 +118,39 @@
             </form>
         </div></div>
     </div>
+
+    <div class="modal fade admin-modal" id="consultationStaffModal" tabindex="-1" aria-labelledby="consultationStaffTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <form method="POST" action="{{ route('admin.consultation-staff.update') }}">
+                @csrf @method('PUT')
+                <div class="modal-header"><div><h2 class="modal-title" id="consultationStaffTitle">Edit petugas konsultasi</h2><p class="admin-panel-subtitle mb-0">Atur nama yang tersedia saat admin menugaskan petugas.</p></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+                <div class="modal-body">
+                    @if ($errors->consultationStaff->any())
+                        <div class="alert alert-danger" role="alert"><ul class="mb-0">@foreach ($errors->consultationStaff->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
+                    @endif
+                    <p class="form-text mb-3">Nama yang diubah juga diperbarui pada konsultasi yang sudah ditugaskan. Hapus baris untuk mengeluarkan petugas dari daftar.</p>
+                    <div class="d-grid gap-2" id="consultation-staff-list">
+                        @foreach (old('staff', $consultationStaff->pluck('name', 'id')->all()) as $staffId => $staffName)
+                            <div class="d-flex gap-2 align-items-center" data-staff-row>
+                                <label class="visually-hidden" for="staff-{{ $staffId }}">Nama petugas</label>
+                                <input class="form-control" id="staff-{{ $staffId }}" name="staff[{{ $staffId }}]" value="{{ $staffName }}" maxlength="100" required>
+                                <button class="admin-action-icon is-danger" type="button" data-remove-staff aria-label="Hapus petugas"><i class="fe fe-trash-2"></i></button>
+                            </div>
+                        @endforeach
+                        @foreach (old('new_staff', []) as $newStaffName)
+                            <div class="d-flex gap-2 align-items-center" data-staff-row>
+                                <label class="visually-hidden" for="new-staff-{{ $loop->index }}">Nama petugas baru</label>
+                                <input class="form-control" id="new-staff-{{ $loop->index }}" name="new_staff[]" value="{{ $newStaffName }}" maxlength="100" placeholder="Nama petugas baru" required>
+                                <button class="admin-action-icon is-danger" type="button" data-remove-staff aria-label="Hapus petugas"><i class="fe fe-trash-2"></i></button>
+                            </div>
+                        @endforeach
+                    </div>
+                    <button class="admin-btn admin-btn-outline mt-3" type="button" id="add-consultation-staff"><i class="fe fe-plus"></i> Tambah nama petugas</button>
+                </div>
+                <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Batal</button><button class="admin-btn admin-btn-primary" type="submit"><i class="fe fe-check"></i> Simpan petugas</button></div>
+            </form>
+        </div></div>
+    </div>
 @endsection
 
 @section('scripts')
@@ -136,6 +170,44 @@
                 editModal?.show();
             });
         });
+
+        const staffModalElement = document.getElementById('consultationStaffModal');
+        const staffModal = window.bootstrap ? new bootstrap.Modal(staffModalElement) : null;
+        const staffList = document.getElementById('consultation-staff-list');
+        document.getElementById('add-consultation-staff').addEventListener('click', () => {
+            const row = document.createElement('div');
+            row.className = 'd-flex gap-2 align-items-center';
+            row.dataset.staffRow = '';
+
+            const input = document.createElement('input');
+            input.className = 'form-control';
+            input.name = 'new_staff[]';
+            input.type = 'text';
+            input.maxLength = 100;
+            input.placeholder = 'Nama petugas baru';
+            input.required = true;
+            input.setAttribute('aria-label', 'Nama petugas baru');
+
+            const removeButton = document.createElement('button');
+            removeButton.className = 'admin-action-icon is-danger';
+            removeButton.type = 'button';
+            removeButton.dataset.removeStaff = '';
+            removeButton.setAttribute('aria-label', 'Hapus petugas');
+            removeButton.innerHTML = '<i class="fe fe-trash-2"></i>';
+
+            row.append(input, removeButton);
+            staffList.append(row);
+            input.focus();
+        });
+
+        staffList.addEventListener('click', (event) => {
+            const removeButton = event.target.closest('[data-remove-staff]');
+            if (removeButton) removeButton.closest('[data-staff-row]').remove();
+        });
+
+        @if ($errors->consultationStaff->any())
+            staffModal?.show();
+        @endif
     })();
 </script>
 @endsection

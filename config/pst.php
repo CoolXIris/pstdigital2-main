@@ -19,12 +19,12 @@ return [
         '2027-12-26',
     ],
     'consultation_staff' => [
-        'Petugas 1 (Ahmad Rifqi)',
-        'Petugas 2 (Budi Santoso)',
-        'Petugas 3 (Citra Dewi)',
-        'Petugas 4 (Dian Puspita)',
-        'Petugas 5 (Eko Prasetyo)',
-        'Petugas 6 (Fitriani Putri)',
+        'Petugas 1 (Aris Wijayanto)',
+        'Petugas 2 (Nadia Qathrunnada)',
+        'Petugas 3 (M. Irfan Zulfahmi)',
+        'Petugas 4 (S. Abdurrahman)',
+        'Petugas 5 (Telly Dwi Nataliza)',
+        'Petugas 6 (Zahirah Husin)',
     ],
     'ice_servers' => (static function (): array {
         $raw = trim((string) env('WEBRTC_ICE_SERVERS', ''));

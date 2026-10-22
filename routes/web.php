@@ -57,6 +57,7 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::get('dashboard', [HomeController::class, 'index'])->name('dashboard');
     Route::resource('users', UserController::class);
     Route::get('users_export', [UserController::class, 'export'])->name('users_export');
+    Route::put('admin/consultation-staff', [UserController::class, 'updateConsultationStaff'])->name('admin.consultation-staff.update');
     Route::get('admin/konsultasi', [KonsultasiAdminController::class, 'index'])->name('admin.konsultasi');
     Route::patch('admin/konsultasi/{meeting}/status', [KonsultasiAdminController::class, 'updateStatus'])
         ->name('admin.konsultasi.status');

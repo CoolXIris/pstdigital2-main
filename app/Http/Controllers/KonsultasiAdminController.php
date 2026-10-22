@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Meeting;
+use App\Models\ConsultationStaff;
 use App\Models\TelegramBot;
 use App\Services\ConsultationDocumentationService;
 use App\Services\ConsultationGoogleCalendarService;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -45,7 +47,8 @@ class KonsultasiAdminController extends Controller
             return $meeting;
         });
         $history = $baseQuery()->whereIn('status', [1, 9])->orderByDesc('tanggal')->orderByDesc('start_time')->paginate(12, ['*'], 'history_page')->withQueryString();
-        $staff = config('pst.consultation_staff', []);
+        $staffRecords = ConsultationStaff::query()->orderBy('sort_order')->orderBy('id')->get();
+        $staff = $staffRecords->pluck('name')->all();
         $upcoming->getCollection()->transform(function (Meeting $meeting) {
             $meeting->setAttribute('room_open', $this->isRoomOpen($meeting));
 
@@ -53,7 +56,7 @@ class KonsultasiAdminController extends Controller
         });
         $availableStaff = [];
         foreach ($pending as $meeting) {
-            $availableStaff[$meeting->id] = $this->availableStaffFor($meeting, $staff);
+            $availableStaff[$meeting->id] = $this->availableStaffFor($meeting, $staffRecords);
         }
 
         return view('admin.konsultasi.index', [
@@ -77,7 +80,7 @@ class KonsultasiAdminController extends Controller
     {
         $validated = $request->validate([
             'action' => ['required', Rule::in(['confirm', 'complete', 'cancel'])],
-            'assigned_staff' => ['required_if:action,confirm', 'nullable', Rule::in(config('pst.consultation_staff', []))],
+            'assigned_staff' => ['required_if:action,confirm', 'nullable', Rule::in(ConsultationStaff::query()->pluck('name')->all())],
             'cancellation_reason' => ['required_if:action,cancel', 'nullable', 'string', 'min:10', 'max:1000'],
             'ringkasan' => ['required_if:action,complete', 'nullable', 'string', 'min:10', 'max:5000'],
             'documentation' => [Rule::requiredIf(fn () => $request->input('action') === 'complete' && !$request->filled('documentation_url')), 'nullable', 'file', 'mimes:jpg,jpeg,png,webp,mp4,webm,mov', 'max:25600'],
@@ -107,9 +110,17 @@ class KonsultasiAdminController extends Controller
                         throw ValidationException::withMessages(['action' => 'Permintaan konsultasi ini sudah diproses.']);
                     }
 
-                    $staffName = $validated['assigned_staff'];
+                    $staffMember = ConsultationStaff::query()
+                        ->where('name', $validated['assigned_staff'])
+                        ->lockForUpdate()
+                        ->first();
+                    if (!$staffMember) {
+                        throw ValidationException::withMessages(['assigned_staff' => 'Petugas sudah diubah. Muat ulang halaman lalu pilih petugas yang tersedia.']);
+                    }
+
+                    $staffName = $staffMember->name;
                     $conflict = Meeting::query()
-                        ->where('assigned_staff', $staffName)
+                        ->where('assigned_staff_id', $staffMember->id)
                         ->where('status', 2)
                         ->whereDate('tanggal', $lockedMeeting->tanggal)
                         ->where('start_time', '<', $lockedMeeting->end_time)
@@ -122,6 +133,7 @@ class KonsultasiAdminController extends Controller
                     }
 
                     $lockedMeeting->assigned_staff = $staffName;
+                    $lockedMeeting->assigned_staff_id = $staffMember->id;
                     $lockedMeeting->approved_by_user_id = $approver->id;
                     $lockedMeeting->approved_by_name = $approver->name;
                     $lockedMeeting->approved_by_email = $approver->email;
@@ -565,17 +577,19 @@ class KonsultasiAdminController extends Controller
         }
     }
 
-    private function availableStaffFor(Meeting $meeting, array $staff): array
+    private function availableStaffFor(Meeting $meeting, Collection $staff): array
     {
         $busyStaff = Meeting::query()
-            ->whereIn('assigned_staff', $staff)
+            ->whereIn('assigned_staff_id', $staff->pluck('id'))
             ->where('status', 2)
             ->whereDate('tanggal', $meeting->tanggal)
             ->where('start_time', '<', $meeting->end_time)
             ->where('end_time', '>', $meeting->start_time)
-            ->pluck('assigned_staff')
+            ->pluck('assigned_staff_id')
             ->all();
 
-        return array_values(array_diff($staff, $busyStaff));
+        return $staff->reject(fn (ConsultationStaff $staffMember) => in_array($staffMember->id, $busyStaff))
+            ->pluck('name')
+            ->all();
     }
 }
