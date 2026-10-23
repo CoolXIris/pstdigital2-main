@@ -21,6 +21,7 @@ import bps_csv_catalog
 import bps_csv_search
 import bps_data_store
 import sinonim
+import sumber_link
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ _VARIABLE_SYNONYMS = {
     "penduduk": "populasi",
     "populasi": "penduduk",
     "warga": "penduduk",
+    "orang": "penduduk",
     "upah": "gaji",
     "gaji": "upah",
     "penghasilan": "pendapatan",
@@ -72,7 +74,7 @@ _GENDER_FEMALE_SYNONYMS = ("perempuan", "wanita", "cewek")
 _VARIABLE_SYNONYM_GROUPS = (
     ("miskin", "kemiskinan"),
     ("penganggur", "pengangguran", "pengangguran terbuka"),
-    ("penduduk", "warga", "jiwa", "populasi", "masyarakat", "rakyat"),
+    ("penduduk", "warga", "orang", "jiwa", "populasi", "masyarakat", "rakyat"),
     ("upah", "gaji", "penghasilan", "pendapatan"),
     _GENDER_MALE_SYNONYMS,
     _GENDER_FEMALE_SYNONYMS,
@@ -112,7 +114,7 @@ _SEARCH_FILLER_WORDS = {
     "data", "terbaru", "terkini", "terakhir", "tahun", "pada", "di", "ke", "dari",
     "untuk", "tentang", "mengenai", "yang", "dan", "atau", "dengan", "saya",
     "ingin", "dong", "kah", "angka", "nilai", "jumlah", "adalah", "tersebut",
-    "jelaskan", "sebutkan", "besaran", "menurut", "per", "tiap", "seluruh", "orang",
+    "jelaskan", "sebutkan", "besaran", "menurut", "per", "tiap", "seluruh",
     "info", "informasi",
     "kab", "kabupaten", "kota", "provinsi", "sumsel", "sumatera", "selatan",
 }
@@ -238,6 +240,11 @@ def _clean_search_keyword(keyword: str) -> str:
         raw_keyword,
         flags=re.IGNORECASE,
     )
+    prison_context = re.search(
+        r"\b(penjara|tahanan|narapidana|dipenjara|tindak\s+pidana|kejahatan)\b",
+        raw_keyword,
+        re.IGNORECASE,
+    ) is not None
     result = raw_keyword.casefold()
     for canonical, aliases in _VARIABLE_SYNONYM_PHRASES:
         for alias in sorted(aliases, key=len, reverse=True):
@@ -250,7 +257,8 @@ def _clean_search_keyword(keyword: str) -> str:
     result = re.sub(r"\b20\d{2}\b", " ", result)
     words = [
         word for word in re.findall(r"[a-z0-9]+", result.casefold())
-        if word not in _SEARCH_FILLER_WORDS
+        if not (prison_context and word == "orang")
+        and word not in _SEARCH_FILLER_WORDS
         and word not in _MONTH_WORDS
         and word not in sinonim.STOP
         and word not in sinonim.GENERIC
@@ -484,6 +492,7 @@ def _rank_local_variables(
         variable["similarity_score"] = match["skor_kemiripan"]
         variable["match_type"] = match["jenis_kecocokan"]
         variable["core_terms"] = match["kata_inti_cocok"]
+        variable["topic_match"] = match.get("topik_cocok", False)
         variable["synonyms_used"] = match["sinonim_digunakan"]
         variable["search_score"] = match["skor"]
         matches.append(variable)
@@ -564,11 +573,13 @@ def cari_tabel_katalog(
             "skor": match["skor"],
             "skor_kemiripan": match["skor_kemiripan"],
             "kata_inti_cocok": match["kata_inti_cocok"],
+            "topik_cocok": match.get("topik_cocok", False),
             "sinonim_digunakan": match["sinonim_digunakan"],
             "jenis_kecocokan": match["jenis_kecocokan"],
         })
     return {
         "kata_inti": search["kata_inti"],
+        "kata_topik": search.get("kata_topik"),
         "hasil": results,
         "kandidat_terdekat": search["saran"],
         "status_hasil": "ditemukan" if results else "kosong",
@@ -662,6 +673,7 @@ def cari_variabel(
             "skor_kemiripan": variable.get("similarity_score"),
             "jenis_kecocokan": variable.get("match_type"),
             "kata_inti_cocok": variable.get("core_terms") or [],
+            "topik_cocok": bool(variable.get("topic_match")),
             "sinonim_digunakan": variable.get("synonyms_used") or {},
             "status_tarik": variable.get("status_tarik") or "belum_diaudit",
         })
@@ -1115,6 +1127,7 @@ def simdasi_cari_data(
 
     result = {
         "judul": table_data.get("judul_tabel") or table.get("judul"),
+        "id_tabel": table.get("id_tabel"),
         "sumber": "BPS Provinsi Sumatera Selatan",
         "tahun": table_data.get("tahun_data") or selected_year,
         "subjek": table_data.get("subject") or table.get("subject"),
@@ -1130,6 +1143,10 @@ def simdasi_cari_data(
         "terpotong": len(rows) > 150,
         "data": results,
         "status_hasil": "ditemukan",
+        "metadata_sumber": sumber_link.metadata_tabel(
+            selected_row,
+            tahun=table_data.get("tahun_data") or selected_year,
+        ),
     }
     if requested_year is not None and selected_year != requested_year:
         result["tahun_diminta_tidak_tersedia"] = requested_year
@@ -1205,6 +1222,33 @@ def _resolve_region(wilayah: str) -> tuple[Optional[str], list[str]]:
             return scores[0][2], []
 
     return None, candidates
+
+
+_OUTSIDE_AREAS = (
+    "aceh|sumatera utara|sumut|sumatera barat|sumbar|riau|kepulauan riau|kepri|jambi|bengkulu|"
+    "lampung|bangka belitung|babel|dki jakarta|jakarta|jawa barat|jabar|jawa tengah|jateng|"
+    "jawa timur|jatim|yogyakarta|banten|bali|nusa tenggara barat|ntb|nusa tenggara timur|ntt|"
+    "kalimantan barat|kalimantan tengah|kalimantan selatan|kalimantan timur|kalimantan utara|"
+    "sulawesi utara|sulawesi tengah|sulawesi selatan|sulawesi tenggara|sulawesi barat|gorontalo|"
+    "maluku utara|maluku|papua barat daya|papua barat|papua selatan|papua tengah|papua pegunungan|papua|"
+    "medan|batam|pekanbaru|padang|bandar lampung|bandung|bekasi|depok|tangerang|bogor|semarang|"
+    "surabaya|malang|solo|surakarta|denpasar|mataram|kupang|pontianak|banjarmasin|balikpapan|"
+    "samarinda|makassar|manado|ambon|jayapura|banda aceh|pangkal pinang|tanjung pinang|serang|"
+    "indonesia|nasional"
+)
+_OUTSIDE_AREA_RE = re.compile(rf"\b(?:{_OUTSIDE_AREAS})\b", re.IGNORECASE)
+_SUMSEL_SCOPE_RE = re.compile(r"\b(sumsel|sumatera\s+selatan)\b", re.IGNORECASE)
+
+
+def outside_scope_area(text: str) -> Optional[str]:
+    """Return a non-Sumsel province/city named in the text, if no Sumsel region is named."""
+    match = _OUTSIDE_AREA_RE.search(text or "")
+    if not match:
+        return None
+    region, _ = resolve_region_from_text(text)
+    if (region and region != "Provinsi Sumatera Selatan") or _SUMSEL_SCOPE_RE.search(text):
+        return None
+    return match.group(0).title()
 
 
 def resolve_region_from_text(text: str) -> tuple[Optional[str], list[str]]:
@@ -1393,6 +1437,7 @@ def _format_data(
 
     formatted = {
         "judul": metadata.get("judul") or judul,
+        "id_tabel": str(var_id),
         "sumber": "BPS Provinsi Sumatera Selatan",
         "sifat_data": "proyeksi, bukan hasil pencacahan" if "proyeksi" in str(judul).lower() else "data resmi",
         "satuan": metadata.get("satuan") or var_info.get("unit"),
@@ -1404,6 +1449,10 @@ def _format_data(
         "jumlah_baris": len(rows),
         "terpotong": len(rows) > 150,
         "data": rows[:150],
+        "metadata_sumber": sumber_link.metadata_tabel(
+            _dynamic_table_row(var_id, str(period["th"])),
+            tahun=period["th"],
+        ),
     }
     if metadata.get("last_update_bps"):
         formatted["last_update_bps"] = metadata["last_update_bps"]
@@ -1553,6 +1602,16 @@ def ambil_data(
                 "tahun_tersedia": [item["tahun"] for item in data_by_year],
                 "tahun_tidak_tersedia": sorted(set(missing_years), key=int),
                 "jumlah_tahun": len(data_by_year),
+                **(
+                    {
+                        "metadata_sumber": sumber_link.metadata_tabel(
+                            _dynamic_table_row(vid, str(data_by_year[-1]["tahun"])),
+                            tahun=f"{start_year}-{end_year}",
+                        )
+                    }
+                    if data_by_year
+                    else {}
+                ),
                 **({"wilayah_ditafsirkan": resolved_region} if resolved_region else {}),
                 "status_hasil": "ditemukan" if data_by_year else "kosong",
             }
@@ -1684,9 +1743,10 @@ def nama_indikator_utama() -> list[str]:
 
 
 _EDITORIAL_ID_FIELDS = {
-    "pressrelease": ("br_id", "pressrelease_id", "id"),
+    "pressrelease": ("brs_id", "br_id", "pressrelease_id", "id"),
     "publication": ("pub_id", "publication_id", "id"),
     "news": ("news_id", "id"),
+    "infographic": ("inf_id", "id"),
 }
 _EDITORIAL_MONTHS = {
     "januari": 1, "februari": 2, "maret": 3, "april": 4,
@@ -1704,7 +1764,10 @@ def _editorial_records(payload: dict) -> list[dict]:
                 return [record for record in records if isinstance(record, dict)]
         if any(
             key in data
-            for key in ("title", "judul", "abstract", "br_id", "pub_id", "news_id", "id")
+            for key in (
+                "title", "judul", "abstract", "brs_id", "br_id", "pub_id",
+                "news_id", "inf_id", "id",
+            )
         ):
             return [data]
         if not data:
@@ -1722,7 +1785,10 @@ def _editorial_records(payload: dict) -> list[dict]:
         if isinstance(record, dict)
         and any(
             key in record
-            for key in ("title", "judul", "abstract", "br_id", "pub_id", "news_id", "id")
+            for key in (
+                "title", "judul", "abstract", "brs_id", "br_id", "pub_id",
+                "news_id", "inf_id", "id",
+            )
         )
     ]
     if records:
@@ -1825,10 +1891,11 @@ def _editorial_content_search(
             if detail_unavailable or not summary:
                 detail_failures += 1
             source_link = _editorial_value(
-                merged, "pdf", "pdf_url", "url_pdf", "link", "url", "permalink"
+                merged, "pdf", "pdf_url", "url_pdf", "dl", "link", "url", "permalink"
             )
             if source_link and not source_link.startswith(("https://", "http://")):
                 source_link = ""
+            source_metadata = sumber_link.link_konten(model, row, detail)
             results.append({
                 "id": item_id or None,
                 "judul": _editorial_value(merged, "title", "judul", "name"),
@@ -1837,6 +1904,22 @@ def _editorial_content_search(
                 ),
                 "ringkasan": summary,
                 "tautan": source_link,
+                "metadata_sumber": {
+                    "jenis": model,
+                    "judul": _editorial_value(merged, "title", "judul", "name"),
+                    **source_metadata,
+                    "pdf_url": (
+                        source_metadata.get("pdf_url")
+                        or source_link
+                    ),
+                    "tahun": (
+                        _editorial_value(merged, "rl_date", "release_date", "pub_date", "date")[:4]
+                        or None
+                    ),
+                    "tanggal_rilis": _editorial_value(
+                        merged, "rl_date", "release_date", "pub_date", "date", "updt_date"
+                    ) or None,
+                },
             })
 
         result = {
@@ -1894,6 +1977,17 @@ def berita_statistik(
 ) -> dict:
     """Search BPS news and retrieve the returned article summary for up to three results."""
     return _editorial_content_search("news", kata_kunci, jumlah, tahun, bulan, halaman)
+
+
+def infografis_terbaru(
+    kata_kunci: Optional[str] = None,
+    jumlah: int = 3,
+    tahun: Optional[int] = None,
+    bulan: Optional[str] = None,
+    halaman: int = 1,
+) -> dict:
+    """Search official BPS Sumatera Selatan infographics."""
+    return _editorial_content_search("infographic", kata_kunci, jumlah, tahun, bulan, halaman)
 
 
 def _static_table_rows(keyword: str, domain: str) -> list[dict]:
@@ -2202,6 +2296,10 @@ def tabel_statis(
                     "sumber": "BPS Provinsi Sumatera Selatan",
                     "isi": text,
                     **table_info,
+                    "metadata_sumber": sumber_link.metadata_tabel(
+                        table["catalog_row"],
+                        tahun=table_info.get("tahun") or table_info.get("tahun_terpilih"),
+                    ),
                     **(
                         {"excel": excel_link}
                         if (excel_link := _static_excel_link(payload))
@@ -2245,6 +2343,7 @@ TOOLS = [
         berita_resmi_statistik,
         publikasi_terbaru,
         berita_statistik,
+        infografis_terbaru,
         tabel_statis,
         simdasi_daftar_tabel,
         simdasi_cari_data,

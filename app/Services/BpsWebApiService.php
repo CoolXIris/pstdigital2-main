@@ -243,7 +243,7 @@ class BpsWebApiService
 
     public function isDataQuestion(string $question): bool
     {
-        return preg_match('/\b(berapa|persen\w*|persentase|jumlah|total|warga|masyarakat|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|rls|hls|sekolah|murid|mahasiswa|dosen|universitas|perguruan|indikator|data|statistik|bencana|korban|kerusakan|lingkungan)\b/i', $question) === 1;
+        return preg_match('/\b(berapa|persen\w*|persentase|jumlah|total|orang|jiwa|warga|masyarakat|angka|nilai|laju|tingkat|indeks|pertumbuhan|inflasi|miskin\w*|kemiskinan|penduduk|populasi|pdrb|bruto|ekspor|impor|upah|penganggur\w*|ekonomi|produksi|harga|gini|ntp|tpt|ipm|rls|hls|sekolah|murid|mahasiswa|dosen|universitas|perguruan|indikator|data|statistik|bencana|korban|kerusakan|lingkungan)\b/i', $question) === 1;
     }
 
     private function hasDynamicDataIntent(string $question): bool
@@ -410,7 +410,10 @@ class BpsWebApiService
                         $this->tableRegionFilterForQuestion($question)
                     );
                 if ($detail !== null) {
-                    $context[] = '[Sumber: BPS WebAPI, '.$table['title'].'] '.$detail;
+                    $context[] = $this->formatSourceSection(
+                        '[Sumber: BPS WebAPI, '.$table['title'].']',
+                        $detail
+                    );
                 }
             }
 
@@ -523,7 +526,126 @@ class BpsWebApiService
             $answer .= "\nDaftar di atas hanya menampilkan sebagian entri katalog.";
         }
 
+        if ($isEditorial) {
+            $sourceLines = $this->sourceLinesForItems($result['items'], $catalog['model']);
+            if ($sourceLines !== '') {
+                $answer = preg_replace('~https?://[^\s<>()]+~iu', '', $answer) ?? $answer;
+                $answer = rtrim($answer)."\n\n".$sourceLines;
+            }
+        }
+
         return $answer;
+    }
+
+    public function sourceLinesForContext(?string $context, string $question = ''): string
+    {
+        if (! is_string($context) || ! str_contains($context, '[Sumber:')) {
+            return '';
+        }
+
+        $sources = [];
+        if (preg_match_all(
+            '/\[Sumber:\s*(?:WebAPI BPS Sumatera Selatan|BPS WebAPI),\s*([^\]]+)\]/u',
+            $context,
+            $matches
+        )) {
+            $rows = $this->csvCatalogRows();
+            $failedUrls = $this->failedCatalogUrls();
+            preg_match_all('/"var_id"\s*:\s*"?(\d+)"?/u', $context, $variableIds);
+            $titles = array_map(static function (string $value): string {
+                $value = trim($value);
+                if (preg_match('/^domain\s+/iu', $value)) {
+                    $parts = explode(',', $value);
+                    $value = trim((string) end($parts));
+                }
+
+                return $value;
+            }, $matches[1]);
+            foreach (array_values(array_unique($titles)) as $index => $title) {
+                foreach ($rows as $row) {
+                    $titleMatches = mb_strtolower(trim((string) ($row['judul'] ?? ''))) === mb_strtolower($title);
+                    $hasVariableId = isset($variableIds[1][$index]);
+                    $idMatches = $hasVariableId
+                        && (string) ($row['id_tabel'] ?? '') === (string) $variableIds[1][$index];
+                    if ($hasVariableId ? ! $idMatches : ! $titleMatches) {
+                        continue;
+                    }
+                    $pageUrl = (string) ($row['url_halaman'] ?? '');
+                    $url = isset($failedUrls[$pageUrl]) ? '' : $this->verifiedSourceUrl($pageUrl);
+                    if ($url === '' && ctype_digit((string) ($row['id_subjek'] ?? ''))) {
+                        $url = 'https://sumsel.bps.go.id/id/statistics-table?subject='.$row['id_subjek'];
+                    }
+                    if ($url !== '') {
+                        $sources[] = ['title' => $title, 'url' => $url];
+                    }
+                    break;
+                }
+            }
+        }
+
+        $catalog = $this->catalogIntent($question);
+        if (preg_match_all('/^\d+\.\s+(\{.*\})$/mu', $context, $items)) {
+            $decodedItems = [];
+            foreach ($items[1] as $encodedItem) {
+                $item = json_decode($encodedItem, true);
+                if (is_array($item)) {
+                    $decodedItems[] = $item;
+                }
+            }
+            $sources = array_merge(
+                $sources,
+                $this->sourceItems($decodedItems, (string) ($catalog['model'] ?? ''))
+            );
+        }
+
+        return $this->formatSourceLines($sources);
+    }
+
+    private function sourceLinesForItems(array $items, string $model): string
+    {
+        return $this->formatSourceLines($this->sourceItems($items, $model));
+    }
+
+    private function sourceItems(array $items, string $model): array
+    {
+        $editorialFallbacks = [
+            'pressrelease' => 'https://sumsel.bps.go.id/id/pressrelease',
+            'publication' => 'https://sumsel.bps.go.id/id/publication',
+            'news' => 'https://sumsel.bps.go.id/id/news',
+        ];
+        $sources = [];
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $title = trim((string) ($item['judul'] ?? ''));
+            $url = $this->verifiedSourceUrl((string) ($item['tautan'] ?? ''));
+            if ($url === '' && isset($editorialFallbacks[$model])) {
+                $url = $editorialFallbacks[$model];
+            }
+            if ($title !== '' && $url !== '') {
+                $sources[] = ['title' => $title, 'url' => $url];
+            }
+        }
+
+        return $sources;
+    }
+
+    private function formatSourceLines(array $sources): string
+    {
+        $lines = [];
+        $seen = [];
+        foreach ($sources as $source) {
+            $url = $source['url'];
+            if (isset($seen[$url])) {
+                continue;
+            }
+            $seen[$url] = true;
+            $title = str_replace(']', '\\]', $source['title']);
+            $lines[] = '- ['.$title.']('.$url.')';
+        }
+
+        return $lines === [] ? '' : "Sumber:\n".implode("\n", $lines);
     }
 
     public function fallbackAnswerFor(string $question): string
@@ -756,9 +878,12 @@ class BpsWebApiService
                 $region
             );
             if ($details !== null) {
-                $sections[] = '[Sumber: BPS WebAPI, '
-                    .html_entity_decode(strip_tags($title), ENT_QUOTES | ENT_HTML5, 'UTF-8')
-                    .'] '.$details;
+                $sections[] = $this->formatSourceSection(
+                    '[Sumber: BPS WebAPI, '
+                        .html_entity_decode(strip_tags($title), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                        .']',
+                    $details
+                );
             }
         }
         if ($sections === []) {
@@ -767,6 +892,11 @@ class BpsWebApiService
 
         return $notice."\n\n".config('chatbot_fallback.data_intro')."\n\n".implode("\n\n", $sections)."\n\n"
             .'Ditampilkan pada '.now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.'."\n\n".$closing;
+    }
+
+    private function formatSourceSection(string $source, string $content): string
+    {
+        return $source."\n\n".ltrim($content);
     }
 
     private function catalogVariableFallback(string $question, array $region, string $apiKey): ?string
@@ -1064,10 +1194,12 @@ class BpsWebApiService
                 }
 
                 $sectionTitle = Str::ucfirst($topic['section_label'] ?? $topic['label']).' '.$region['label'];
+                $pairSectionStart = count($sections);
                 $sections[] = $sectionTitle.':';
                 $regional = ($region['kind'] ?? null) === 'region';
                 $regionalVariables = $regional ? ($topic['variables'] ?? []) : [];
                 $provinceOnly = $regional && $this->isProvinceOnlyFallbackTopic($topic, $question);
+                $hasVerifiedData = false;
                 $useProvinceVariables = ! $regional || $provinceOnly || $regionalVariables === [];
                 $variables = $useProvinceVariables
                     ? ($topic['province_variables'] ?? [])
@@ -1138,6 +1270,7 @@ class BpsWebApiService
                             }
                         }
                         if ($variableDetails !== null) {
+                            $hasVerifiedData = true;
                             $detailLines[] = $variableDetails;
                         } elseif ($lookup['reason'] !== null) {
                             $detailLines[] = 'Data '.$selected['label'].' belum ditemukan: '.$lookup['reason'];
@@ -1163,6 +1296,7 @@ class BpsWebApiService
                         && ! $this->isUnavailableDataContext($legacyContext)
                         && ! str_starts_with($legacyContext, '[WebAPI BPS][INDIKATOR_AMBIGU]')) {
                         $details = $this->dynamicFallbackDetails($legacyQuery, $region, false, $legacyContext);
+                        $hasVerifiedData = $details !== null;
                     }
                     if ($details === null) {
                         $sections[] = 'Belum dapat dipastikan indikator yang dimaksud. Kandidat: '.implode(', ', array_column($variables, 'label')).'.';
@@ -1181,10 +1315,13 @@ class BpsWebApiService
                     $regionUnavailable[] = $region['label'].' untuk '.$topic['label'];
                 }
 
-                if (! ($topic['suppress_brs'] ?? false)) {
-                    $brs = $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
-                    if ($brs !== null) {
-                        $releaseEntries[] = $brs;
+                $brs = ($topic['suppress_brs'] ?? false)
+                    ? null
+                    : $this->fallbackPressReleaseForPair($apiKey, $topic, $region);
+                if ($brs !== null) {
+                    $releaseEntries[] = $brs;
+                    if (! $hasVerifiedData) {
+                        array_splice($sections, $pairSectionStart);
                     }
                 }
             }
@@ -1195,10 +1332,13 @@ class BpsWebApiService
         $lines = [$notice, '', implode("\n\n", $sections)];
         if ($releaseLines !== []) {
             $lines[] = '';
-            $lines[] = 'Berita Resmi Statistik pelengkap:';
+            $lines[] = $sections === []
+                ? 'Berita Resmi Statistik yang ditemukan:'
+                : 'Berita Resmi Statistik pelengkap:';
             $lines = array_merge($lines, $releaseLines);
         }
-        if ($sections === [] || ($releaseLines === [] && count($regionUnavailable) === count($topics) * count($regions))) {
+        if ($releaseLines === []
+            && ($sections === [] || count($regionUnavailable) === count($topics) * count($regions))) {
             $lines[] = '';
             $lines[] = 'Data variabel maupun BRS yang sesuai belum ditemukan. Periksa ketersediaan indikator dan periode yang diminta pada https://sumsel.bps.go.id.';
         }
@@ -1268,13 +1408,13 @@ class BpsWebApiService
     private function hasSeparatePopulationTotalRequest(string $question): bool
     {
         $questionWithoutPoorPopulation = preg_replace(
-            '/\b(?:jumlah|total)?\s*(?:penduduk|warga)\s+miskin\w*\b/iu',
+            '/\b(?:jumlah|total)?\s*(?:penduduk|warga|orang|jiwa|populasi)\s+miskin\w*\b/iu',
             ' ',
             $question
         ) ?? $question;
 
         return preg_match(
-            '/\b(?:jumlah|total)\s+(?:total\s+)?(?:penduduk|warga)\b/iu',
+            '/\b(?:jumlah|total)\s+(?:total\s+)?(?:penduduk|warga|orang|jiwa|populasi)\b/iu',
             $questionWithoutPoorPopulation
         ) === 1;
     }
@@ -2441,9 +2581,10 @@ class BpsWebApiService
 
     private function isPopulationTotalQuestion(string $question): bool
     {
-        return preg_match('/\b(penduduk|warga|masyarakat|populasi)\b/i', $question) === 1
+        return preg_match('/\b(penduduk|warga|orang|jiwa|masyarakat|populasi)\b/i', $question) === 1
             && preg_match('/\b(miskin\w*|kemiskinan|angkatan\s+kerja|ketenagakerjaan|penganggur\w*|tpt|'
-                .'pria|lelaki|cowok|laki[- ]laki|wanita|perempuan|cewek|gender|jenis\s+kelamin)\b/i', $question) !== 1;
+                .'pekerja\w*|bekerja|buruh|karyawan|usia|umur|lansia|pria|lelaki|cowok|laki[- ]laki|'
+                .'wanita|perempuan|cewek|gender|jenis\s+kelamin)\b/i', $question) !== 1;
     }
 
     private function dynamicFallbackDetails(
@@ -3594,6 +3735,48 @@ class BpsWebApiService
             : null;
     }
 
+    private function verifiedSourceUrl(string $url): string
+    {
+        $parts = parse_url(trim($url));
+        if (! is_array($parts)
+            || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || ! isset($parts['host'])
+            || ! preg_match('/(?:^|\.)bps\.go\.id$/i', (string) $parts['host'])
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || preg_match('~/key/[^/]+~i', (string) ($parts['path'] ?? ''))) {
+            return '';
+        }
+
+        parse_str((string) ($parts['query'] ?? ''), $query);
+        foreach (array_keys($query) as $key) {
+            if (in_array(strtolower((string) $key), ['key', 'api_key', 'token'], true)) {
+                return '';
+            }
+        }
+
+        return trim($url);
+    }
+
+    private function failedCatalogUrls(): array
+    {
+        $catalogPath = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+        $auditPath = preg_replace('/\.csv$/i', '_audit.csv', $catalogPath) ?? '';
+        if ($auditPath === '' || ! is_file($auditPath)) {
+            return [];
+        }
+
+        $failedUrls = [];
+        foreach ($this->readCatalogCsv($auditPath, ['url_halaman', 'status_link']) as $row) {
+            if (in_array(strtolower((string) ($row['status_link'] ?? '')), ['gagal', 'tidak_valid'], true)
+                && filled($row['url_halaman'] ?? null)) {
+                $failedUrls[(string) $row['url_halaman']] = true;
+            }
+        }
+
+        return $failedUrls;
+    }
+
     private function csvCatalogRows(): array
     {
         $path = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
@@ -4164,9 +4347,12 @@ class BpsWebApiService
                 );
             if ($detail !== null) {
                 $scope = $tableDomain === '0000' ? 'domain nasional' : 'domain Sumatera Selatan';
-                $context[] = '[Sumber: BPS WebAPI, '.$scope.', '
-                    .html_entity_decode(strip_tags((string) $table['title']), ENT_QUOTES | ENT_HTML5, 'UTF-8')
-                    .'] '.$detail;
+                $context[] = $this->formatSourceSection(
+                    '[Sumber: BPS WebAPI, '.$scope.', '
+                        .html_entity_decode(strip_tags((string) $table['title']), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                        .']',
+                    $detail
+                );
             }
         }
 
@@ -4310,7 +4496,17 @@ class BpsWebApiService
             $truncated = true;
         }
 
-        $lines = array_map(static fn (array $row) => '| '.implode(' | ', $row).' |', $rows);
+        $lines = [];
+        foreach ($rows as $index => $row) {
+            $escaped = array_map(
+                static fn (string $cell) => str_replace('|', '\\|', $cell),
+                $row
+            );
+            $lines[] = '| '.implode(' | ', $escaped).' |';
+            if ($index === 0) {
+                $lines[] = '| '.implode(' | ', array_fill(0, count($row), '---')).' |';
+            }
+        }
         $text = Str::limit(implode("\n", $lines), 2300, '...');
         if ($truncated) {
             $text .= "\n[Data tabel dipotong setelah 25 baris.]";
@@ -4473,6 +4669,10 @@ class BpsWebApiService
             'total' => 'jumlah',
             'masyarakat' => 'penduduk',
             'rakyat' => 'penduduk',
+            'orang' => 'penduduk',
+            'jiwa' => 'penduduk',
+            'populasi' => 'penduduk',
+            'warga' => 'penduduk',
             'laju' => 'pertumbuhan',
         ];
         $keywords = array_diff($matches[0] ?? [], $stopWords);
@@ -4525,6 +4725,9 @@ class BpsWebApiService
             'total' => 'jumlah',
             'masyarakat' => 'penduduk',
             'warga' => 'penduduk',
+            'orang' => 'penduduk',
+            'jiwa' => 'penduduk',
+            'populasi' => 'penduduk',
             'rakyat' => 'penduduk',
             'laju' => 'pertumbuhan',
             'kemiskinan' => 'miskin',

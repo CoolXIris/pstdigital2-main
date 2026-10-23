@@ -131,6 +131,7 @@ class Pencari:
         for document in documents.values():
             document_frequency.update(document)
         count = len(documents)
+        self.unseen_idf = math.log((count + 1) / 0.5) + 1
         self.idf = {
             token: math.log((count + 1) / (frequency + 0.5)) + 1
             for token, frequency in document_frequency.items()
@@ -189,6 +190,30 @@ class Pencari:
             if normalized and normalized not in core:
                 core.append(normalized)
         return core
+
+    def _term_weight(self, term: str) -> float:
+        return max(
+            (
+                self.idf.get(stem(token), self.unseen_idf)
+                for alternative in self._alternatives(term)
+                for token in tokenize(alternative)
+            ),
+            default=self.unseen_idf,
+        )
+
+    def kata_topik(self, pertanyaan: str, core: list[str] | None = None) -> str | None:
+        """Pick the main topic term: highest IDF among core terms, preferring non-verbal words."""
+        core = core if core is not None else self.kata_inti(pertanyaan)
+        if not core:
+            return None
+        verbal = {
+            stem(token)
+            for token in tokenize(str(pertanyaan or "").casefold())
+            if re.match(r"(?:di|ter|ber|me|mem|men|meng|meny)[a-z]{4,}", token)
+            and stem(token) != token
+        }
+        nominal = [term for term in core if term not in verbal] or core
+        return max(nominal, key=lambda term: (self._term_weight(term), len(term)))
 
     def _alternatives(self, term: str) -> list[str]:
         return list(dict.fromkeys([
@@ -411,8 +436,13 @@ class Pencari:
                 "tahun_terbaru": str(newest_year) if newest_year else None,
             })
 
+        topic_word = self.kata_topik(pertanyaan, core)
+        for item in matches:
+            item["topik_cocok"] = topic_word is not None and topic_word in item["kata_inti_cocok"]
+
         matches.sort(
             key=lambda item: (
+                item["topik_cocok"],
                 len(item["kata_inti_cocok"]),
                 {"ok": 2, "belum_diaudit": 1, "kosong": 0, "gagal": 0}.get(
                     item.get("status_tarik", ""), 1
@@ -428,6 +458,7 @@ class Pencari:
         suggestions = self._suggest(core, rejected, top)
         output = {
             "kata_inti": core,
+            "kata_topik": topic_word,
             "hasil": matches[:max(0, top)],
             "saran": suggestions,
         }

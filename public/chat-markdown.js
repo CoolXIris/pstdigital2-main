@@ -133,40 +133,76 @@
         return cleanNode;
     };
 
+    const normalizeTableSpacing = (source) => {
+        const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
+        const output = [];
+        let fenceCharacter = null;
+        let index = 0;
+        const isTableRow = (line) => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('|') && (trimmed.match(/\|/g) || []).length >= 2;
+        };
+        const isTableSeparator = (line) => {
+            if (!isTableRow(line)) return false;
+            const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+            return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim().replace(/\s/g, '')));
+        };
+
+        while (index < lines.length) {
+            let line = lines[index];
+            const fence = line.match(/^\s*(```+|~~~+)/);
+            if (fence) {
+                output.push(line);
+                const marker = fence[1][0];
+                fenceCharacter = fenceCharacter === marker ? null : marker;
+                index++;
+                continue;
+            }
+            let sourcePrefix = null;
+            if (fenceCharacter === null && !isTableRow(line) && isTableSeparator(lines[index + 1] || '')) {
+                const pipeIndex = line.indexOf('|');
+                const embeddedHeader = pipeIndex >= 0 ? line.slice(pipeIndex).trim() : '';
+                if (isTableRow(embeddedHeader)) {
+                    sourcePrefix = line.slice(0, pipeIndex).trim();
+                    line = embeddedHeader;
+                }
+            }
+            if (
+                fenceCharacter === null
+                && isTableRow(line)
+                && isTableSeparator(lines[index + 1] || '')
+            ) {
+                if (output.length && output[output.length - 1].trim()) output.push('');
+                if (sourcePrefix) {
+                    output.push(sourcePrefix, '');
+                }
+                output.push(line, lines[index + 1]);
+                index += 2;
+                while (index < lines.length && isTableRow(lines[index])) output.push(lines[index++]);
+                if (index < lines.length && lines[index].trim()) output.push('');
+                continue;
+            }
+            output.push(line);
+            index++;
+        }
+        return output.join('\n').trim();
+    };
+
     const sanitizeHtml = (html) => {
         const parsed = new DOMParser().parseFromString(String(html), 'text/html');
         const container = document.createElement('div');
         parsed.body.childNodes.forEach((node) => container.append(sanitizeNode(node)));
         container.querySelectorAll('table').forEach((table) => {
-            const rows = [...table.querySelectorAll('tr')];
-            const headerRow = table.querySelector('thead tr') || (rows[0]?.querySelector('th') ? rows[0] : null);
-            const headers = headerRow
-                ? [...headerRow.querySelectorAll('th, td')].map((cell) => cell.textContent.trim())
-                : [];
-            const replacement = document.createDocumentFragment();
-
-            rows.filter((row) => row !== headerRow).forEach((row) => {
-                const paragraph = document.createElement('p');
-                [...row.querySelectorAll('th, td')].forEach((cell, index) => {
-                    if (!cell.textContent.trim()) return;
-                    if (paragraph.childNodes.length) paragraph.append(document.createTextNode('; '));
-                    if (headers[index]) {
-                        const label = document.createElement('strong');
-                        label.textContent = headers[index];
-                        paragraph.append(label, document.createTextNode(': '));
-                    }
-                    cell.childNodes.forEach((child) => paragraph.append(child.cloneNode(true)));
-                });
-                if (paragraph.childNodes.length) replacement.append(paragraph);
-            });
-
-            table.replaceWith(replacement);
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chat-md-table';
+            table.replaceWith(wrapper);
+            wrapper.append(table);
         });
         return container.innerHTML;
     };
 
     const render = (source) => {
-        const markdown = String(source ?? '');
+        const markdown = normalizeTableSpacing(source);
         const html = window.marked && typeof window.marked.parse === 'function'
             ? window.marked.parse(markdown, {
                 breaks: true,

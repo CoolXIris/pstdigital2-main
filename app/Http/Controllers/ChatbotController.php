@@ -123,14 +123,25 @@ class ChatbotController extends Controller
             }
         }
 
-        $reply = $safetyResult['reply']
-            ?? $aiReply
-            ?? $this->fallbackAnswer(
+        if ($safetyResult !== null) {
+            $reply = $safetyResult['reply'];
+        } elseif ($aiReply !== null) {
+            $reply = $aiReply;
+        } else {
+            $reply = $this->fallbackAnswer(
                 $bps,
                 $validated['message'],
                 $context,
-                $this->lastAiReplyUnverified
+                $this->lastAiReplyUnverified,
+                $history
             );
+        }
+        $reply = $this->appendTrustedSources(
+            $reply,
+            $context,
+            $bps,
+            $validated['message']
+        );
         $knowledgeUsed = $context !== null
             && ($aiReply !== null || ($safetyResult === null && $this->isConceptQuestion($validated['message'])));
         $title = $conversation?->title ?? Str::limit(trim($validated['message']), 180, '...');
@@ -207,6 +218,7 @@ class ChatbotController extends Controller
                 $context,
                 $this->lastAiReplyUnverified
             );
+            $reply = $this->appendTrustedSources($reply, $context, $bps, $message);
 
             return response()->json([
                 'reply' => $reply,
@@ -231,6 +243,13 @@ class ChatbotController extends Controller
                     .'Jelaskan faktor umum secara informatif dan hati-hati; jangan menyatakan bahwa faktor tersebut '
                     .'terbukti menyebabkan angka tertentu tanpa bukti. Jika pengguna sudah memberi angka, gunakan '
                     .'angka itu sebagai konteks pertanyaan dan bedakan fakta dari kemungkinan penjelasan.',
+            ])));
+        } elseif ($this->isConceptQuestion($message)) {
+            $context = trim(implode("\n\n", array_filter([
+                $context,
+                'Arahan untuk jawaban: Pengguna meminta definisi atau penjelasan umum. Jawab langsung dengan bahasa '
+                    .'sederhana; jangan mengganti penjelasan dengan tabel atau angka statistik. Gunakan data BPS hanya '
+                    .'jika pengguna secara jelas meminta angka, tahun, wilayah, atau tabel.',
             ])));
         }
         $cacheKey = 'chatbot:ai:v2:'.sha1(mb_strtolower(trim($message)).'|'.sha1((string) $context).'|'.sha1(serialize($history)));
@@ -454,13 +473,23 @@ class ChatbotController extends Controller
         BpsWebApiService $bps,
         string $message,
         ?string $context = null,
-        bool $aiReplyUnverified = false
+        bool $aiReplyUnverified = false,
+        array $history = []
     ): string
     {
+        if ($this->isAdviceQuestion($message)) {
+            return $this->generalAdviceFallback();
+        }
+
         if ($this->isConceptQuestion($message)) {
             if (filled($context)) {
                 return "Berikut penjelasan dari basis pengetahuan BPS yang tersedia:\n\n"
                     .Str::limit(trim($context), 4000, '...');
+            }
+
+            $percentageExplanation = $this->percentageExplanationFallback($message, $history);
+            if ($percentageExplanation !== null) {
+                return $percentageExplanation;
             }
 
             if ($this->isExplanatoryQuestion($message)) {
@@ -489,6 +518,117 @@ class ChatbotController extends Controller
         }
     }
 
+    private function appendTrustedSources(
+        string $reply,
+        ?string $context,
+        BpsWebApiService $bps,
+        string $question
+    ): string {
+        if (! is_string($context) || ! str_contains($context, '[Sumber:')) {
+            return $reply;
+        }
+
+        $sourceLines = $bps->sourceLinesForContext($context, $question);
+        if ($sourceLines === '') {
+            return $reply;
+        }
+
+        $lines = [];
+        $inSourceSection = false;
+        foreach (preg_split('/\R/u', $reply) ?: [] as $line) {
+            if (preg_match('/^\s*Sumber\s*:/iu', $line)) {
+                $inSourceSection = true;
+                continue;
+            }
+            if ($inSourceSection) {
+                if (trim($line) === '') {
+                    $inSourceSection = false;
+                    continue;
+                }
+                if (preg_match('/^\s*(?:[-*+]\s+|https?:\/\/)/iu', $line)) {
+                    continue;
+                }
+                $inSourceSection = false;
+            }
+
+            $line = preg_replace(
+                '/\[([^\]]+)\]\(\s*https?:\/\/[^)]+\)/iu',
+                '$1',
+                $line
+            ) ?? $line;
+            $line = preg_replace('~https?://[^\s<>()]+~iu', '', $line) ?? $line;
+            $lines[] = rtrim($line);
+        }
+
+        $cleanReply = trim(implode("\n", $lines));
+        return $cleanReply === ''
+            ? $sourceLines
+            : $cleanReply."\n\n".$sourceLines;
+    }
+
+    private function isAdviceQuestion(string $message): bool
+    {
+        return preg_match(
+            '/\b(saran|nasihat|rekomendasi|anjuran|tips|masukan|panduan|petunjuk)\b/iu',
+            $message
+        ) === 1;
+    }
+
+    private function generalAdviceFallback(): string
+    {
+        return 'Tentu, saya bisa membantu. Untuk menggunakan data statistik dengan tepat, tentukan dulu '
+            .'pertanyaan atau tujuan Anda, lalu pilih indikator yang sesuai. Periksa definisi indikator, '
+            .'wilayah, periode, satuan, dan sumbernya sebelum membandingkan angka. Jika Anda memberi tahu '
+            .'topik, wilayah, dan tujuan penggunaan datanya, saya dapat membantu menyusun langkah atau '
+            .'merekomendasikan jenis data yang perlu dicari.';
+    }
+
+    private function percentageExplanationFallback(string $message, array $history): ?string
+    {
+        if (preg_match('/\b(maksud(?:nya)?|artinya|arti|makna|jelaskan|bagaimana|gimana)\b/iu', $message) !== 1) {
+            return null;
+        }
+
+        $previousResponses = collect($history)
+            ->reverse()
+            ->pluck('response')
+            ->filter(fn ($response) => is_string($response) && trim($response) !== '');
+        $previousAnswer = $previousResponses->first(
+            fn (string $response) => preg_match('/\d+(?:[.,]\d+)?\s*(?:%|\bpersen\b)/iu', $response) === 1
+        );
+        if (! is_string($previousAnswer)) {
+            return null;
+        }
+
+        $numberPattern = '/(?<![\d.,])(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:%|\bpersen\b)/iu';
+        preg_match($numberPattern, $message, $questionMatch);
+        preg_match($numberPattern, $previousAnswer, $answerMatch);
+        $number = $questionMatch[1] ?? $answerMatch[1] ?? null;
+        if (! is_string($number)) {
+            return null;
+        }
+
+        $percentage = (float) str_replace(',', '.', $number);
+        if ($percentage < 0 || $percentage > 100) {
+            return null;
+        }
+
+        $formatted = str_replace('.', ',', $number);
+        $perHundred = (int) round($percentage);
+        $basis = 'unit yang diukur';
+        if (preg_match('/\b(rumah\s+tangga|penduduk|orang|usaha|perusahaan|angkatan\s+kerja)\b/iu', $previousAnswer, $basisMatch) === 1) {
+            $basis = mb_strtolower($basisMatch[1]);
+        }
+        $year = preg_match('/\b20\d{2}\b/', $previousAnswer, $yearMatch) === 1
+            ? ' pada tahun '.$yearMatch[0]
+            : '';
+
+        return "Angka {$formatted} persen berarti dari setiap 100 {$basis} dalam cakupan data, "
+            ."sekitar {$perHundred} termasuk kelompok yang disebut pada indikator{$year}. "
+            ."Ini adalah proporsi, bukan jumlah absolut; jumlah pastinya memerlukan total {$basis} "
+            .'yang menjadi dasar pengukuran.';
+    }
+
     private function explanatoryFallbackAnswer(string $message): string
     {
         if (preg_match('/\b(penganggur\w*|tpt|ketenagakerjaan|tenaga\s+kerja)\b/iu', $message) === 1) {
@@ -514,16 +654,17 @@ class ChatbotController extends Controller
         }
 
         if (preg_match(
-            '/\b(apa\s+itu|apa\s+artinya|apa\s+makna|apa\s+perbedaan|perbedaan|pengertian|definisi|arti|makna|'
-            .'maksud(?:nya)?|konsep|cara\s+membaca|cara\s+menghitung|cara\s+menafsir\w*|rumus|jelaskan|itu\s+apa)\b/iu',
+            '/\b(apa\s+itu|apa\s+artinya|apa\s+makna|apa\s+maksud(?:nya)?|apa\s+yang\s+dimaksud(?:\s+dengan)?|'
+            .'apa\s+perbedaan|perbedaan|pengertian|definisi|arti|makna|maksud(?:nya)?|konsep|cara\s+membaca|'
+            .'cara\s+menghitung|cara\s+menafsir\w*|rumus|jelaskan|fungsi|kegunaan|tujuan|manfaat)\b'
+            .'|\b[\p{L}\d][\p{L}\d -]{1,80}\s+itu(?:\s+[\p{L}\d-]+){0,4}\s+(?:apa|bagaimana|seperti\s+apa)\b/iu',
             $message
         ) !== 1) {
             return false;
         }
-        if (preg_match('/\b(berapa|nilai|angka|terbaru|terkini|tahun|periode|rilis)\b|\b20\d{2}\b/iu', $message)) {
+        if (preg_match('/\b(berapa|nilai|angka|terbaru|terkini|tahun|periode|rilis)\b|\b20\d{2}\b/iu', $message)        ) {
             return false;
         }
-        return true;
         return true;
     }
     private function isExplanatoryQuestion(string $message): bool

@@ -33,7 +33,7 @@ _REQUIRED_COLUMNS = {
 }
 _EDITORIAL_LIST_TTL = 60 * 60
 _EDITORIAL_DETAIL_TTL = 24 * 60 * 60
-_EDITORIAL_MODELS = {"pressrelease", "publication", "news"}
+_EDITORIAL_MODELS = {"pressrelease", "publication", "news", "infographic"}
 _http = httpx.Client(timeout=8.0)
 _lock = threading.Lock()
 _catalog_cache: tuple[tuple[str, int, int, int, int], list[dict[str, str]]] | None = None
@@ -123,7 +123,14 @@ def _merge_audit_status(rows: list[dict[str, str]], catalog_path: Path) -> None:
             row.get("link_json", ""),
         ))
         if audited_row:
-            for field in ("status_tarik", "status_detail", "dicek_pada"):
+            for field in (
+                "status_tarik",
+                "status_detail",
+                "dicek_pada",
+                "status_link",
+                "status_link_detail",
+                "dicek_link_pada",
+            ):
                 row[field] = str(audited_row.get(field) or "")
 
 

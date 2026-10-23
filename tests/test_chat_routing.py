@@ -62,15 +62,18 @@ class ChatRoutingTests(unittest.TestCase):
             )
         search.assert_not_called()
 
-    def test_markdown_table_output_is_converted_to_plain_bullets(self):
-        rendered = main._plain_text_markdown_tables(
+    def test_markdown_table_is_preserved_and_separated_from_text(self):
+        rendered = main._ensure_markdown_table_spacing(
             "Data terbaru:\n| Wilayah | Tahun | Jumlah |\n|---|---:|---:|\n"
             "| Palembang | 2025 | 20 |\n| Muara Enim | 2025 | 25 |"
         )
 
-        self.assertIn("- Wilayah: Palembang; Tahun: 2025; Jumlah: 20", rendered)
-        self.assertIn("- Wilayah: Muara Enim; Tahun: 2025; Jumlah: 25", rendered)
-        self.assertNotIn("|", rendered)
+        self.assertIn(
+            "Data terbaru:\n\n| Wilayah | Tahun | Jumlah |\n|---|---:|---:|\n"
+            "| Palembang | 2025 | 20 |\n| Muara Enim | 2025 | 25 |",
+            rendered,
+        )
+        self.assertIn("| Muara Enim | 2025 | 25 |", rendered)
 
     def test_multi_topic_parser_keeps_ambiguous_topics_and_alternatives(self):
         candidates = {
@@ -1565,6 +1568,12 @@ class ChatRoutingTests(unittest.TestCase):
             ("jumlah_penduduk", "", "Provinsi Sumatera Selatan"),
         )
         self.assertEqual(
+            main._canonical_indicator_intent("jumlah orang di sumsel terbaru"),
+            ("jumlah_penduduk", "", "Provinsi Sumatera Selatan"),
+        )
+        self.assertEqual(main._classify_question_intent("jumlah orang di sumsel terbaru"), "nilai")
+        self.assertEqual(main.bps_tools._clean_search_keyword("jumlah orang di sumsel terbaru"), "penduduk")
+        self.assertEqual(
             main._canonical_indicator_intent("jumlah penduduk miskin Palembang"),
             ("kemiskinan_jumlah_kab_kota", "", "Kota Palembang"),
         )
@@ -2485,7 +2494,8 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn("Jika status_hasil='gagal_teknis'", instructions)
         self.assertIn("jangan menyatakan data tidak ada di BPS", instructions)
         self.assertIn("Jangan menolak pertanyaan statistik umum", instructions)
-        self.assertIn("Jangan membuat tabel", instructions)
+        self.assertIn("tabel Markdown yang ringkas", instructions)
+        self.assertIn("baris kosong sebelum dan sesudah tabel", instructions)
         self.assertIn("daftar berpoin", instructions)
         self.assertIn("mudah dipahami orang awam", instructions)
 
@@ -2707,6 +2717,51 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertIn(": 9 Jiwa.", reply)
         self.assertIn("proyeksi", reply)
         self.assertNotIn("99", reply)
+
+    def test_main_topic_word_must_match_but_partial_core_match_survives(self):
+        import bps_tools
+
+        expectations = {
+            "Jumlah Korban yang Diakibatkan Bencana Alam di sumsel terbaru": "bencana",
+            "berapa jumlah PNS (pegawai negeri sipil)": "pns",
+            "total perpustakaan di palembang": "perpustakaan",
+            "rata-rata gaji di sumsel": "upah",
+        }
+        for question, topic in expectations.items():
+            with self.subTest(question=question):
+                result = bps_tools.cari_tabel_katalog(question)
+                self.assertIn(topic, result.get("kata_topik", ""))
+                matched = [item for item in result.get("hasil", []) if item.get("topik_cocok")]
+                self.assertTrue(matched)
+
+    def test_unrelated_topics_have_no_topic_match(self):
+        import bps_tools
+
+        for question in ("harga bitcoin", "harga mobil listrik di Lahat", "harga tiket pesawat"):
+            with self.subTest(question=question):
+                result = bps_tools.cari_tabel_katalog(question)
+                self.assertFalse([item for item in result.get("hasil", []) if item.get("topik_cocok")])
+
+    def test_outside_sumsel_area_detection(self):
+        import bps_tools
+
+        for question in ("penduduk DKI Jakarta", "jumlah sekolah di Bandung", "kemiskinan Jawa Timur 2024", "PDRB Papua"):
+            with self.subTest(question=question):
+                self.assertIsNotNone(bps_tools.outside_scope_area(question))
+        for question in ("penduduk Palembang", "jumlah sekolah di Lahat", "kemiskinan Sumatera Selatan"):
+            with self.subTest(question=question):
+                self.assertIsNone(bps_tools.outside_scope_area(question))
+
+    def test_intent_cues_cover_spelling_variants(self):
+        cases = {
+            "sapaan": ("makasihhh banyak", "thx", "selamat sore min", "okeee sip"),
+            "definisi": ("aoa itu inflasi", "pngertian pdrb", "bagaimana cara membaca angka inflasi"),
+            "panduan": ("ada tips memilih indikator untuk skripsi?", "minta sarannya memahami angka inflasi"),
+        }
+        for expected, questions in cases.items():
+            for question in questions:
+                with self.subTest(question=question):
+                    self.assertEqual(main._classify_question_intent(question), expected)
 
 
 if __name__ == "__main__":

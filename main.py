@@ -2,6 +2,7 @@ import hmac
 import json
 import logging
 import os
+import difflib
 import re
 import threading
 import time
@@ -19,6 +20,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 import bps_tools
+import sumber_link
 import bps_csv_search
 
 load_dotenv()
@@ -56,14 +58,14 @@ MAX_CHATS_PER_MINUTE = int(os.getenv("GEMINI_MAX_CHATS_PER_MINUTE", "4"))
 DATA_QUESTION = re.compile(
     r"\b(berapa|persen\w*|jumlah|total|angka|nilai|laju|tingkat|indeks|ipm|pertumbuhan|inflasi|tpt|"
     r"\w*miskin\w*|penduduk|warga|jiwa|populasi|pdrb|ekspor|impor|upah|harga|penganggur\w*|"
-    r"ntp|terbaru|produksi|kasus|penyakit|penderita|gaji|penghasilan|pendapatan|minimum|ump|umk|umr|padi|beras|"
+    r"orang|ntp|terbaru|produksi|kasus|penyakit|penderita|gaji|penghasilan|pendapatan|minimum|ump|umk|umr|padi|beras|"
     r"korban|bencana|desa|kantor|pos|perpustakaan|pns|asn|pegawai|"
     r"luas|panen|pertanian|perkebunan|perikanan|konsumsi|rls|hls|rata-rata\s+lama\s+sekolah|"
     r"harapan\s+lama\s+sekolah)\b",
     re.IGNORECASE,
 )
 _STATISTIC_TOPIC = re.compile(
-    r"\b(ipm|indeks pembangunan manusia|kepadatan|penduduk|warga|jiwa|populasi|"
+    r"\b(ipm|indeks pembangunan manusia|kepadatan|penduduk|warga|orang|jiwa|populasi|"
     r"kemiskinan|miskin\w*|penganggur\w*|tpt|upah|gaji|penghasilan|pendapatan|"
     r"ump|umk|umr|inflasi|ntp|nilai tukar petani|ekspor|impor|harga|pdrb|"
     r"produk domestik regional bruto|pertumbuhan|kasus|penyakit|penderita|rasio gini|gini|"
@@ -77,11 +79,14 @@ _SERVICE_GUIDANCE = re.compile(
     r"\b(minta|meminta|mencari|mendapatkan|mengakses|mengunduh|memperoleh|"
     r"minta data|data|statistik|layanan)\b"
     r"|\b(cara minta data|cara meminta data|cara mencari data|di mana mencari data|"
-    r"dimana mencari data|permintaan data|layanan statistik|layanan bps)\b",
+    r"dimana mencari data|permintaan data|layanan statistik|layanan bps)\b"
+    r"|\b(?:tolong\s+)?(?:beri|berikan|minta)\s+(?:saran|nasihat|rekomendasi|panduan)\b"
+    r"|\b(saran|nasihat|rekomendasi|panduan)\b.{0,80}"
+    r"\b(menyusun|membuat|menulis|merancang|memilih|menggunakan|memahami)\b",
     re.IGNORECASE,
 )
 _CONCEPT_QUESTION = re.compile(
-    r"\b(apa itu|apa perbedaan|perbedaan|definisi|pengertian|arti|makna|maksud|konsep|bagaimana|"
+    r"\b(apa itu|apa yang dimaksud|apa perbedaan|perbedaan|definisi|pengertian|arti|makna|maksud|konsep|bagaimana|"
     r"cara membaca|cara menafsir\w*|cara menghitung|rumus|metodologi|jelaskan)\b",
     re.IGNORECASE,
 )
@@ -99,6 +104,10 @@ _BRS_QUESTION = re.compile(
 )
 _NEWS_QUESTION = re.compile(
     r"\b(berita|kegiatan|sensus|survei|survey)\b",
+    re.IGNORECASE,
+)
+_INFOGRAPHIC_QUESTION = re.compile(
+    r"\b(infografis|infografik)\b",
     re.IGNORECASE,
 )
 _NUMBER_TOKEN = re.compile(
@@ -170,16 +179,24 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
 
 
+def _chat_temperature() -> float:
+    try:
+        return float(os.getenv("CHATBOT_TEMPERATURE", "0.2"))
+    except ValueError:
+        return 0.2
+
+
 def build_instructions() -> str:
     today = datetime.now(WIB).strftime("%Y-%m-%d")
     return (
         f"Kamu adalah asisten chatbot resmi BPS Provinsi Sumatera Selatan. Tanggal hari ini: {today} (WIB). "
         "Jawab dalam Bahasa Indonesia yang jelas, sopan, ringkas, dan profesional; jangan memperkenalkan diri berulang.\n\n"
         "FORMAT JAWABAN:\n"
-        "Gunakan paragraf dan kalimat yang mudah dipahami orang awam. Jangan membuat tabel. "
-        "Jawab dengan kalimat atau daftar berpoin; jangan gunakan format tabel Markdown. "
-        "Sajikan perbandingan atau beberapa angka sebagai kalimat singkat dengan nama indikator, wilayah, periode, dan satuan yang jelas. "
-        "Gunakan daftar singkat hanya jika membantu pembaca.\n\n"
+        "Gunakan paragraf dan kalimat yang mudah dipahami orang awam. "
+        "Untuk data dengan beberapa kolom, wilayah, atau seri, gunakan tabel Markdown yang ringkas; "
+        "beri satu baris kosong sebelum dan sesudah tabel. Jangan gunakan HTML mentah. "
+        "Untuk jawaban sederhana, gunakan kalimat atau daftar berpoin singkat. "
+        "Pastikan nama indikator, wilayah, periode, dan satuan tetap jelas.\n\n"
         "ATURAN DATA:\n"
         "1. Semua angka statistik WAJIB berasal dari sumber terverifikasi. Jangan menjawab angka dari ingatan. "
         "Jika referensi file pengetahuan yang relevan menjadi sumber utama, angka hanya boleh dikutip jika "
@@ -260,7 +277,9 @@ def build_instructions() -> str:
         "13. Sebutkan periode data menurut judul BRS (mis. bulan survei), bukan bulan tanggal rilisnya.\n"
         "14. Untuk indikator tahunan, tentukan kebaruan hanya dari tahun yang tercantum pada baris katalog CSV; "
         "jangan memeriksa rilis melalui sumber API lain.\n"
-        "15. Jangan menyatakan apa yang dikumpulkan atau tidak dikumpulkan BPS kecuali berdasarkan hasil tools; gunakan frasa 'tidak ditemukan pada data yang tersedia'.\n"
+        "15. Jangan menyatakan apa yang dikumpulkan atau tidak dikumpulkan BPS kecuali berdasarkan hasil tools. "
+        "Jika data tidak ditemukan atau berada di luar cakupan, nyatakan dengan tegas 'tidak ditemukan pada data yang tersedia'; "
+        "jangan menyertakan angka atau kandidat yang hanya cocok pada kata umum.\n"
         "16. Jangan tampilkan label kategori kosong atau 'Tidak ada'; jangan menulis keluaran seperti 'Tidak ada: 9,04'. "
         "Jika BRS yang ditemukan sudah menjawab pertanyaan, jangan tampilkan pesan indikator keliru/B07 atau baris "
         "'Data variabel belum ditemukan' yang bertentangan dengan jawaban BRS. Sapaan seperti 'halo' dan ucapan "
@@ -270,6 +289,7 @@ def build_instructions() -> str:
         "17. Jangan menolak pertanyaan statistik umum atau konsep hanya karena tidak tersedia di WebAPI BPS Sumatera Selatan. "
         "Jawab pengetahuan statistik umum secara wajar dan tandai sebagai penjelasan umum, bukan angka resmi BPS Sumatera Selatan. "
         "Jangan mengarang angka aktual, tahun, atau rincian wilayah yang tidak didukung tools; aturan keselamatan tetap berlaku.\n"
+        "18. Jangan menulis URL atau tautan sendiri. Sistem akan menambahkan tautan sumber yang sudah diverifikasi setelah jawaban selesai.\n"
     )
 
 
@@ -481,6 +501,184 @@ def _label_tool_result(value: object) -> dict:
     return labeled
 
 
+def _without_source_metadata(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _without_source_metadata(item)
+            for key, item in value.items()
+            if key.casefold() not in {
+                "metadata_sumber",
+                "tautan",
+                "url",
+                "url_pdf",
+                "pdf_url",
+                "url_halaman",
+                "link_json",
+                "link_tabel",
+            }
+        }
+    if isinstance(value, list):
+        return [_without_source_metadata(item) for item in value]
+    return value
+
+
+def _context_without_urls(context: str) -> str:
+    return re.sub(r"https?://[^\s\"'<>]+", "", context, flags=re.IGNORECASE)
+
+
+def _source_metadata_from_payloads(
+    payloads: list[object],
+    reply: str,
+) -> list[dict[str, object]]:
+    found: list[dict[str, object]] = []
+    reply_text = reply.casefold()
+
+    def visit(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+            return
+        if not isinstance(value, dict):
+            return
+
+        metadata = value.get("metadata_sumber")
+        if isinstance(metadata, dict):
+            found.append(metadata)
+            return
+
+        result_items = value.get("hasil")
+        if isinstance(result_items, list):
+            item_metadata = [
+                item["metadata_sumber"]
+                for item in result_items
+                if isinstance(item, dict) and isinstance(item.get("metadata_sumber"), dict)
+            ]
+            if item_metadata:
+                mentioned = [
+                    item for item in item_metadata
+                    if str(item.get("judul") or "").casefold() in reply_text
+                ]
+                found.extend(mentioned or item_metadata[:1])
+                return
+
+        for key, child in value.items():
+            if key not in {
+                "kandidat",
+                "kandidat_terdekat",
+                "pencarian_variabel",
+                "pencarian_tabel",
+                "metadata_sumber",
+            }:
+                visit(child)
+
+    for payload in payloads:
+        visit(payload)
+    return found
+
+
+def _source_metadata_from_reference(
+    context: str | None,
+    question: str = "",
+    reply: str = "",
+) -> list[dict[str, object]]:
+    if not context or not re.search(
+        r"\[Sumber:\s*(?:BPS WebAPI|WebAPI BPS(?: Sumatera Selatan|;)|Berita Resmi Statistik BPS,)",
+        context,
+        re.I,
+    ):
+        return []
+    titles = re.findall(
+        r"\[Sumber:\s*(?:BPS WebAPI|WebAPI BPS Sumatera Selatan)\s*,\s*([^\]]+)\]",
+        context,
+        re.IGNORECASE,
+    )
+    try:
+        rows = bps_tools._catalog_rows()
+    except bps_tools.BpsError:
+        logger.warning("Katalog lokal tidak tersedia untuk membangun tautan sumber konteks BPS.")
+        rows = []
+    results = []
+    variable_ids = re.findall(r'"var_id"\s*:\s*"?(\d+)"?', context)
+    for index, title in enumerate(titles):
+        if title.casefold().startswith("domain ") and "," in title:
+            title = title.rsplit(",", 1)[-1].strip()
+        normalized = " ".join(title.casefold().split())
+        if index < len(variable_ids):
+            matching = [
+                row for row in rows if str(row.get("id_tabel") or "") == variable_ids[index]
+            ]
+        else:
+            matching = [
+                row for row in rows
+                if " ".join(str(row.get("judul") or "").casefold().split()) == normalized
+            ]
+        if matching:
+            results.append(sumber_link.metadata_tabel(matching[0]))
+
+    intent_model = {
+        "brs": "pressrelease",
+        "publikasi": "publication",
+        "berita": "news",
+        "infografis": "infographic",
+    }.get(_classify_question_intent(question))
+    if intent_model and re.search(
+        r"\[Sumber:\s*(?:WebAPI BPS;|Berita Resmi Statistik BPS,)",
+        context,
+        re.IGNORECASE,
+    ):
+        editorial_items = []
+        for encoded_item in re.findall(r"^\d+\.\s+(\{.*\})$", context, re.MULTILINE):
+            try:
+                item = json.loads(encoded_item)
+            except json.JSONDecodeError:
+                logger.warning("Item editorial pada konteks BPS tidak dapat dibaca sebagai JSON.")
+                continue
+            if not isinstance(item, dict):
+                continue
+            source_links = sumber_link.link_konten(intent_model, item)
+            release_date = item.get("tanggal")
+            editorial_items.append({
+                "jenis": intent_model,
+                "judul": str(item.get("judul") or ""),
+                **source_links,
+                "tahun": str(release_date)[:4] if release_date else None,
+                "tanggal_rilis": release_date,
+            })
+        mentioned = [
+            item for item in editorial_items
+            if str(item.get("judul") or "").casefold() in reply.casefold()
+        ]
+        results.extend(mentioned or editorial_items[:1])
+    return results
+
+
+def _answer_with_sources(
+    reply: str,
+    payloads: list[object],
+    *,
+    tools_used: bool,
+    context: str | None = None,
+    status: str | None = None,
+    question: str = "",
+) -> dict[str, object]:
+    sources = _source_metadata_from_payloads(payloads, reply)
+    sources.extend(_source_metadata_from_reference(context, question, reply))
+    source_text = sumber_link.susun_sumber(sources)
+    if sources and not source_text:
+        logger.warning("Metadata sumber BPS ditemukan tetapi tidak memiliki tautan tepercaya.")
+    final_reply = f"{reply.rstrip()}\n\n{source_text}" if source_text else reply
+    result: dict[str, object] = {
+        "reply": final_reply,
+        "data": final_reply,
+        "tools_used": tools_used,
+    }
+    if sources:
+        result["sources"] = sources
+    if status:
+        result["status"] = status
+    return result
+
+
 def _safe_tool_log(name: str, arguments: dict, result: dict) -> None:
     encoded = json.dumps({"arguments": arguments, "result": result}, ensure_ascii=False, default=str)
     for secret in (os.getenv("BPS_API_KEY"), os.getenv("GEMINI_API_KEY")):
@@ -516,7 +714,7 @@ def _generate_without_tools(contents: list[types.Content], instruction: str):
         contents=final_contents,
         config=types.GenerateContentConfig(
             system_instruction=build_instructions(),
-            temperature=0.2,
+            temperature=_chat_temperature(),
         ),
     )
 
@@ -533,7 +731,7 @@ def _generate_with_manual_tools(
     hit_limit = maximum_calls <= 0
     config = types.GenerateContentConfig(
         system_instruction=build_instructions(),
-        temperature=0.2,
+        temperature=_chat_temperature(),
         tools=bps_tools.TOOLS,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
@@ -541,7 +739,7 @@ def _generate_with_manual_tools(
     if force_tool:
         initial_config = types.GenerateContentConfig(
             system_instruction=build_instructions(),
-            temperature=0.2,
+            temperature=_chat_temperature(),
             tools=bps_tools.TOOLS,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             tool_config=types.ToolConfig(
@@ -584,7 +782,10 @@ def _generate_with_manual_tools(
             _safe_tool_log(name, arguments, result)
             records.append({"name": name, "arguments": arguments, "result": result})
             function_responses.append(
-                types.Part.from_function_response(name=name, response={"result": result})
+                types.Part.from_function_response(
+                    name=name,
+                    response={"result": _without_source_metadata(result)},
+                )
             )
 
         pending_contents.append(types.Content(role="user", parts=function_responses))
@@ -643,12 +844,16 @@ def _canonical_indicator_intent(question: str) -> tuple[str, str, Optional[str]]
             name = "kemiskinan_jumlah_kab_kota" if regional else "kemiskinan_jumlah"
         else:
             name = "kemiskinan_persen_kab_kota" if regional else "kemiskinan_persen"
-    elif re.search(r"\b(proyeksi)\b", text) and re.search(r"\b(penduduk|warga|populasi)\b", text):
+    elif re.search(r"\b(proyeksi)\b", text) and re.search(r"\b(penduduk|warga|orang|jiwa|populasi)\b", text):
         name = "proyeksi_penduduk"
     elif (
-        re.search(r"\b(penduduk|warga|populasi)\b", text)
+        re.search(r"\b(penduduk|warga|orang|jiwa|populasi)\b", text)
         and re.search(r"\b(jumlah|berapa|total|banyak)\b", text)
-        and not re.search(r"\b(angkatan\s+kerja|ketenagakerjaan|penganggur\w*|usia|umur|lansia)\b", text)
+        and not re.search(
+            r"\b(angkatan\s+kerja|ketenagakerjaan|penganggur\w*|pekerja\w*|"
+            r"bekerja|buruh|karyawan|usia|umur|lansia)\b",
+            text,
+        )
         and not re.search(
             r"\b(pria|lelaki|cowok|laki[- ]laki|wanita|perempuan|cewek|gender|jenis\s+kelamin)\b",
             text,
@@ -1057,9 +1262,90 @@ def _prefer_knowledge_context(question: str, context: str | None) -> bool:
     ) is not None
 
 
+_DEFINITION_CUES = (
+    "definisi", "pengertian", "arti", "makna", "maksud", "dimaksud", "jelaskan", "terangkan",
+    "artinya", "singkatan", "kepanjangan", "konsep", "istilah",
+)
+_ADVICE_CUES = ("saran", "nasihat", "rekomendasi", "anjuran", "tips", "usul", "masukan", "panduan", "petunjuk")
+_REQUEST_CUES = (
+    "beri", "berikan", "kasih", "minta", "mohon", "tolong", "butuh", "bisa", "bisakah", "ingin", "mau",
+    "bagaimana", "gimana", "cara",
+)
+_CLOSING_CUES = (
+    "terima", "kasih", "makasih", "trims", "terimakasih", "thanks", "thank", "thx", "tq", "oke", "ok",
+    "sip", "siap", "bye", "dadah", "sampai", "jumpa", "cukup", "baik", "mantap", "sama", "selamat",
+    "tinggal", "pamit", "you", "bantuannya", "bantuan", "banget", "ya", "yaa", "nya", "atas",
+)
+_OPENING_CUES = (
+    "halo", "hai", "hi", "hello", "hey", "assalamualaikum", "salam", "selamat", "pagi", "siang", "sore",
+    "malam", "permisi", "apa", "kabar", "kabarnya", "ada", "yang", "bisa", "dibantu", "kamu", "siapa",
+)
+
+
+_FILLER_CUES = ("min", "admin", "kak", "kakak", "mas", "mbak", "pak", "bu", "bro", "dong", "nih", "deh", "sih", "banyak", "bgt")
+_UNDERSTAND_CUES = ("membaca", "menafsirkan", "menafsir", "menghitung", "memahami", "mengartikan", "menginterpretasi")
+_QUESTION_WORD_APA = ("apa", "apaan", "apakah")
+_STRICT_VALUE_CUE = re.compile(r"\b(berapa|terbaru|terkini|periode)\b|\b20\d{2}\b", re.IGNORECASE)
+
+
+def _cue_tokens(text: str) -> list[str]:
+    tokens = [re.sub(r"(.)\1{2,}", r"\1", token) for token in re.findall(r"[a-z]+", text.casefold())]
+    return [token[:-3] if token.endswith("nya") and len(token) > 6 else token for token in tokens]
+
+
+def _has_cue(token: str, vocabulary: tuple[str, ...]) -> bool:
+    if token in vocabulary:
+        return True
+    return len(token) >= 5 and bool(difflib.get_close_matches(token, vocabulary, n=1, cutoff=0.84))
+
+
+def _is_apa(token: str) -> bool:
+    return token in _QUESTION_WORD_APA or (
+        len(token) == 3 and difflib.SequenceMatcher(None, token, "apa").ratio() >= 0.66
+    )
+
+
+def _intent_from_cues(text: str) -> str | None:
+    tokens = _cue_tokens(text)
+    if not tokens or _STRICT_VALUE_CUE.search(text):
+        return None
+    has_topic = _STATISTIC_TOPIC.search(text) is not None
+    social = _CLOSING_CUES + _FILLER_CUES
+    if len(tokens) <= 8 and not has_topic:
+        if "?" not in text and all(_has_cue(token, social) for token in tokens):
+            return "sapaan"
+        if all(_has_cue(token, _OPENING_CUES + social) for token in tokens):
+            return "sapaan"
+    resolved_region, _ = bps_tools.resolve_region_from_text(text)
+    if resolved_region:
+        return None
+    if any(_has_cue(token, _ADVICE_CUES) for token in tokens):
+        return "panduan"
+    if any(_has_cue(token, _DEFINITION_CUES) for token in tokens):
+        return "definisi"
+    if any(_has_cue(token, _UNDERSTAND_CUES) for token in tokens) and any(
+        _has_cue(token, ("cara", "bagaimana", "gimana")) for token in tokens
+    ):
+        return "definisi"
+    if len(tokens) >= 2 and _is_apa(tokens[0]) and tokens[1] in {"itu", "sih", "yang", "maksudnya"}:
+        return "definisi"
+    return None
+
+
 def _classify_question_intent(question: str) -> str:
     text = re.sub(r"\s+", " ", question.casefold()).strip()
     if GREETING_ONLY.fullmatch(text):
+        return "sapaan"
+    cue_intent = _intent_from_cues(text)
+    if cue_intent:
+        return cue_intent
+    if (
+        re.search(r"\b(terima kasih|makasih|trims)\b", text)
+        and not re.search(r"\?", text)
+        and not _STATISTIC_TOPIC.search(text)
+        and not _CONCEPT_VALUE_CUE.search(text)
+        and not _SERVICE_GUIDANCE.search(text)
+    ):
         return "sapaan"
     if _SERVICE_GUIDANCE.search(text):
         return "panduan"
@@ -1073,6 +1359,8 @@ def _classify_question_intent(question: str) -> str:
         return "definisi"
     if re.search(r"\bsimdasi\b", text) and re.search(r"\b(daftar|list|katalog|judul|tabel)\b", text):
         return "nilai"
+    if _INFOGRAPHIC_QUESTION.search(text):
+        return "infografis"
     if _PUBLICATION_QUESTION.search(text):
         return "publikasi"
     if _BRS_QUESTION.search(text):
@@ -1604,15 +1892,9 @@ def _format_editorial_fallback(data: dict, label: str) -> str:
         title = str(item.get("judul") or "").strip() or "Judul tidak tersedia"
         date = str(item.get("tanggal_rilis") or "").strip()
         summary = str(item.get("ringkasan") or "").strip()
-        source = str(item.get("tautan") or "").strip()
         lines = [f"{title} — tanggal rilis: {date or 'tidak tercantum pada respons API'}"]
         if summary:
             lines.append(f"Abstrak/isi yang dikembalikan API: {summary}")
-        lines.append(
-            f"Sumber/PDF: {source}"
-            if source
-            else "Sumber/PDF: tautan tidak tersedia pada respons API."
-        )
         formatted.append("\n".join(lines))
 
     if not formatted:
@@ -1705,47 +1987,55 @@ def _format_catalog_failure(candidate: dict) -> str:
     return f"{message}\nTautan: {link}" if link else message
 
 
-def _plain_text_markdown_tables(text: str) -> str:
+def _ensure_markdown_table_spacing(text: str) -> str:
     lines = text.splitlines()
     output: list[str] = []
     index = 0
+    fence_character = None
+
+    def is_table_row(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith("|") and stripped.count("|") >= 2
+
+    def is_table_separator(line: str) -> bool:
+        if not is_table_row(line):
+            return False
+        cells = line.strip().strip("|").split("|")
+        return len(cells) > 1 and all(
+            re.fullmatch(r":?-{3,}:?", cell.strip().replace(" ", ""))
+            for cell in cells
+        )
+
     while index < len(lines):
         line = lines[index]
-        if not line.strip().startswith("|") or "|" not in line.strip()[1:]:
+        fence = re.match(r"^\s*(```+|~~~+)", line)
+        if fence:
             output.append(line)
             index += 1
+            marker = fence.group(1)[0]
+            fence_character = None if fence_character == marker else marker
             continue
 
-        table_lines = []
-        while index < len(lines) and lines[index].strip().startswith("|"):
-            table_lines.append(lines[index])
-            index += 1
-        rows = [
-            [cell.strip() for cell in row.strip().strip("|").split("|")]
-            for row in table_lines
-        ]
-        if rows and all(
-            cell and re.fullmatch(r":?-{3,}:?", cell.replace(" ", ""))
-            for cell in rows[min(1, len(rows) - 1)]
+        if (
+            fence_character is None
+            and index + 1 < len(lines)
+            and is_table_row(line)
+            and is_table_separator(lines[index + 1])
         ):
-            headers = rows.pop(0)
-            rows.pop(0)
-        else:
-            headers = []
-        for row in rows:
-            if not row or all(not cell for cell in row):
-                continue
-            if headers and len(row) == len(headers):
-                fields = [
-                    f"{header}: {value}"
-                    for header, value in zip(headers, row)
-                    if header and value
-                ]
-                output.append("- " + "; ".join(fields))
-            else:
-                output.append("- " + "; ".join(cell for cell in row if cell))
-        if index < len(lines) and lines[index].strip():
-            output.append("")
+            if output and output[-1].strip():
+                output.append("")
+            output.extend((line, lines[index + 1]))
+            index += 2
+            while index < len(lines) and is_table_row(lines[index]):
+                output.append(lines[index])
+                index += 1
+            if index < len(lines) and lines[index].strip():
+                output.append("")
+            continue
+
+        output.append(line)
+        index += 1
+
     return "\n".join(output).strip()
 
 
@@ -2680,8 +2970,17 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         and _followup_data_intent(question, request.history) is not None
     ):
         intent_kind = "nilai"
-    editorial_intent = intent_kind in {"brs", "publikasi", "berita"}
+    editorial_intent = intent_kind in {"brs", "publikasi", "berita", "infografis"}
     requires_tool = intent_kind in {"nilai", "rentang_waktu"} or editorial_intent
+    outside_area = bps_tools.outside_scope_area(question) if requires_tool else None
+    if outside_area:
+        reply = (
+            f"Maaf, data yang tersedia hanya mencakup Provinsi Sumatera Selatan, "
+            f"sehingga data untuk {outside_area} tidak dapat saya sampaikan. "
+            "Silakan ajukan pertanyaan tentang Sumatera Selatan, atau kunjungi https://www.bps.go.id "
+            "untuk data wilayah lain."
+        )
+        return {"reply": reply, "data": reply, "tools_used": False, "status": "di_luar_cakupan"}
     canonical_data: dict | None = None
     year_range = _year_range_intent(question) if requires_tool and not editorial_intent else None
     year_match = re.search(r"\b(20\d{2})\b", question)
@@ -2936,6 +3235,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             "brs": (bps_tools.berita_resmi_statistik, "pressrelease", "BRS"),
             "publikasi": (bps_tools.publikasi_terbaru, "publication", "publikasi"),
             "berita": (bps_tools.berita_statistik, "news", "berita statistik"),
+            "infografis": (bps_tools.infografis_terbaru, "infographic", "infografis"),
         }
         editorial_tool, model_name, label = editorial_tools[intent_kind]
         canonical_tool_call = (
@@ -3217,7 +3517,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 if query_core_count:
                     candidate_options = [
                         item for item in candidate_options
-                        if len(item.get("kata_inti_cocok") or []) / query_core_count >= 0.75
+                        if item.get("topik_cocok")
                     ]
                 variable = candidate_options[0] if len(candidate_options) == 1 else None
                 if search_result.get("status_hasil") == "gagal_teknis":
@@ -3290,6 +3590,10 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                         jumlah=8,
                     )
                     catalog_candidates = catalog_search.get("hasil") or []
+                    catalog_core = catalog_search.get("kata_inti") or []
+                    catalog_candidates = [
+                        item for item in catalog_candidates if item.get("topik_cocok")
+                    ]
                     if catalog_candidates:
                         best_core_count = len(
                             catalog_candidates[0].get("kata_inti_cocok") or []
@@ -3417,24 +3721,20 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             )
                             force_deterministic_fallback = True
                     else:
-                        suggestions = [
-                            str(item.get("judul") or "").strip()
-                            for item in search_result.get("kandidat_terdekat") or []
-                            if item.get("judul")
-                        ]
-                        canonical_data = {
-                            "hasil": [],
-                            "kata_inti": search_result.get("kata_inti") or [],
-                            "kandidat_terdekat": search_result.get("kandidat_terdekat") or [],
-                            "status_hasil": "kosong",
-                        }
-                        canonical_tool_call = f"cari_variabel(kata_kunci='{keyword}')"
+                        canonical_data = (
+                            catalog_search
+                            if catalog_search.get("status_hasil") == "gagal_teknis"
+                            else {
+                                "hasil": [],
+                                "kata_inti": catalog_core,
+                                "status_hasil": "kosong",
+                            }
+                        )
+                        canonical_tool_call = f"cari_tabel_katalog(kata_kunci='{keyword}')"
                         canonical_fallback = (
-                            f"Data untuk topik '{keyword}' belum ditemukan pada katalog BPS."
-                            + (
-                                " Judul terdekat: " + "; ".join(suggestions[:3]) + "."
-                                if suggestions else ""
-                            )
+                            "Maaf, data belum dapat diverifikasi saat ini."
+                            if catalog_search.get("status_hasil") == "gagal_teknis"
+                            else f"Data untuk topik “{keyword}” tidak ditemukan pada data yang tersedia di katalog BPS Sumatera Selatan."
                         )
                         force_deterministic_fallback = True
                 elif variable is not None:
@@ -3571,20 +3871,34 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 "result": canonical_data,
             })
 
+    def answer_with_verified_sources(reply: str) -> dict[str, object]:
+        payloads = [canonical_data] if canonical_data is not None else []
+        payloads.extend(
+            record["result"]
+            for record in tool_records
+            if isinstance(record.get("result"), dict)
+        )
+        statuses = [_tool_result_status(payload) for payload in payloads]
+        status = (
+            "tidak_ditemukan"
+            if statuses and all(value == "kosong" for value in statuses)
+            else None
+        )
+        return _answer_with_sources(
+            reply,
+            payloads,
+            tools_used=bool(payloads),
+            context=request.context,
+            status=status,
+            question=question,
+        )
+
     if force_deterministic_fallback and canonical_fallback:
-        return {
-            "reply": canonical_fallback,
-            "data": canonical_fallback,
-            "tools_used": True,
-        }
+        return answer_with_verified_sources(canonical_fallback)
 
     if not os.getenv("GEMINI_API_KEY"):
         if canonical_fallback:
-            return {
-                "reply": canonical_fallback,
-                "data": canonical_fallback,
-                "tools_used": canonical_data is not None,
-            }
+            return answer_with_verified_sources(canonical_fallback)
         raise HTTPException(status_code=503, detail="GEMINI_API_KEY belum dikonfigurasi.")
 
     contents: list[types.Content] = []
@@ -3609,7 +3923,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         user_text = (
             f"KLASIFIKASI MAKSUD: {intent_kind}.\n"
             f"{reference_instruction}"
-            f"<referensi_pengetahuan>\n{request.context}\n</referensi_pengetahuan>\n\n"
+            f"<referensi_pengetahuan>\n{_context_without_urls(request.context)}\n</referensi_pengetahuan>\n\n"
             f"PERTANYAAN:\n{question}"
         )
     if continuation_instruction:
@@ -3619,7 +3933,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             fallback_instruction = (
                 "Ini adalah konten editorial dari endpoint list/detail BPS. Ringkas hanya abstrak atau isi "
                 "yang tersedia di data; jangan mengaku telah membaca atau menyimpulkan isi PDF. Cantumkan "
-                "judul, tanggal rilis, dan tautan sumber/PDF, atau nyatakan bila tautan tidak tersedia. "
+                "judul dan tanggal rilis. Jangan menulis tautan sumber; sistem menambahkannya setelah jawaban. "
                 "Jika abstrak tidak tersedia, jangan mengarang ringkasan."
             )
         else:
@@ -3644,7 +3958,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             f"PERTANYAAN:\n{user_text}\n\n"
             "DATA TERVERIFIKASI YANG DIAMBIL KODE (sumber angka; jangan memanggil tool atau "
             "mengubah indikator, tahun, wilayah, maupun nilai):\n"
-            f"{json.dumps(canonical_data, ensure_ascii=False)}\n"
+            f"{json.dumps(_without_source_metadata(canonical_data), ensure_ascii=False)}\n"
             "Susun jawaban singkat hanya dari data ini. " + fallback_instruction
         )
     contents.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
@@ -3657,7 +3971,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=build_instructions(),
-                    temperature=0.2,
+                    temperature=_chat_temperature(),
                 ),
             )
         elif requires_tool and not prefer_knowledge:
@@ -3678,18 +3992,14 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=build_instructions(),
-                    temperature=0.2,
+                    temperature=_chat_temperature(),
                 ),
             )
     except genai_errors.APIError as exc:
         code = getattr(exc, "code", None)
         logger.warning("Gemini API error, code=%s", code)
         if canonical_fallback:
-            return {
-                "reply": canonical_fallback,
-                "data": canonical_fallback,
-                "tools_used": canonical_data is not None,
-            }
+            return answer_with_verified_sources(canonical_fallback)
         raise HTTPException(
             status_code=429 if code == 429 else 502,
             detail="Gemini tidak dapat memproses pesan saat ini.",
@@ -3697,11 +4007,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     except Exception as exc:
         logger.exception("Gemini request failed")
         if canonical_fallback:
-            return {
-                "reply": canonical_fallback,
-                "data": canonical_fallback,
-                "tools_used": canonical_data is not None,
-            }
+            return answer_with_verified_sources(canonical_fallback)
         raise HTTPException(status_code=502, detail="Gemini tidak dapat memproses pesan saat ini.") from exc
 
     if requires_tool and not prefer_knowledge and canonical_data is None and DATA_QUESTION.search(question):
@@ -3725,7 +4031,8 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     if not reply:
         logger.warning("Jawaban kosong: finish_reason=%s", finish_info(response))
         raise HTTPException(status_code=502, detail="Gemini tidak menghasilkan jawaban.")
-    reply = _plain_text_markdown_tables(reply)
+    reply = sumber_link.hapus_link_model(reply)
+    reply = _ensure_markdown_table_spacing(reply)
     if not reply:
         raise HTTPException(
             status_code=502,
@@ -3746,11 +4053,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
         logger.warning("Jawaban mengandung angka yang tidak ada pada hasil tool")
         if canonical_fallback:
             logger.warning("Menggunakan jawaban deterministik dari data terverifikasi.")
-            return {
-                "reply": canonical_fallback,
-                "data": canonical_fallback,
-                "tools_used": canonical_data is not None or bool(tool_records),
-            }
+            return answer_with_verified_sources(canonical_fallback)
         _record_unresolved_question(
             question,
             "unverified_numeric_output",
@@ -3761,9 +4064,10 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             detail="Jawaban memuat angka yang tidak terverifikasi dari hasil tool.",
         )
 
-    used_tools = canonical_data is not None or bool(tool_records)
-
-    result: dict[str, object] = {"reply": reply, "data": reply, "tools_used": used_tools}
+    result = answer_with_verified_sources(reply)
+    record_statuses = [_tool_result_status(record["result"]) for record in tool_records]
+    if record_statuses and all(status == "kosong" for status in record_statuses):
+        result["status"] = "tidak_ditemukan"
     if os.getenv("GEMINI_DEBUG") == "1":
         result["tool_calls"] = extract_tool_calls(tool_records)
     return result

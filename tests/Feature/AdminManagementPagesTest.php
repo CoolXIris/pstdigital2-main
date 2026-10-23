@@ -897,11 +897,14 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $regionalReply = app(BpsWebApiService::class)->fallbackAnswerFor('total warga PALI');
         $provinceReply = app(BpsWebApiService::class)->fallbackAnswerFor('total masyarakat');
+        $peopleReply = app(BpsWebApiService::class)->fallbackAnswerFor('jumlah orang di sumsel terbaru');
 
         $this->assertStringContainsString('Kabupaten Penukal Abab Lematang Ilir tahun 2026', $regionalReply);
         $this->assertStringContainsString('Total: 232.044 Jiwa', $regionalReply);
         $this->assertStringContainsString('Provinsi Sumatera Selatan tahun 2026', $provinceReply);
         $this->assertStringContainsString('Total: 9.707.356 Jiwa', $provinceReply);
+        $this->assertStringContainsString('Provinsi Sumatera Selatan tahun 2026', $peopleReply);
+        $this->assertStringContainsString('Total: 9.707.356 Jiwa', $peopleReply);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/domain/1612/'));
     }
@@ -2156,6 +2159,10 @@ class AdminManagementPagesTest extends BaseTestCase
         $bps = \Mockery::mock(BpsWebApiService::class);
         $bps->shouldReceive('isDataQuestion')->once()->with('Berapa laju pertumbuhan ekonomi?')->andReturnTrue();
         $bps->shouldReceive('contextFor')->once()->with('Berapa laju pertumbuhan ekonomi?')->andReturn($bpsContext);
+        $bps->shouldReceive('sourceLinesForContext')
+            ->once()
+            ->with($bpsContext, 'Berapa laju pertumbuhan ekonomi?')
+            ->andReturn("Sumber:\n- [Pertumbuhan ekonomi](https://sumsel.bps.go.id/id/statistics-table?subject=565)");
         $this->app->instance(BpsWebApiService::class, $bps);
         Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response([
             'reply' => 'Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.',
@@ -2164,7 +2171,11 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($user)
             ->postJson(route('chatbot.message'), ['message' => 'Berapa laju pertumbuhan ekonomi?'])
             ->assertOk()
-            ->assertJsonPath('reply', 'Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.');
+            ->assertJsonPath(
+                'reply',
+                "Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.\n\n"
+                    ."Sumber:\n- [Pertumbuhan ekonomi](https://sumsel.bps.go.id/id/statistics-table?subject=565)"
+            );
 
         Http::assertSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat')
             && $request['question'] === 'Berapa laju pertumbuhan ekonomi?'
@@ -2191,6 +2202,27 @@ class AdminManagementPagesTest extends BaseTestCase
         Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
     }
 
+    public function test_definition_follow_up_is_answered_by_ai_without_bps_data_lookup(): void
+    {
+        Cache::flush();
+        $question = 'rumah sakit khusus itu rumah sakit apa';
+        $reply = 'Rumah sakit khusus melayani bidang atau jenis penyakit tertentu, misalnya rumah sakit jantung.';
+        Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response(['reply' => $reply], 200)]);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => $question])
+            ->assertOk()
+            ->assertJsonPath('reply', $reply);
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat')
+            && str_contains($request['context'], 'definisi atau penjelasan umum')
+            && str_contains($request['context'], 'jangan mengganti penjelasan dengan tabel atau angka statistik'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'webapi.bps.go.id'));
+    }
+
     public function test_chatbot_uses_bps_fallback_when_ai_omits_verified_data(): void
     {
         /** @var User $user */
@@ -2203,6 +2235,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $bps->shouldReceive('isDataQuestion')->once()->with($question)->andReturnTrue();
         $bps->shouldReceive('contextFor')->once()->with($question)->andReturn($bpsContext);
         $bps->shouldReceive('fallbackAnswerFor')->once()->with($question)->andReturn('Tabel SIMDASI resmi BPS ditampilkan.');
+        $bps->shouldReceive('sourceLinesForContext')->once()->with($bpsContext, $question)->andReturn('');
         $this->app->instance(BpsWebApiService::class, $bps);
         Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response([
             'reply' => 'Untuk informasi bencana alam, silakan kunjungi situs resmi BPS.',
@@ -2266,6 +2299,76 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertJsonPath('knowledge_used', false);
     }
 
+    public function test_percentage_follow_up_is_explained_from_the_conversation_when_ai_is_unavailable(): void
+    {
+        Cache::flush();
+        $question = 'maksudnya 17,79 persen untuk rumah tangga yang memiliki komputer, laptop, atau tablet di Sumsel itu apa';
+        $knowledge = \Mockery::mock(ChatbotKnowledgeService::class);
+        $knowledge->shouldReceive('contextFor')->once()->with($question)->andReturn(null);
+        $this->app->instance(ChatbotKnowledgeService::class, $knowledge);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $conversation = \App\Models\ChatbotConversation::create([
+            'user_id' => $user->id,
+            'session_key' => (string) \Illuminate\Support\Str::uuid(),
+            'title' => 'Data rumah tangga',
+        ]);
+        $knowledge->shouldReceive('askWithContext')
+            ->once()
+            ->with(
+                $question,
+                $conversation->session_key,
+                null,
+                \Mockery::on(fn (array $history) => ($history[0]['response'] ?? null)
+                    === 'Persentase rumah tangga yang memiliki komputer, laptop, atau tablet di Provinsi Sumatera Selatan pada tahun 2025 tercatat sebesar 17,79 persen.')
+            )
+            ->andReturn(new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(503, [], '{"error":"busy"}')));
+        $conversation->messages()->create([
+            'prompt' => 'Persentase rumah tangga yang memiliki komputer di Sumsel?',
+            'response' => 'Persentase rumah tangga yang memiliki komputer, laptop, atau tablet di Provinsi Sumatera Selatan pada tahun 2025 tercatat sebesar 17,79 persen.',
+            'knowledge_used' => true,
+        ]);
+
+        $response = $this->actingAs($user)
+            ->postJson(route('chatbot.message'), [
+                'message' => $question,
+                'conversation_id' => $conversation->id,
+            ])
+            ->assertOk();
+
+        $this->assertStringContainsString('sekitar 18 termasuk kelompok', $response->json('reply'));
+        $this->assertStringContainsString('dari setiap 100 rumah tangga', $response->json('reply'));
+        $this->assertStringContainsString('tahun 2025', $response->json('reply'));
+    }
+
+    public function test_general_advice_remains_helpful_when_ai_is_unavailable(): void
+    {
+        Cache::flush();
+        $question = 'Tolong beri saran memilih data statistik untuk penelitian';
+        $knowledge = \Mockery::mock(ChatbotKnowledgeService::class);
+        $knowledge->shouldReceive('contextFor')->once()->with($question)->andReturn(null);
+        $knowledge->shouldReceive('askWithContext')
+            ->once()
+            ->andReturn(new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(503, [], '{"error":"busy"}')));
+        $this->app->instance(ChatbotKnowledgeService::class, $knowledge);
+        $bps = \Mockery::mock(BpsWebApiService::class);
+        $bps->shouldReceive('isDataQuestion')->once()->with($question)->andReturnFalse();
+        $this->app->instance(BpsWebApiService::class, $bps);
+
+        /** @var User $user */
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $response = $this->actingAs($user)
+            ->postJson(route('chatbot.message'), ['message' => $question])
+            ->assertOk();
+
+        $this->assertStringContainsString('tentukan dulu pertanyaan atau tujuan', $response->json('reply'));
+        $this->assertStringContainsString('indikator', $response->json('reply'));
+        $this->assertStringNotContainsString('Berita Resmi Statistik terbaru', $response->json('reply'));
+    }
+
     public function test_explanatory_question_about_a_statistic_is_answered_without_bps_api_lookup(): void
     {
         Cache::flush();
@@ -2309,6 +2412,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_chatbot_keeps_data_bearing_answer_even_if_it_mentions_no_exact_indicator(): void
     {
+        config(['services.bps.api_key' => null]);
         Cache::flush();
         $question = 'Apakah ada data terkait jumlah murid di Sumsel yang terbaru?';
         $reply = 'Maaf, saya belum menemukan indikator khusus. Namun, tersedia data Jumlah Murid (Jiwa) tahun 2024: '
@@ -2319,7 +2423,7 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $user */
         $user = User::factory()->create();
         $user->assignRole('user');
-        $this->actingAs($user)
+        $response = $this->actingAs($user)
             ->postJson(route('chatbot.message'), ['message' => $question])
             ->assertOk()
             ->assertJsonPath('reply', $cleanReply);
@@ -3178,6 +3282,10 @@ class AdminManagementPagesTest extends BaseTestCase
         $bps = \Mockery::mock(BpsWebApiService::class);
         $bps->shouldReceive('isDataQuestion')->once()->with('Berapa tingkat kemiskinan?')->andReturnTrue();
         $bps->shouldReceive('contextFor')->once()->with('Berapa tingkat kemiskinan?')->andReturn($bpsContext);
+        $bps->shouldReceive('sourceLinesForContext')
+            ->once()
+            ->with($bpsContext, 'Berapa tingkat kemiskinan?')
+            ->andReturn("Sumber:\n- [Tingkat kemiskinan](https://sumsel.bps.go.id/id/statistics-table?subject=565)");
         $this->app->instance(BpsWebApiService::class, $bps);
         Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response([
             'reply' => 'Tingkat kemiskinan Sumatera Selatan 10,2 persen.',
@@ -3186,7 +3294,11 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)
             ->postJson(route('admin.chatbot.test'), ['message' => 'Berapa tingkat kemiskinan?'])
             ->assertOk()
-            ->assertJsonPath('reply', 'Tingkat kemiskinan Sumatera Selatan 10,2 persen.');
+            ->assertJsonPath(
+                'reply',
+                "Tingkat kemiskinan Sumatera Selatan 10,2 persen.\n\n"
+                    ."Sumber:\n- [Tingkat kemiskinan](https://sumsel.bps.go.id/id/statistics-table?subject=565)"
+            );
 
         Http::assertSent(fn ($request) => str_contains($request->url(), '127.0.0.1:8001/api/chat')
             && $request['question'] === 'Berapa tingkat kemiskinan?'

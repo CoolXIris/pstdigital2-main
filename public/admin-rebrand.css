@@ -555,10 +555,10 @@ html[data-theme="dark"] .admin-pagination .page-item.active .page-link { color: 
 .chat-md blockquote { border-left: 3px solid rgba(0,0,0,.25); margin: 0 0 .6em; padding-left: .8em; opacity: .9; }
 .chat-md hr { margin: .7em 0; }
 .chat-md a { text-decoration: underline; }
-.chat-md .chat-md-table { overflow-x: auto; margin: 0 0 .6em; }
-.chat-md table { border-collapse: collapse; font-size: .92em; }
-.chat-md th, .chat-md td { border: 1px solid rgba(0,0,0,.2); padding: .3em .6em; text-align: left; }
-.chat-md th { background: rgba(0,0,0,.06); }
+.chat-md .chat-md-table { max-width: 100%; margin: 0 0 .6em; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.chat-md table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .92em; }
+.chat-md th, .chat-md td { border: 1px solid rgba(0,0,0,.2); padding: .4em .6em; text-align: left; vertical-align: top; white-space: nowrap; }
+.chat-md th { background: rgba(0,0,0,.06); font-weight: 700; }
 
 .consultation-chat-modal .modal-content { overflow: hidden; border-radius: 10px; }
 .consultation-chat-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

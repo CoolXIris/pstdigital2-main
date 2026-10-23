@@ -220,6 +220,7 @@ class BpsWebApiServiceTest extends TestCase
         );
 
         $this->assertStringContainsString('| Wilayah | Gaji |', $text);
+        $this->assertStringContainsString('| --- | --- |', $text);
         $this->assertStringContainsString('| Lahat 1 | Rp4.000.000 |', $text);
         $this->assertStringNotContainsString('<table>', $text);
         $this->assertStringNotContainsString('| Lahat 26 |', $text);
@@ -278,6 +279,126 @@ class BpsWebApiServiceTest extends TestCase
 
         $this->assertStringContainsString('| Wilayah | Pertanian | Jumlah |', $text);
         $this->assertStringContainsString('| Lahat | 2.500.000 | 2.800.000 |', $text);
+    }
+
+    public function test_related_press_release_replaces_unavailable_indicator_fallback(): void
+    {
+        Cache::flush();
+        \Illuminate\Support\Carbon::setTestNow(
+            \Illuminate\Support\Carbon::parse('2026-10-22 21:03:00', 'Asia/Jakarta')
+        );
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/645/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['pages' => 1], [['th' => '2026', 'th_id' => 126]]],
+                ]);
+            }
+            if (str_contains($url, '/model/pressrelease/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['total' => 1, 'pages' => 1], [[
+                        'title' => 'NTP September 2026 tercatat 156,67',
+                        'rl_date' => '2026-10-01',
+                    ]]],
+                ]);
+            }
+            if (str_contains($url, '/var/645/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'var' => [['val' => 645, 'label' => 'Perkembangan Nilai Tukar Petani', 'unit' => 'Indeks']],
+                    'vervar' => [],
+                    'turvar' => [],
+                    'datacontent' => [],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $service = new BpsWebApiService;
+        $topic = config('chatbot_fallback.topics.ntp') + ['key' => 'ntp'];
+        $region = [
+            'label' => 'Provinsi Sumatera Selatan',
+            'aliases' => ['sumsel', 'sumatera selatan'],
+            'match' => ['sumsel', 'sumatera selatan'],
+            'kind' => 'province',
+            'domain' => '1600',
+        ];
+        $method = new \ReflectionMethod(BpsWebApiService::class, 'fallbackForTopicRegions');
+        $reply = $method->invoke(
+            $service,
+            'NTP terbaru',
+            [$topic],
+            [$region],
+            'test-api-key',
+            'Layanan AI tidak tersedia.',
+            'Silakan coba lagi.'
+        );
+        \Illuminate\Support\Carbon::setTestNow();
+
+        $this->assertStringNotContainsString('belum ditemukan', mb_strtolower($reply));
+        $this->assertStringContainsString('Berita Resmi Statistik yang ditemukan:', $reply);
+        $this->assertStringContainsString('Berita Resmi Statistik terbaru tentang Nilai Tukar Petani (NTP):', $reply);
+    }
+
+    public function test_source_label_is_separated_from_markdown_table(): void
+    {
+        $service = new BpsWebApiService;
+        $section = $this->invokePrivate(
+            $service,
+            'formatSourceSection',
+            '[Sumber: BPS WebAPI, Tabel contoh]',
+            "| Wilayah | Jumlah |\n| --- | --- |\n| Palembang | 75 |"
+        );
+
+        $this->assertSame(
+            "[Sumber: BPS WebAPI, Tabel contoh]\n\n| Wilayah | Jumlah |\n| --- | --- |\n| Palembang | 75 |",
+            $section
+        );
+    }
+
+    public function test_fallback_table_sources_use_the_matching_verified_csv_url(): void
+    {
+        foreach ([
+            '[Sumber: WebAPI BPS Sumatera Selatan, Jumlah Fasilitas Kesehatan. (Unit)]',
+            '[Sumber: BPS WebAPI, Jumlah Fasilitas Kesehatan. (Unit)]',
+        ] as $marker) {
+            $context = $marker.' {"tahun":"2025"}';
+            $sources = (new BpsWebApiService)->sourceLinesForContext(
+                $context,
+                'jumlah fasilitas kesehatan Sumsel'
+            );
+
+            $this->assertStringContainsString('Sumber:', $sources);
+            $this->assertStringContainsString(
+                'https://sumsel.bps.go.id/id/statistics-table/2/Nzc5IzI=/jumlah-fasilitas-kesehatan---unit-.html',
+                $sources
+            );
+        }
+
+        $populationSources = (new BpsWebApiService)->sourceLinesForContext(
+            '[Sumber: BPS WebAPI, Jumlah Penduduk Menurut Kabupaten/Kota] {"var_id":262}',
+            'jumlah orang di Sumsel terbaru'
+        );
+        $this->assertStringContainsString(
+            'https://sumsel.bps.go.id/id/statistics-table/2/MjYyIzI=/jumlah-penduduk-menurut-kabupaten-kota--jiwa-.html',
+            $populationSources
+        );
+    }
+
+    public function test_fallback_editorial_source_rejects_api_key_urls_and_uses_listing_page(): void
+    {
+        $context = "[Sumber: WebAPI BPS; Berita Resmi Statistik]\n"
+            .'1. {"judul":"BRS terbaru","tautan":"https://webapi.bps.go.id/v1/api/key/not-a-real-key/"}';
+        $sources = (new BpsWebApiService)->sourceLinesForContext($context, 'BRS terbaru');
+
+        $this->assertStringContainsString(
+            '- [BRS terbaru](https://sumsel.bps.go.id/id/pressrelease)',
+            $sources
+        );
+        $this->assertStringNotContainsString('not-a-real-key', $sources);
     }
 
     public function test_simdasi_table_is_limited_to_the_requested_sumsel_aggregate(): void
