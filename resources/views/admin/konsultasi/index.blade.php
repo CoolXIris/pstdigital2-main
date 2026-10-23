@@ -104,14 +104,20 @@
             <form class="admin-search" method="GET" action="{{ route('admin.konsultasi') }}"><i class="fe fe-search" aria-hidden="true"></i><input class="form-control" type="search" name="q" value="{{ $search }}" placeholder="Cari pengguna atau topik" aria-label="Cari riwayat konsultasi"></form>
         </div>
         <section class="admin-panel">
-            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Pengguna</th><th>Topik konsultasi</th><th>Tanggal</th><th>Waktu</th><th>Petugas</th><th>Status akhir</th><th>Rating</th><th>Detail</th></tr></thead><tbody>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Pengguna</th><th>Topik konsultasi</th><th>Tanggal</th><th>Waktu</th><th>Petugas</th><th>Status akhir</th><th>Rating</th><th>Tindakan</th></tr></thead><tbody>
                 @forelse ($history as $meeting)
                     <tr>
                         <td><div class="admin-person"><span class="admin-person-avatar">{{ strtoupper(substr($meeting->user?->name ?? 'P', 0, 1)) }}</span><span><strong>{{ $meeting->user?->name ?? 'Pengguna dihapus' }}</strong><small>{{ $meeting->user?->email ?? '' }}</small></span></div></td>
                         <td>{{ $meeting->name }}</td><td>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}</td><td>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }}</td><td>{{ $meeting->assigned_staff ?: '—' }}</td>
                         <td><span class="admin-badge {{ (int) $meeting->status === 1 ? 'admin-badge-green' : 'admin-badge-red' }}">{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}</span></td>
                         <td>@if ($meeting->rating)<span class="admin-stars">{{ str_repeat('★', (int) $meeting->rating) }}</span>@else<span class="text-muted">—</span>@endif</td>
-                        <td><button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#meetingDetailModal" data-user="{{ $meeting->user?->name ?? 'Pengguna dihapus' }}" data-email="{{ $meeting->user?->email ?? '' }}" data-topic="{{ $meeting->name }}" data-description="{{ $meeting->description }}" data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}" data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}" data-staff="{{ $meeting->assigned_staff }}" data-status="{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}" data-reason="{{ $meeting->cancellation_reason }}" data-summary="{{ $meeting->ringkasan }}" data-feedback="{{ $meeting->kritik_saran }}" data-rating="{{ $meeting->rating }}" data-doc-url="{{ $meeting->link_dokumentasi ? $meeting->link_dokumentasi : ($meeting->documentation_path ? route('konsultasi.documentation', $meeting) : '') }}" aria-label="Detail konsultasi" title="Lihat detail"><i class="fe fe-eye"></i></button></td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#meetingDetailModal" data-user="{{ $meeting->user?->name ?? 'Pengguna dihapus' }}" data-email="{{ $meeting->user?->email ?? '' }}" data-topic="{{ $meeting->name }}" data-description="{{ $meeting->description }}" data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}" data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}" data-staff="{{ $meeting->assigned_staff }}" data-status="{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}" data-reason="{{ $meeting->cancellation_reason }}" data-summary="{{ $meeting->ringkasan }}" data-feedback="{{ $meeting->kritik_saran }}" data-rating="{{ $meeting->rating }}" data-doc-url="{{ $meeting->link_dokumentasi ? $meeting->link_dokumentasi : ($meeting->documentation_path ? route('konsultasi.documentation', $meeting) : '') }}" aria-label="Detail konsultasi" title="Lihat detail"><i class="fe fe-eye"></i></button>
+                                <button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#editHistoryModal" data-edit-url="{{ route('admin.konsultasi.history.update', $meeting) }}" data-status-code="{{ (int) $meeting->status }}" data-topic="{{ $meeting->name }}" data-description="{{ $meeting->description }}" data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->format('Y-m-d') }}" data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}" data-staff="{{ $meeting->assigned_staff }}" data-summary="{{ $meeting->ringkasan }}" data-reason="{{ $meeting->cancellation_reason }}" data-documentation-url="{{ $meeting->link_dokumentasi }}" aria-label="Edit riwayat konsultasi {{ $meeting->name }}" title="Edit riwayat"><i class="fe fe-edit-2"></i></button>
+                                <button class="admin-action-icon is-danger" type="button" data-bs-toggle="modal" data-bs-target="#deleteHistoryModal" data-delete-url="{{ route('admin.konsultasi.history.destroy', $meeting) }}" data-topic="{{ $meeting->name }}" aria-label="Hapus riwayat konsultasi {{ $meeting->name }}" title="Hapus riwayat"><i class="fe fe-trash-2"></i></button>
+                            </div>
+                        </td>
                     </tr>
                 @empty
                     <tr><td colspan="8"><div class="admin-empty"><i class="fe fe-archive"></i><strong>Riwayat masih kosong</strong><span>Sesi selesai atau dibatalkan akan tersimpan di sini.</span></div></td></tr>
@@ -120,6 +126,41 @@
             @if ($history->hasPages())<div class="admin-table-footer"><span>{{ $history->total() }} sesi dalam riwayat</span><div class="admin-pagination">{{ $history->links() }}</div></div>@endif
         </section>
     </section>
+
+    <div class="modal fade admin-modal" id="editHistoryModal" tabindex="-1" aria-labelledby="editHistoryTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
+            <form method="POST" id="edit-history-form">
+                @csrf @method('PATCH')
+                <div class="modal-header"><div><span class="admin-eyebrow">Perbarui arsip</span><h2 class="modal-title" id="editHistoryTitle">Edit riwayat konsultasi</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+                <div class="modal-body">
+                    <p class="text-muted">Data pemohon, status akhir, rating, dan kritik/saran pengguna tidak diubah melalui formulir ini.</p>
+                    <div class="mb-3"><label class="form-label" for="history-topic">Topik konsultasi</label><input class="form-control" id="history-topic" name="name" type="text" maxlength="255" required></div>
+                    <div class="mb-3"><label class="form-label" for="history-description">Deskripsi kebutuhan</label><textarea class="form-control" id="history-description" name="description" rows="3" maxlength="3000" required></textarea></div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4"><label class="form-label" for="history-date">Tanggal</label><input class="form-control" id="history-date" name="tanggal" type="date" required></div>
+                        <div class="col-md-4"><label class="form-label" for="history-start">Jam mulai</label><input class="form-control" id="history-start" name="start_time" type="time" required></div>
+                        <div class="col-md-4"><label class="form-label" for="history-end">Jam selesai</label><input class="form-control" id="history-end" name="end_time" type="time" required></div>
+                    </div>
+                    <div class="mb-3"><label class="form-label" for="history-staff">Petugas</label><input class="form-control" id="history-staff" name="assigned_staff" type="text" maxlength="255"></div>
+                    <div class="mb-3" id="history-summary-wrap"><label class="form-label" for="history-summary">Hasil konsultasi</label><textarea class="form-control" id="history-summary" name="ringkasan" rows="4" maxlength="5000"></textarea></div>
+                    <div class="mb-3" id="history-reason-wrap" hidden><label class="form-label" for="history-reason">Alasan pembatalan</label><textarea class="form-control" id="history-reason" name="cancellation_reason" rows="3" maxlength="1000"></textarea></div>
+                    <div><label class="form-label" for="history-documentation-url">Tautan dokumentasi</label><input class="form-control" id="history-documentation-url" name="documentation_url" type="url" maxlength="2048" placeholder="https://..."><small class="form-text">Berkas dokumentasi yang sudah diunggah tetap tersimpan jika kolom ini kosong.</small></div>
+                </div>
+                <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Kembali</button><button class="admin-btn admin-btn-success" type="submit"><i class="fe fe-save"></i> Simpan perubahan</button></div>
+            </form>
+        </div></div>
+    </div>
+
+    <div class="modal fade admin-modal" id="deleteHistoryModal" tabindex="-1" aria-labelledby="deleteHistoryTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <form method="POST" id="delete-history-form">
+                @csrf @method('DELETE')
+                <div class="modal-header"><div><span class="admin-eyebrow">Hapus arsip</span><h2 class="modal-title" id="deleteHistoryTitle">Hapus riwayat konsultasi?</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+                <div class="modal-body"><p>Riwayat <strong id="delete-history-topic"></strong> beserta percakapan dan dokumentasi terkait akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.</p></div>
+                <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Kembali</button><button class="admin-btn admin-btn-danger" type="submit"><i class="fe fe-trash-2"></i> Hapus permanen</button></div>
+            </form>
+        </div></div>
+    </div>
 
     <div class="modal fade admin-modal" id="approveMeetingModal" tabindex="-1" aria-labelledby="approveMeetingTitle" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
@@ -203,6 +244,31 @@
             const error = document.getElementById('documentation-choice-error');
             error.hidden = hasFile || hasUrl;
             if (!hasFile && !hasUrl) event.preventDefault();
+        });
+
+        document.getElementById('editHistoryModal').addEventListener('show.bs.modal', (event) => {
+            const button = event.relatedTarget;
+            const form = document.getElementById('edit-history-form');
+            form.action = button.dataset.editUrl;
+            document.getElementById('history-topic').value = button.dataset.topic || '';
+            document.getElementById('history-description').value = button.dataset.description || '';
+            document.getElementById('history-date').value = button.dataset.date || '';
+            document.getElementById('history-start').value = button.dataset.start || '';
+            document.getElementById('history-end').value = button.dataset.end || '';
+            document.getElementById('history-staff').value = button.dataset.staff || '';
+            document.getElementById('history-summary').value = button.dataset.summary || '';
+            document.getElementById('history-reason').value = button.dataset.reason || '';
+            document.getElementById('history-documentation-url').value = button.dataset.documentationUrl || '';
+
+            const isCancelled = button.dataset.statusCode === '9';
+            document.getElementById('history-summary-wrap').hidden = isCancelled;
+            document.getElementById('history-reason-wrap').hidden = !isCancelled;
+        });
+
+        document.getElementById('deleteHistoryModal').addEventListener('show.bs.modal', (event) => {
+            const button = event.relatedTarget;
+            document.getElementById('delete-history-form').action = button.dataset.deleteUrl;
+            document.getElementById('delete-history-topic').textContent = button.dataset.topic || 'konsultasi ini';
         });
 
         document.getElementById('meetingDetailModal').addEventListener('show.bs.modal', (event) => {

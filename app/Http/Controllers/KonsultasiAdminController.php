@@ -239,6 +239,77 @@ class KonsultasiAdminController extends Controller
         return back()->with('message', $message);
     }
 
+    public function updateHistory(Request $request, Meeting $meeting): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'description' => ['required', 'string', 'max:3000'],
+            'tanggal' => ['required', 'date_format:Y-m-d'],
+            'start_time' => ['required', 'date_format:H:i'],
+            'end_time' => ['required', 'date_format:H:i', 'after:start_time'],
+            'assigned_staff' => ['nullable', 'string', 'max:255'],
+            'ringkasan' => ['nullable', 'string', 'max:5000'],
+            'cancellation_reason' => ['nullable', 'string', 'max:1000'],
+            'documentation_url' => ['nullable', 'url', 'max:2048'],
+        ]);
+
+        DB::transaction(function () use ($meeting, $validated) {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if (!in_array((int) $lockedMeeting->status, [1, 9], true)) {
+                throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat diedit di riwayat.']);
+            }
+
+            $staffName = $validated['assigned_staff'] ?: null;
+            $changes = [
+                'name' => $validated['name'],
+                'description' => $validated['description'],
+                'tanggal' => $validated['tanggal'],
+                'start_time' => $validated['start_time'],
+                'end_time' => $validated['end_time'],
+                'assigned_staff' => $staffName,
+                'assigned_staff_id' => $staffName
+                    ? ConsultationStaff::query()->where('name', $staffName)->value('id')
+                    : null,
+                'link_dokumentasi' => $validated['documentation_url'] ?? null,
+            ];
+
+            if ((int) $lockedMeeting->status === 1) {
+                $changes['ringkasan'] = $validated['ringkasan'] ?? null;
+            } else {
+                $changes['cancellation_reason'] = $validated['cancellation_reason'] ?? null;
+            }
+
+            $lockedMeeting->update($changes);
+        });
+
+        return back()->with('message', 'Riwayat konsultasi berhasil diperbarui.');
+    }
+
+    public function deleteHistory(Meeting $meeting, ConsultationDocumentationService $documentation): RedirectResponse
+    {
+        $documentationPath = null;
+
+        DB::transaction(function () use ($meeting, &$documentationPath) {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if (!in_array((int) $lockedMeeting->status, [1, 9], true)) {
+                throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat dihapus dari riwayat.']);
+            }
+
+            $documentationPath = $lockedMeeting->documentation_path;
+            $lockedMeeting->delete();
+        });
+
+        if ($documentationPath) {
+            if (Str::startsWith($documentationPath, 'gdrive:')) {
+                $documentation->delete($documentationPath, Auth::user());
+            } else {
+                Storage::disk('local')->delete($documentationPath);
+            }
+        }
+
+        return back()->with('message', 'Riwayat konsultasi beserta data dan dokumentasi terkait berhasil dihapus.');
+    }
+
     private function roomIceServers(Meeting $meeting): array
     {
         $iceServers = config('pst.ice_servers', []);
