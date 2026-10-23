@@ -76,8 +76,15 @@
                                 <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kehadiran...</span>
                                 <form method="GET" action="{{ route('konsultasi.room', $meeting) }}"><button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button></form>
                             </div>
+                        @elseif ($meeting->can_open_room_now)
+                            <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
+                                @csrf @method('PATCH')
+                                <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang konsultasi sekarang</button>
+                            </form>
+                            <p class="admin-room-window-note">Pemohon dapat masuk lebih awal. Jam selesai tetap sesuai jadwal.</p>
+                        @else
+                            <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
                         @endif
-                        @unless ($meeting->room_open)<p class="admin-room-window-note">Ruang aktif hanya pada tanggal dan jam sesi.</p>@endunless
                         @if (!$meeting->approved_by_user_id || (int) $meeting->approved_by_user_id === (int) Auth::id())
                             <button class="admin-btn admin-btn-outline admin-confirmed-button consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->user?->name ?? 'Pengguna' }}"><i class="fe fe-message-circle"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
                         @endif

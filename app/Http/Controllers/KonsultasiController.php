@@ -32,9 +32,7 @@ class KonsultasiController extends Controller
             ->orderByDesc('start_time')
             ->paginate(10, ['*'], 'riwayat_page');
         $data_mendatang->getCollection()->transform(function (Meeting $meeting) {
-            $start = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->start_time);
-            $end = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->end_time);
-            $meeting->setAttribute('room_open', (int) $meeting->status === 2 && now('Asia/Jakarta')->betweenIncluded($start, $end));
+            $meeting->setAttribute('room_open', $meeting->isRoomOpen());
 
             return $meeting;
         });

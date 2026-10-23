@@ -42,18 +42,14 @@ class KonsultasiAdminController extends Controller
         $pending = $baseQuery()->where('status', 0)->orderBy('tanggal')->orderBy('start_time')->paginate(8, ['*'], 'pending_page')->withQueryString();
         $upcoming = $baseQuery()->where('status', 2)->orderBy('tanggal')->orderBy('start_time')->paginate(9, ['*'], 'upcoming_page')->withQueryString();
         $upcoming->getCollection()->transform(function (Meeting $meeting) {
-            $meeting->setAttribute('room_open', $this->isRoomOpen($meeting));
+            $meeting->setAttribute('room_open', $meeting->isRoomOpen());
+            $meeting->setAttribute('can_open_room_now', $meeting->canBeOpenedEarly());
 
             return $meeting;
         });
         $history = $baseQuery()->whereIn('status', [1, 9])->orderByDesc('tanggal')->orderByDesc('start_time')->paginate(12, ['*'], 'history_page')->withQueryString();
         $staffRecords = ConsultationStaff::query()->orderBy('sort_order')->orderBy('id')->get();
         $staff = $staffRecords->pluck('name')->all();
-        $upcoming->getCollection()->transform(function (Meeting $meeting) {
-            $meeting->setAttribute('room_open', $this->isRoomOpen($meeting));
-
-            return $meeting;
-        });
         $availableStaff = [];
         foreach ($pending as $meeting) {
             $availableStaff[$meeting->id] = $this->availableStaffFor($meeting, $staffRecords);
@@ -205,12 +201,42 @@ class KonsultasiAdminController extends Controller
         return back()->with('message', $message);
     }
 
-    private function isRoomOpen(Meeting $meeting): bool
+    public function openRoomNow(Meeting $meeting): RedirectResponse
     {
-        $start = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->start_time);
-        $end = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->end_time);
+        $result = DB::transaction(function () use ($meeting): string {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if ((int) $lockedMeeting->status !== 2) {
+                throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi terkonfirmasi yang ruangnya dapat dibuka.']);
+            }
 
-        return (int) $meeting->status === 2 && now('Asia/Jakarta')->betweenIncluded($start, $end);
+            $now = now('Asia/Jakarta');
+            $end = Carbon::parse($lockedMeeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString((string) $lockedMeeting->end_time);
+            if ($now->gt($end)) {
+                throw ValidationException::withMessages(['meeting' => 'Jadwal konsultasi ini sudah berakhir.']);
+            }
+
+            if ($lockedMeeting->room_opened_at) {
+                return 'already_open';
+            }
+
+            $start = Carbon::parse($lockedMeeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString((string) $lockedMeeting->start_time);
+            if (!$now->lt($start)) {
+                return 'scheduled_open';
+            }
+
+            $lockedMeeting->room_opened_at = $now->copy()->utc();
+            $lockedMeeting->save();
+
+            return 'opened';
+        });
+
+        $message = match ($result) {
+            'opened' => 'Ruang konsultasi berhasil dibuka sekarang. Jam selesai tetap mengikuti jadwal yang telah dikonfirmasi.',
+            'already_open' => 'Ruang konsultasi ini sudah dibuka lebih awal dan dapat diakses sampai jam selesai yang dijadwalkan.',
+            default => 'Waktu mulai sesi telah tiba. Ruang konsultasi dapat diakses sesuai jadwal.',
+        };
+
+        return back()->with('message', $message);
     }
 
     private function roomIceServers(Meeting $meeting): array
@@ -537,7 +563,7 @@ class KonsultasiAdminController extends Controller
     private function ensureRoomOpen(Meeting $meeting): void
     {
         abort_unless((int) $meeting->status === 2, 404);
-        abort_unless($this->isRoomOpen($meeting), 403, 'Ruang konsultasi hanya tersedia pada tanggal dan jam yang telah dikonfirmasi.');
+        abort_unless($meeting->isRoomOpen(), 403, 'Ruang konsultasi hanya tersedia pada tanggal dan jam yang telah dikonfirmasi.');
     }
 
     private function touchRoomParticipant(Meeting $meeting): void
