@@ -13,6 +13,8 @@ class BpsWebApiService
 {
     private const GENERIC_TERMS = ['rata', 'rata-rata', 'jumlah', 'persentase', 'angka', 'nilai', 'tingkat', 'banyak', 'indeks', 'pembangunan', 'manusia', 'status', 'terkait', 'apakah', 'total', 'kabupaten', 'kota', 'produksi', 'produks'];
 
+    private const CONTEXT_TERMS = ['fasilitas'];
+
     private const VARIABLE_INDEX_CACHE_PREFIX = 'bps-webapi:variables:index:';
 
     public function hasApiKey(): bool
@@ -239,6 +241,19 @@ class BpsWebApiService
             'vertical_evidence' => $verticalEvidenceReport,
             'vertical_counts' => $verticalCounts,
         ];
+    }
+
+    public function invalidateCatalogCaches(): void
+    {
+        $path = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+        if (! is_file($path)) {
+            return;
+        }
+
+        $signature = (string) filemtime($path).':'.(string) filesize($path);
+        Cache::forget('bps-csv-catalog:'.sha1($path.':'.$signature));
+        Cache::forget('bps-webapi:variables:local-catalog:'.sha1($path.':'.$signature));
+        Cache::forget(self::VARIABLE_INDEX_CACHE_PREFIX.'1600');
     }
 
     public function isDataQuestion(string $question): bool
@@ -4143,7 +4158,10 @@ class BpsWebApiService
                     }
                     if ($termScore > 0.0) {
                         $matchedCoreTerms++;
-                        $score += min(Str::length($term), 10) * $termScore;
+                        $weight = in_array($term, self::CONTEXT_TERMS, true)
+                            ? 1
+                            : min(Str::length($term), 10);
+                        $score += $weight * $termScore;
                     }
                 }
                 if ($score === 0.0 || $matchedCoreTerms === 0) {
@@ -4378,7 +4396,7 @@ class BpsWebApiService
     private function mainKeyword(array $keywords): ?string
     {
         foreach ($keywords as $keyword) {
-            if (! in_array($keyword, self::GENERIC_TERMS, true)) {
+            if (! in_array($keyword, [...self::GENERIC_TERMS, ...self::CONTEXT_TERMS], true)) {
                 return $keyword;
             }
         }
@@ -4656,7 +4674,7 @@ class BpsWebApiService
             ) ?? $normalizedQuestion;
         }
         preg_match_all('/[\pL\pN]{3,}/u', $normalizedQuestion, $matches);
-        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'apakah', 'data', 'terkait', 'sebutkan', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih'];
+        $stopWords = ['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'dalam', 'adalah', 'berapa', 'bagaimana', 'apa', 'apakah', 'data', 'terkait', 'sebutkan', 'saya', 'kami', 'bisa', 'tolong', 'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi', 'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada', 'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih', 'pengen', 'ingin', 'mau', 'tau', 'tahu', 'yah', 'ya'];
         $region = $this->regionMentioned($question);
         if ($region !== null) {
             $regionWords = ['kabupaten', 'kab', 'kota'];
@@ -4766,7 +4784,7 @@ class BpsWebApiService
             'menurut', 'per', 'tahun', 'sumatera', 'selatan', 'sumsel', 'provinsi',
             'indonesia', 'terbaru', 'terkini', 'terakhir', 'sekarang', 'baru', 'ada',
             'ini', 'itu', 'bulan', 'lalu', 'sih', 'dong', 'nih', 'kabupaten', 'kab',
-            'kota',
+            'kota', 'pengen', 'ingin', 'mau', 'tau', 'tahu', 'yah', 'ya', 'fasilitas',
         ];
 
         return array_values(array_unique(array_filter(

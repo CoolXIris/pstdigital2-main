@@ -348,6 +348,14 @@ class BpsToolsTests(unittest.TestCase):
             "penduduk",
         )
 
+    def test_keyword_cleanup_removes_casual_fillers_from_area_questions(self):
+        self.assertEqual(
+            bps_tools._clean_search_keyword(
+                "Pengen tau luas daerah pali itu berapa yah?"
+            ),
+            "luas daerah",
+        )
+
     def test_keyword_variants_include_roots_and_related_synonyms(self):
         variants = bps_tools._search_keyword_variants("kemiskinan")
         self.assertEqual(variants[:2], ["miskin", "kemiskinan"])
@@ -399,6 +407,18 @@ class BpsToolsTests(unittest.TestCase):
         self.assertTrue(bps_tools.catalog_variable_matches("rumah sakit"))
         self.assertTrue(bps_tools.catalog_variable_matches("puskesmas"))
         self.assertTrue(bps_tools.catalog_variable_matches("posyandu"))
+
+    def test_specific_topic_outweighs_generic_facility_context(self):
+        catalog = bps_tools._load_catalog_index()
+        with (
+            patch.object(bps_tools, "_variable_index", return_value=catalog),
+            patch.object(bps_tools, "_latest_year", return_value=("2025", 10, False)),
+        ):
+            schools = bps_tools.cari_variabel("fasilitas sekolah")
+            healthcare = bps_tools.cari_variabel("fasilitas kesehatan")
+
+        self.assertEqual(schools["hasil"][0]["var_id"], 357)
+        self.assertEqual(healthcare["hasil"][0]["var_id"], 779)
 
     def test_ambil_data_returns_a_bounded_year_range(self):
         periods = [

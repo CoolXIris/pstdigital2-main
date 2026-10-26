@@ -72,6 +72,9 @@
 .admin-panel-title { margin: 0; color: var(--admin-ink); font-size: 13px; font-weight: 600; }
 .admin-panel-subtitle { margin: 4px 0 0; color: var(--admin-muted); font-size: 10px; }
 .admin-panel-body { padding: 18px 20px; }
+.admin-consultation-staff-panel > .admin-section-heading { padding: 18px 20px 0; }
+.admin-consultation-staff-panel .form-control { min-height: 42px; color: var(--admin-ink); background-color: var(--admin-surface); border-color: var(--admin-line); border-radius: 5px; }
+.admin-consultation-staff-panel .form-control:focus { border-color: #5b8fc4; box-shadow: 0 0 0 3px rgba(4,50,119,.12); }
 .admin-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-bottom: 18px; }
 .admin-stat { position: relative; overflow: hidden; min-height: 112px; padding: 17px 18px; background: #fff; border: 1px solid var(--admin-line); border-radius: 7px; }
 .admin-stat::after { position: absolute; right: -22px; bottom: -34px; width: 90px; height: 90px; content: ''; border: 15px solid var(--stat-accent, #dce8f6); border-radius: 50%; opacity: .5; }
@@ -475,6 +478,7 @@ html[data-theme="dark"] .admin-stat-blue, html[data-theme="dark"] .admin-stat-gr
 html[data-theme="dark"] .admin-stat-icon { color: #dce9f5; background: #34475a; }
 html[data-theme="dark"] .admin-filter-field label, html[data-theme="dark"] .admin-dashboard-filters .admin-filter-field label { color: #d0dbe4; }
 html[data-theme="dark"] .admin-filter-field .form-control, html[data-theme="dark"] .admin-filter-field .form-select, html[data-theme="dark"] .admin-dashboard-filters .form-select, html[data-theme="dark"] .admin-search input, html[data-theme="dark"] .admin-knowledge-upload .form-control, html[data-theme="dark"] .admin-modal .form-control, html[data-theme="dark"] .admin-modal .form-select { color: #edf3f8; background-color: #1e2831; border-color: #536372; }
+html[data-theme="dark"] .admin-consultation-staff-panel .form-control { color: #edf3f8; background-color: #1e2831; border-color: #536372; color-scheme: dark; }
 html[data-theme="dark"] .admin-filter-field select option, html[data-theme="dark"] .admin-modal select option { color: #edf3f8; background: #1e2831; }
 html[data-theme="dark"] .admin-filter-field .form-control::placeholder, html[data-theme="dark"] .admin-search input::placeholder, html[data-theme="dark"] .admin-knowledge-upload .form-control::placeholder { color: #98a9b8; }
 html[data-theme="dark"] .admin-btn-outline { color: #d8e2ea !important; background: #303b45; border-color: #586a79; }

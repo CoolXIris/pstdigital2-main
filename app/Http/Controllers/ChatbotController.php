@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
@@ -42,6 +43,10 @@ class ChatbotController extends Controller
     public function management(BpsWebApiService $bps): View
     {
         $sources = ChatbotKnowledgeSource::with('uploader:id,name')->latest()->paginate(10);
+        $catalogPath = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+        $catalogUpdatedAt = is_file($catalogPath)
+            ? \Illuminate\Support\Carbon::createFromTimestamp(filemtime($catalogPath))
+            : null;
 
         return view('admin.chatbot.index', [
             'sources' => $sources,
@@ -49,7 +54,105 @@ class ChatbotController extends Controller
             'chunkCount' => \App\Models\ChatbotKnowledgeChunk::count(),
             'lastTrainedAt' => ChatbotKnowledgeSource::max('trained_at'),
             'bpsApiKeyConfigured' => $bps->hasApiKey(),
+            'catalogUpdatedAt' => $catalogUpdatedAt,
         ]);
+    }
+
+    public function refreshBpsCatalog(BpsWebApiService $bps): RedirectResponse
+    {
+        if (! $bps->hasApiKey()) {
+            return back()->with('error', 'API key WebAPI BPS belum dikonfigurasi. Katalog tidak diperbarui.');
+        }
+
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(210);
+        }
+
+        $lock = Cache::lock('bps:catalog:refresh', 300);
+        if (! $lock->get()) {
+            return back()->with('error', 'Pembaruan katalog sedang berlangsung. Silakan tunggu hingga selesai.');
+        }
+
+        $processSucceeded = false;
+        try {
+            $catalogPath = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+            $result = Process::path(base_path())
+                ->timeout(180)
+                ->env(['BPS_API_KEY' => (string) config('services.bps.api_key')])
+                ->run([
+                    (string) config('services.bps.python_binary', 'python'),
+                    base_path('update_bps.py'),
+                    '--csv',
+                    $catalogPath,
+                ]);
+
+            if (! $result->successful()) {
+                Log::warning('bps.catalog_refresh_failed', ['exit_code' => $result->exitCode()]);
+
+                return back()->with(
+                    'error',
+                    'WebAPI BPS gagal memperbarui katalog. Data katalog yang tersimpan tetap dipertahankan; silakan coba lagi.'
+                );
+            }
+
+            $processSucceeded = true;
+            $sync = json_decode(trim($result->output()), true);
+            if (! is_array($sync) || ($sync['status'] ?? null) !== 'ok') {
+                Log::warning('bps.catalog_refresh_invalid_result');
+
+                return back()->with(
+                    'error',
+                    'WebAPI BPS merespons, tetapi ringkasan sinkronisasi katalog tidak dapat dibaca. CSV tidak ditampilkan sebagai berhasil diperbarui.'
+                );
+            }
+            foreach (['added_tables', 'added_rows', 'added_periods', 'updated_rows', 'skipped_tables'] as $field) {
+                if (! is_int($sync[$field] ?? null) || $sync[$field] < 0) {
+                    Log::warning('bps.catalog_refresh_invalid_summary', ['field' => $field]);
+
+                    return back()->with(
+                        'error',
+                        'Ringkasan sinkronisasi katalog tidak lengkap. Periksa CSV sebelum menjalankan pembaruan ulang.'
+                    );
+                }
+            }
+
+            $bps->invalidateCatalogCaches();
+            $summary = $bps->refreshVariableIndex();
+            $updatedRows = (int) ($sync['updated_rows'] ?? 0);
+            $addedTables = (int) ($sync['added_tables'] ?? 0);
+            $addedRows = (int) ($sync['added_rows'] ?? 0);
+            $addedPeriods = (int) ($sync['added_periods'] ?? 0);
+            $skippedTables = (int) ($sync['skipped_tables'] ?? 0);
+            if ($updatedRows === 0 && $addedTables === 0 && $addedRows === 0 && $skippedTables === 0) {
+                $message = 'Katalog BPS sudah terbaru. Tidak ada judul, topik, atau periode yang perlu ditambah atau diperbarui.';
+            } elseif ($updatedRows === 0 && $addedTables === 0 && $addedRows === 0) {
+                $message = "Sinkronisasi belum lengkap: tidak ada perubahan yang diterapkan dan {$skippedTables} entri katalog tidak dapat dipetakan. "
+                    .'CSV lama tetap dipertahankan; periksa format respons WebAPI sebelum mencoba lagi.';
+            } else {
+                $message = "Sinkronisasi katalog BPS selesai. Ada pembaruan: {$addedTables} tabel baru, "
+                    ."{$addedPeriods} periode/tahun baru, {$updatedRows} baris judul, topik, atau tautan diperbarui.";
+                if ($addedRows > $addedPeriods) {
+                    $message .= ' Termasuk '.$addedRows.' baris katalog baru.';
+                }
+                if ($skippedTables > 0) {
+                    $message .= " {$skippedTables} entri tidak dapat dipetakan dan perlu ditinjau.";
+                }
+            }
+            $message .= ' Indeks pencarian diperbarui untuk '.$summary['count'].' tabel dinamis.';
+
+            return back()->with('message', $message);
+        } catch (\Throwable $exception) {
+            Log::error('bps.catalog_refresh_error', ['exception_class' => $exception::class]);
+
+            return back()->with(
+                'error',
+                $processSucceeded
+                    ? 'CSV katalog telah disinkronkan, tetapi indeks pencarian chatbot gagal diperbarui. Periksa log aplikasi sebelum mencoba ulang.'
+                    : 'Pembaruan katalog tidak berhasil dijalankan. Periksa konfigurasi layanan Python dan WebAPI BPS.'
+            );
+        } finally {
+            $lock->release();
+        }
     }
 
     public function uploadKnowledge(Request $request, ChatbotKnowledgeService $knowledge): RedirectResponse

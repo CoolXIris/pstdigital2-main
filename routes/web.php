@@ -59,11 +59,16 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::get('dashboard/reviews/export', [HomeController::class, 'exportReviews'])->name('dashboard.reviews.export');
     Route::resource('users', UserController::class);
     Route::get('users_export', [UserController::class, 'export'])->name('users_export');
+    Route::put('admin/consultation-staff', [UserController::class, 'updateConsultationStaff'])->name('admin.consultation-staff.update');
     Route::get('admin/konsultasi', [KonsultasiAdminController::class, 'index'])->name('admin.konsultasi');
     Route::get('admin/konsultasi/riwayat/export', [KonsultasiAdminController::class, 'exportHistory'])->name('admin.konsultasi.history.export');
     Route::patch('admin/konsultasi/{meeting}/status', [KonsultasiAdminController::class, 'updateStatus'])
         ->name('admin.konsultasi.status');
+    Route::post('admin/konsultasi/{meeting}/open-room', [KonsultasiAdminController::class, 'openRoomNow'])->name('admin.konsultasi.open-room');
+    Route::put('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'updateHistory'])->name('admin.konsultasi.history.update');
+    Route::delete('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'deleteHistory'])->name('admin.konsultasi.history.destroy');
     Route::get('admin/chatbot', [ChatbotController::class, 'management'])->name('admin.chatbot');
+    Route::post('admin/chatbot/catalog/refresh', [ChatbotController::class, 'refreshBpsCatalog'])->name('admin.chatbot.catalog.refresh');
     Route::post('admin/chatbot/test', [ChatbotController::class, 'testMessage'])->name('admin.chatbot.test');
     Route::post('admin/chatbot/knowledge', [ChatbotController::class, 'uploadKnowledge'])->name('admin.chatbot.knowledge.store');
     Route::delete('admin/chatbot/knowledge/{source}', [ChatbotController::class, 'deleteKnowledge'])->name('admin.chatbot.knowledge.destroy');

@@ -23,6 +23,38 @@
         <article class="admin-stat admin-stat-red"><span class="admin-stat-label">Hasil pencarian</span><strong class="admin-stat-value">{{ number_format($data->total()) }}</strong><span class="admin-stat-foot">Akun cocok dengan filter aktif</span><span class="admin-stat-icon"><i class="fe fe-filter"></i></span></article>
     </div>
 
+    <section class="admin-panel admin-consultation-staff-panel mb-4">
+        <div class="admin-section-heading">
+            <div><span class="admin-eyebrow">Jadwal konsultasi</span><h2>Petugas konsultasi</h2><p>Kelola nama petugas yang dapat ditugaskan pada konsultasi.</p></div>
+        </div>
+        <form method="POST" action="{{ route('admin.consultation-staff.update') }}">
+            @csrf @method('PUT')
+            <div class="admin-panel-body">
+                @if ($errors->consultationStaff->any())
+                    <div class="alert alert-danger" role="alert">{{ $errors->consultationStaff->first() }}</div>
+                @endif
+                <div id="consultation-staff-list" class="d-grid gap-2">
+                    @foreach ($consultationStaff as $staffMember)
+                        <div class="d-flex gap-2 align-items-center" data-staff-row>
+                            <input class="form-control" name="staff[{{ $staffMember->id }}]" value="{{ old('staff.'.$staffMember->id, $staffMember->name) }}" maxlength="100" aria-label="Nama petugas" required>
+                            <button class="admin-action-icon is-danger" type="button" data-remove-staff title="Hapus petugas" aria-label="Hapus petugas"><i class="fe fe-trash-2"></i></button>
+                        </div>
+                    @endforeach
+                    @foreach (old('new_staff', []) as $name)
+                        <div class="d-flex gap-2 align-items-center" data-staff-row>
+                            <input class="form-control" name="new_staff[]" value="{{ $name }}" maxlength="100" aria-label="Nama petugas baru" required>
+                            <button class="admin-action-icon is-danger" type="button" data-remove-staff title="Hapus baris" aria-label="Hapus baris"><i class="fe fe-trash-2"></i></button>
+                        </div>
+                    @endforeach
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button class="admin-btn admin-btn-outline" type="button" id="add-consultation-staff"><i class="fe fe-plus"></i> Tambah petugas</button>
+                    <button class="admin-btn admin-btn-primary" type="submit"><i class="fe fe-save"></i> Simpan petugas</button>
+                </div>
+            </div>
+        </form>
+    </section>
+
     <section class="admin-panel">
         <form class="admin-toolbar" method="GET" action="{{ route('users.index') }}">
             <div class="admin-search">
@@ -131,6 +163,23 @@
 @endsection
 
 @section('scripts')
+<script>
+    (() => {
+        const list = document.getElementById('consultation-staff-list');
+        document.getElementById('add-consultation-staff').addEventListener('click', () => {
+            const row = document.createElement('div');
+            row.className = 'd-flex gap-2 align-items-center';
+            row.dataset.staffRow = '';
+            row.innerHTML = '<input class="form-control" name="new_staff[]" maxlength="100" aria-label="Nama petugas baru" required><button class="admin-action-icon is-danger" type="button" data-remove-staff title="Hapus baris" aria-label="Hapus baris"><i class="fe fe-trash-2"></i></button>';
+            list.append(row);
+            row.querySelector('input').focus();
+        });
+        list.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-remove-staff]');
+            if (button) button.closest('[data-staff-row]').remove();
+        });
+    })();
+</script>
 <script>
     (() => {
         const editModalElement = document.getElementById('editUserModal');

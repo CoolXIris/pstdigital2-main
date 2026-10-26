@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exports\ConsultationHistoryExport;
+use App\Models\ConsultationStaff;
 use App\Models\Meeting;
 use App\Models\TelegramBot;
 use App\Services\ConsultationDocumentationService;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,20 +44,17 @@ class KonsultasiAdminController extends Controller
         $pending = $baseQuery()->where('status', 0)->orderBy('tanggal')->orderBy('start_time')->paginate(8, ['*'], 'pending_page')->withQueryString();
         $upcoming = $baseQuery()->where('status', 2)->orderBy('tanggal')->orderBy('start_time')->paginate(9, ['*'], 'upcoming_page')->withQueryString();
         $upcoming->getCollection()->transform(function (Meeting $meeting) {
-            $meeting->setAttribute('room_open', $this->isRoomOpen($meeting));
+            $meeting->setAttribute('room_open', $meeting->isRoomOpen());
+            $meeting->setAttribute('can_open_room_now', $meeting->canBeOpenedEarly());
 
             return $meeting;
         });
         $history = $baseQuery()->whereIn('status', [1, 9])->orderByDesc('tanggal')->orderByDesc('start_time')->paginate(12, ['*'], 'history_page')->withQueryString();
-        $staff = config('pst.consultation_staff', []);
-        $upcoming->getCollection()->transform(function (Meeting $meeting) {
-            $meeting->setAttribute('room_open', $this->isRoomOpen($meeting));
-
-            return $meeting;
-        });
+        $staffRecords = ConsultationStaff::query()->orderBy('sort_order')->orderBy('id')->get();
+        $staff = $staffRecords->pluck('name')->all();
         $availableStaff = [];
         foreach ($pending as $meeting) {
-            $availableStaff[$meeting->id] = $this->availableStaffFor($meeting, $staff);
+            $availableStaff[$meeting->id] = $this->availableStaffFor($meeting, $staffRecords);
         }
 
         return view('admin.konsultasi.index', [
@@ -87,7 +86,7 @@ class KonsultasiAdminController extends Controller
     {
         $validated = $request->validate([
             'action' => ['required', Rule::in(['confirm', 'complete', 'cancel'])],
-            'assigned_staff' => ['required_if:action,confirm', 'nullable', Rule::in(config('pst.consultation_staff', []))],
+            'assigned_staff' => ['required_if:action,confirm', 'nullable', Rule::in(ConsultationStaff::query()->pluck('name')->all())],
             'cancellation_reason' => ['required_if:action,cancel', 'nullable', 'string', 'min:10', 'max:1000'],
             'ringkasan' => ['required_if:action,complete', 'nullable', 'string', 'min:10', 'max:5000'],
             'documentation' => [Rule::requiredIf(fn () => $request->input('action') === 'complete' && !$request->filled('documentation_url')), 'nullable', 'file', 'mimes:jpg,jpeg,png,webp,mp4,webm,mov', 'max:25600'],
@@ -117,9 +116,17 @@ class KonsultasiAdminController extends Controller
                         throw ValidationException::withMessages(['action' => 'Permintaan konsultasi ini sudah diproses.']);
                     }
 
-                    $staffName = $validated['assigned_staff'];
+                    $staffMember = ConsultationStaff::query()
+                        ->where('name', $validated['assigned_staff'])
+                        ->lockForUpdate()
+                        ->first();
+                    if (! $staffMember) {
+                        throw ValidationException::withMessages(['assigned_staff' => 'Petugas sudah diubah. Muat ulang halaman lalu pilih petugas yang tersedia.']);
+                    }
+
+                    $staffName = $staffMember->name;
                     $conflict = Meeting::query()
-                        ->where('assigned_staff', $staffName)
+                        ->where('assigned_staff_id', $staffMember->id)
                         ->where('status', 2)
                         ->whereDate('tanggal', $lockedMeeting->tanggal)
                         ->where('start_time', '<', $lockedMeeting->end_time)
@@ -132,6 +139,7 @@ class KonsultasiAdminController extends Controller
                     }
 
                     $lockedMeeting->assigned_staff = $staffName;
+                    $lockedMeeting->assigned_staff_id = $staffMember->id;
                     $lockedMeeting->approved_by_user_id = $approver->id;
                     $lockedMeeting->approved_by_name = $approver->name;
                     $lockedMeeting->approved_by_email = $approver->email;
@@ -203,12 +211,118 @@ class KonsultasiAdminController extends Controller
         return back()->with('message', $message);
     }
 
+    public function openRoomNow(Meeting $meeting): RedirectResponse
+    {
+        $result = DB::transaction(function () use ($meeting): string {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if ((int) $lockedMeeting->status !== 2) {
+                throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi terkonfirmasi yang ruangnya dapat dibuka.']);
+            }
+
+            $now = now('Asia/Jakarta');
+            $end = Carbon::parse($lockedMeeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString((string) $lockedMeeting->end_time);
+            if ($now->gt($end)) {
+                throw ValidationException::withMessages(['meeting' => 'Jadwal konsultasi ini sudah berakhir.']);
+            }
+
+            if ($lockedMeeting->room_opened_at) {
+                return 'already_open';
+            }
+
+            $start = Carbon::parse($lockedMeeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString((string) $lockedMeeting->start_time);
+            if (! $now->lt($start)) {
+                return 'scheduled_open';
+            }
+
+            $lockedMeeting->room_opened_at = $now->copy()->utc();
+            $lockedMeeting->save();
+
+            return 'opened';
+        });
+
+        $message = match ($result) {
+            'opened' => 'Ruang konsultasi berhasil dibuka sekarang. Jam selesai tetap mengikuti jadwal yang telah dikonfirmasi.',
+            'already_open' => 'Ruang konsultasi ini sudah dibuka lebih awal dan dapat diakses sampai jam selesai yang dijadwalkan.',
+            default => 'Waktu mulai sesi telah tiba. Ruang konsultasi dapat diakses sesuai jadwal.',
+        };
+
+        return back()->with('message', $message);
+    }
+
+    public function updateHistory(Request $request, Meeting $meeting): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'description' => ['required', 'string', 'max:3000'],
+            'tanggal' => ['required', 'date_format:Y-m-d'],
+            'start_time' => ['required', 'date_format:H:i'],
+            'end_time' => ['required', 'date_format:H:i', 'after:start_time'],
+            'assigned_staff' => ['nullable', 'string', 'max:255'],
+            'ringkasan' => ['nullable', 'string', 'max:5000'],
+            'cancellation_reason' => ['nullable', 'string', 'max:1000'],
+            'documentation_url' => ['nullable', 'url', 'max:2048'],
+        ]);
+
+        DB::transaction(function () use ($meeting, $validated) {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if (! in_array((int) $lockedMeeting->status, [1, 9], true)) {
+                throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat diedit di riwayat.']);
+            }
+
+            $staffName = $validated['assigned_staff'] ?: null;
+            $changes = [
+                'name' => $validated['name'],
+                'description' => $validated['description'],
+                'tanggal' => $validated['tanggal'],
+                'start_time' => $validated['start_time'],
+                'end_time' => $validated['end_time'],
+                'assigned_staff' => $staffName,
+                'assigned_staff_id' => $staffName
+                    ? ConsultationStaff::query()->where('name', $staffName)->value('id')
+                    : null,
+                'link_dokumentasi' => $validated['documentation_url'] ?? null,
+            ];
+
+            if ((int) $lockedMeeting->status === 1) {
+                $changes['ringkasan'] = $validated['ringkasan'] ?? null;
+            } else {
+                $changes['cancellation_reason'] = $validated['cancellation_reason'] ?? null;
+            }
+
+            $lockedMeeting->update($changes);
+        });
+
+        return back()->with('message', 'Riwayat konsultasi berhasil diperbarui.');
+    }
+
+    public function deleteHistory(Meeting $meeting, ConsultationDocumentationService $documentation): RedirectResponse
+    {
+        $documentationPath = DB::transaction(function () use ($meeting): ?string {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if (! in_array((int) $lockedMeeting->status, [1, 9], true)) {
+                throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat dihapus dari riwayat.']);
+            }
+
+            $path = $lockedMeeting->documentation_path;
+            $lockedMeeting->delete();
+
+            return $path;
+        });
+
+        if ($documentationPath) {
+            if (Str::startsWith($documentationPath, 'gdrive:')) {
+                $documentation->delete($documentationPath, Auth::user());
+            } else {
+                Storage::disk('local')->delete($documentationPath);
+            }
+        }
+
+        return back()->with('message', 'Riwayat konsultasi beserta data dan dokumentasi terkait berhasil dihapus.');
+    }
+
     private function isRoomOpen(Meeting $meeting): bool
     {
-        $start = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->start_time);
-        $end = Carbon::parse($meeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString($meeting->end_time);
-
-        return (int) $meeting->status === 2 && now('Asia/Jakarta')->betweenIncluded($start, $end);
+        return $meeting->isRoomOpen();
     }
 
     private function roomIceServers(Meeting $meeting): array
@@ -535,7 +649,7 @@ class KonsultasiAdminController extends Controller
     private function ensureRoomOpen(Meeting $meeting): void
     {
         abort_unless((int) $meeting->status === 2, 404);
-        abort_unless($this->isRoomOpen($meeting), 403, 'Ruang konsultasi hanya tersedia pada tanggal dan jam yang telah dikonfirmasi.');
+        abort_unless($meeting->isRoomOpen(), 403, 'Ruang konsultasi hanya tersedia pada tanggal dan jam yang telah dikonfirmasi.');
     }
 
     private function touchRoomParticipant(Meeting $meeting): void
@@ -575,17 +689,19 @@ class KonsultasiAdminController extends Controller
         }
     }
 
-    private function availableStaffFor(Meeting $meeting, array $staff): array
+    private function availableStaffFor(Meeting $meeting, Collection $staff): array
     {
         $busyStaff = Meeting::query()
-            ->whereIn('assigned_staff', $staff)
+            ->whereIn('assigned_staff_id', $staff->pluck('id'))
             ->where('status', 2)
             ->whereDate('tanggal', $meeting->tanggal)
             ->where('start_time', '<', $meeting->end_time)
             ->where('end_time', '>', $meeting->start_time)
-            ->pluck('assigned_staff')
+            ->pluck('assigned_staff_id')
             ->all();
 
-        return array_values(array_diff($staff, $busyStaff));
+        return $staff->reject(fn (ConsultationStaff $staffMember) => in_array($staffMember->id, $busyStaff))
+            ->pluck('name')
+            ->all();
     }
 }

@@ -117,6 +117,49 @@ class BpsWebApiServiceTest extends TestCase
         $this->assertFalse($this->invokePrivate($service, 'tablesNeedConfirmation', $tables, $question));
     }
 
+    public function test_casual_area_question_keeps_only_the_indicator_and_region_terms(): void
+    {
+        $service = new BpsWebApiService;
+        $question = 'Pengen tau luas daerah PALI itu berapa yah?';
+
+        $this->assertSame(
+            ['luas', 'daerah'],
+            $this->invokePrivate($service, 'keywords', $question)
+        );
+        $this->assertSame(
+            ['luas', 'daerah'],
+            $this->invokePrivate($service, 'requiredVariableTerms', $question)
+        );
+    }
+
+    public function test_specific_topic_outweighs_facility_context_in_table_search(): void
+    {
+        $service = new BpsWebApiService;
+        $schoolKeywords = $this->invokePrivate($service, 'keywords', 'fasilitas sekolah');
+        $healthKeywords = $this->invokePrivate($service, 'keywords', 'fasilitas kesehatan');
+
+        $this->assertSame(
+            ['sekolah'],
+            $this->invokePrivate($service, 'requiredVariableTerms', 'fasilitas sekolah')
+        );
+        $this->assertSame(
+            'sekolah',
+            $this->invokePrivate(
+                $service,
+                'mainKeyword',
+                $this->invokePrivate($service, 'coreTableKeywords', $schoolKeywords)
+            )
+        );
+        $this->assertSame(
+            'kesehatan',
+            $this->invokePrivate(
+                $service,
+                'mainKeyword',
+                $this->invokePrivate($service, 'coreTableKeywords', $healthKeywords)
+            )
+        );
+    }
+
     public function test_universitas_mahasiswa_and_dosen_match_the_latest_higher_education_simdasi_tables(): void
     {
         $service = new BpsWebApiService;

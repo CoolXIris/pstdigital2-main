@@ -2,12 +2,12 @@
 
 return [
     'consultation_staff' => [
-        'Petugas 1',
-        'Petugas 2',
-        'Petugas 3',
-        'Petugas 4',
-        'Petugas 5',
-        'Petugas 6',
+        'Petugas 1 (Aris Wijayanto)',
+        'Petugas 2 (Nadia Qathrunnada)',
+        'Petugas 3 (M. Irfan Zulfahmi)',
+        'Petugas 4 (S. Abdurrahman)',
+        'Petugas 5 (Telly Dwi Nataliza)',
+        'Petugas 6 (Zahirah Husin)',
     ],
     'ice_servers' => (static function (): array {
         $raw = trim((string) env('WEBRTC_ICE_SERVERS', ''));

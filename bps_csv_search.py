@@ -13,6 +13,7 @@ import sinonim
 
 logger = logging.getLogger(__name__)
 _TOKEN_PATTERN = re.compile(r"[a-z]+", re.IGNORECASE)
+_CONTEXT_TOPIC_TERMS = {"fasilitas"}
 _ABBREVIATION_PATTERN = re.compile(
     r"(?P<phrase>[A-Za-z][A-Za-z\s,/-]{3,80}?)\s*\((?P<abbr>[A-Z][A-Z0-9-]{1,9})\)"
     r"|(?P<abbr_first>[A-Z][A-Z0-9-]{1,9})\s*\((?P<phrase_first>[^()]{4,80})\)"
@@ -212,7 +213,8 @@ class Pencari:
             if re.match(r"(?:di|ter|ber|me|mem|men|meng|meny)[a-z]{4,}", token)
             and stem(token) != token
         }
-        nominal = [term for term in core if term not in verbal] or core
+        topical = [term for term in core if term not in _CONTEXT_TOPIC_TERMS] or core
+        nominal = [term for term in topical if term not in verbal] or topical
         return max(nominal, key=lambda term: (self._term_weight(term), len(term)))
 
     def _alternatives(self, term: str) -> list[str]:

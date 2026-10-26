@@ -26,6 +26,7 @@ class ChatRoutingTests(unittest.TestCase):
             ("berapa jumlah penduduk hasil sensus 2020", "nilai"),
             ("Daftar tabel SIMDASI", "nilai"),
             ("apa itu PDRB ADHB", "definisi"),
+            ("Apa arti luas daerah?", "definisi"),
             ("Apa perbedaan PDRB ADHB dan ADHK?", "definisi"),
             ("Bagaimana membaca PDRB ADHB?", "definisi"),
             ("Berapa PDRB Kota Palembang?", "nilai"),
@@ -1955,6 +1956,21 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(
             main._dynamic_variable_intent("produksi padi menurut kabupaten/kota"),
             ("produksi padi", "", None),
+        )
+
+    def test_casual_area_question_selects_the_area_table_for_pali(self):
+        question = "Pengen tau luas daerah PALI itu berapa yah?"
+        intent = main._dynamic_variable_intent(question)
+
+        self.assertEqual(
+            intent,
+            ("luas daerah", "", "Kabupaten Penukal Abab Lematang Ilir"),
+        )
+        search_result = main.bps_tools.cari_variabel(intent[0])
+        self.assertEqual(search_result["hasil"][0]["var_id"], 201)
+        self.assertEqual(
+            search_result["hasil"][0]["judul"],
+            "Luas Daerah Menurut Kabupaten/Kota (Km2)",
         )
 
     def test_resolves_multiple_regions_in_question_order(self):

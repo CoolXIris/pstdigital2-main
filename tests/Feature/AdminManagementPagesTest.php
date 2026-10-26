@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exports\DashboardReviewsExport;
 use App\Exports\UsersExport;
+use App\Models\ConsultationStaff;
 use App\Models\Meeting;
 use App\Models\User;
 use App\Services\BpsWebApiService;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Permission\Models\Role;
@@ -51,6 +53,93 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)->get(route('admin.konsultasi'))->assertOk();
         $this->actingAs($this->admin)->get(route('admin.chatbot'))->assertOk();
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
+    }
+
+    public function test_admin_can_refresh_bps_catalog_from_webapi(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Process::fake([
+            '*update_bps.py*' => Process::result(
+                json_encode([
+                    'status' => 'ok',
+                    'api_tables' => 577,
+                    'matched_tables' => 500,
+                    'skipped_tables' => 0,
+                    'added_tables' => 3,
+                    'added_rows' => 8,
+                    'added_periods' => 7,
+                    'updated_rows' => 2,
+                ], JSON_THROW_ON_ERROR)
+            ),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->from(route('admin.chatbot'))
+            ->post(route('admin.chatbot.catalog.refresh'))
+            ->assertRedirect(route('admin.chatbot'))
+            ->assertSessionHas('message', fn (string $message) => str_contains($message, 'Ada pembaruan')
+                && str_contains($message, '3 tabel baru')
+                && str_contains($message, '7 periode/tahun baru')
+                && str_contains($message, '2 baris judul, topik, atau tautan diperbarui')
+                && str_contains($message, 'Indeks pencarian diperbarui'));
+
+        Process::assertRan(fn ($process, $result) => str_contains(implode(' ', $process->command), 'update_bps.py')
+            && $process->environment['BPS_API_KEY'] === 'bps-test-secret'
+            && $result->successful());
+    }
+
+    public function test_bps_catalog_refresh_notifies_when_catalog_is_already_current(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Process::fake([
+            '*update_bps.py*' => Process::result(json_encode([
+                'status' => 'ok',
+                'api_tables' => 577,
+                'matched_tables' => 577,
+                'skipped_tables' => 0,
+                'added_tables' => 0,
+                'added_rows' => 0,
+                'added_periods' => 0,
+                'updated_rows' => 0,
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->from(route('admin.chatbot'))
+            ->post(route('admin.chatbot.catalog.refresh'))
+            ->assertRedirect(route('admin.chatbot'))
+            ->assertSessionHas('message', fn (string $message) => str_starts_with(
+                $message,
+                'Katalog BPS sudah terbaru. Tidak ada judul, topik, atau periode yang perlu ditambah atau diperbarui.'
+            ) && str_contains($message, 'Indeks pencarian diperbarui'));
+    }
+
+    public function test_bps_catalog_refresh_requires_api_key(): void
+    {
+        config(['services.bps.api_key' => null]);
+        Process::fake();
+
+        $this->actingAs($this->admin)
+            ->from(route('admin.chatbot'))
+            ->post(route('admin.chatbot.catalog.refresh'))
+            ->assertRedirect(route('admin.chatbot'))
+            ->assertSessionHas('error', 'API key WebAPI BPS belum dikonfigurasi. Katalog tidak diperbarui.');
+        Process::assertDidntRun(fn () => true);
+
+    }
+
+    public function test_bps_catalog_refresh_reports_process_failure_without_exposing_process_output(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Process::fake([
+            '*update_bps.py*' => Process::result('', 'API key=bps-test-secret request failed', 1),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->from(route('admin.chatbot'))
+            ->post(route('admin.chatbot.catalog.refresh'))
+            ->assertRedirect(route('admin.chatbot'))
+            ->assertSessionHas('error', 'WebAPI BPS gagal memperbarui katalog. Data katalog yang tersimpan tetap dipertahankan; silakan coba lagi.');
     }
 
     public function test_admin_can_edit_delete_and_export_user_profile_fields(): void
@@ -97,6 +186,48 @@ class AdminManagementPagesTest extends BaseTestCase
             ->delete(route('users.destroy', $user))
             ->assertRedirect(route('users.index'));
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
+    }
+
+    public function test_admin_can_manage_consultation_staff_and_rename_assigned_staff(): void
+    {
+        $staff = ConsultationStaff::query()->orderBy('sort_order')->firstOrFail();
+        $meeting = $this->createMeeting([
+            'status' => 2,
+            'assigned_staff' => $staff->name,
+            'assigned_staff_id' => $staff->id,
+        ]);
+        $staffInput = ConsultationStaff::query()->pluck('name', 'id')->all();
+        $staffInput[$staff->id] = 'Petugas konsultasi diperbarui';
+
+        $this->actingAs($this->admin)
+            ->put(route('admin.consultation-staff.update'), [
+                'staff' => $staffInput,
+                'new_staff' => ['Petugas tambahan'],
+            ])
+            ->assertRedirect(route('users.index'))
+            ->assertSessionHas('message');
+
+        $this->assertDatabaseHas('consultation_staff', [
+            'id' => $staff->id,
+            'name' => 'Petugas konsultasi diperbarui',
+        ]);
+        $this->assertDatabaseHas('consultation_staff', ['name' => 'Petugas tambahan']);
+        $this->assertDatabaseHas('meeting', [
+            'id' => $meeting->id,
+            'assigned_staff' => 'Petugas konsultasi diperbarui',
+            'assigned_staff_id' => $staff->id,
+        ]);
+
+        unset($staffInput[$staff->id]);
+        $this->actingAs($this->admin)
+            ->from(route('users.index'))
+            ->put(route('admin.consultation-staff.update'), [
+                'staff' => $staffInput,
+                'new_staff' => ['Petugas tambahan'],
+            ])
+            ->assertRedirect(route('users.index'))
+            ->assertSessionHasErrorsIn('consultationStaff', 'staff');
+        $this->assertDatabaseHas('consultation_staff', ['id' => $staff->id]);
     }
 
     public function test_admin_can_export_dashboard_reviews_with_active_filters(): void
@@ -171,6 +302,77 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertOk();
 
         Excel::assertDownloaded('riwayat-konsultasi.xlsx', fn ($export) => $export->query()->count() === 1);
+    }
+
+    public function test_admin_can_edit_completed_consultation_history(): void
+    {
+        $staff = ConsultationStaff::query()->firstOrFail();
+        $meeting = $this->createMeeting([
+            'status' => 1,
+            'assigned_staff' => $staff->name,
+            'assigned_staff_id' => $staff->id,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->put(route('admin.konsultasi.history.update', $meeting), [
+                'name' => 'Topik diperbarui',
+                'description' => 'Deskripsi konsultasi yang diperbarui.',
+                'tanggal' => '2026-10-26',
+                'start_time' => '10:00',
+                'end_time' => '10:45',
+                'assigned_staff' => $staff->name,
+                'ringkasan' => 'Hasil konsultasi yang sudah diperbarui.',
+                'documentation_url' => 'https://example.org/dokumentasi-baru',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('message');
+
+        $this->assertDatabaseHas('meeting', [
+            'id' => $meeting->id,
+            'name' => 'Topik diperbarui',
+            'description' => 'Deskripsi konsultasi yang diperbarui.',
+            'tanggal' => '2026-10-26',
+            'start_time' => '10:00',
+            'end_time' => '10:45',
+            'assigned_staff_id' => $staff->id,
+            'ringkasan' => 'Hasil konsultasi yang sudah diperbarui.',
+            'link_dokumentasi' => 'https://example.org/dokumentasi-baru',
+        ]);
+    }
+
+    public function test_admin_cannot_edit_a_confirmed_consultation_from_history(): void
+    {
+        $meeting = $this->createMeeting(['status' => 2]);
+
+        $this->actingAs($this->admin)
+            ->from(route('admin.konsultasi'))
+            ->put(route('admin.konsultasi.history.update', $meeting), [
+                'name' => 'Topik',
+                'description' => 'Deskripsi konsultasi',
+                'tanggal' => '2026-10-26',
+                'start_time' => '10:00',
+                'end_time' => '10:45',
+            ])
+            ->assertRedirect(route('admin.konsultasi'))
+            ->assertSessionHasErrors('meeting');
+    }
+
+    public function test_admin_can_delete_consultation_history_and_local_documentation(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('consultation/history-file.jpg', 'documentation');
+        $meeting = $this->createMeeting([
+            'status' => 9,
+            'documentation_path' => 'consultation/history-file.jpg',
+        ]);
+
+        $this->actingAs($this->admin)
+            ->delete(route('admin.konsultasi.history.destroy', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('message');
+
+        $this->assertDatabaseMissing('meeting', ['id' => $meeting->id]);
+        Storage::disk('local')->assertMissing('consultation/history-file.jpg');
     }
 
     public function test_regular_user_cannot_open_admin_management_pages(): void
@@ -1782,6 +1984,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
     public function test_admin_can_confirm_assign_and_complete_a_consultation(): void
     {
+        $staff = ConsultationStaff::query()->firstOrFail();
         $meeting = $this->createMeeting([
             'tanggal' => '2026-10-15',
             'start_time' => '09:00:00',
@@ -1791,12 +1994,17 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)
             ->patch(route('admin.konsultasi.status', $meeting), [
                 'action' => 'confirm',
-                'assigned_staff' => 'Petugas 1',
+                'assigned_staff' => $staff->name,
             ])
             ->assertRedirect()
             ->assertSessionHas('message');
 
-        $this->assertDatabaseHas('meeting', ['id' => $meeting->id, 'status' => 2, 'assigned_staff' => 'Petugas 1']);
+        $this->assertDatabaseHas('meeting', [
+            'id' => $meeting->id,
+            'status' => 2,
+            'assigned_staff' => $staff->name,
+            'assigned_staff_id' => $staff->id,
+        ]);
 
         $this->actingAs($this->admin)
             ->patch(route('admin.konsultasi.status', $meeting), [
@@ -1807,17 +2015,19 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertRedirect()
             ->assertSessionHas('message');
 
-        $this->assertDatabaseHas('meeting', ['id' => $meeting->id, 'status' => 1, 'assigned_staff' => 'Petugas 1']);
+        $this->assertDatabaseHas('meeting', ['id' => $meeting->id, 'status' => 1, 'assigned_staff' => $staff->name]);
     }
 
     public function test_a_staff_member_cannot_be_assigned_to_overlapping_confirmed_meetings(): void
     {
+        $staff = ConsultationStaff::query()->firstOrFail();
         $this->createMeeting([
             'tanggal' => '2026-10-15',
             'start_time' => '09:00:00',
             'end_time' => '10:00:00',
             'status' => 2,
-            'assigned_staff' => 'Petugas 1',
+            'assigned_staff' => $staff->name,
+            'assigned_staff_id' => $staff->id,
         ]);
         $pending = $this->createMeeting([
             'tanggal' => '2026-10-15',
@@ -1829,7 +2039,7 @@ class AdminManagementPagesTest extends BaseTestCase
             ->from(route('admin.konsultasi'))
             ->patch(route('admin.konsultasi.status', $pending), [
                 'action' => 'confirm',
-                'assigned_staff' => 'Petugas 1',
+                'assigned_staff' => $staff->name,
             ])
             ->assertRedirect(route('admin.konsultasi'))
             ->assertSessionHasErrors('assigned_staff');
@@ -3491,6 +3701,38 @@ class AdminManagementPagesTest extends BaseTestCase
         $authenticatedOther = $otherUser;
         $this->actingAs($authenticatedOther)->get(route('konsultasi.room', $meeting))->assertForbidden();
 
+        Carbon::setTestNow();
+    }
+
+    public function test_admin_can_open_a_confirmed_consultation_room_early_for_both_participants(): void
+    {
+        /** @var User $requester */
+        $requester = User::factory()->create();
+        $requester->assignRole('user');
+        /** @var Authenticatable $authenticatedRequester */
+        $authenticatedRequester = $requester;
+        $meeting = $this->createMeeting([
+            'user_id' => $requester->id,
+            'status' => 2,
+            'tanggal' => '2026-10-15',
+            'start_time' => '09:00:00',
+            'end_time' => '10:00:00',
+        ]);
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 08:30:00', 'Asia/Jakarta'));
+        $this->actingAs($this->admin)
+            ->post(route('admin.konsultasi.open-room', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('message');
+
+        $this->assertNotNull($meeting->fresh()->room_opened_at);
+        $this->actingAs($authenticatedRequester)
+            ->get(route('konsultasi.room', $meeting))
+            ->assertOk()
+            ->assertSee('Ruang Konsultasi');
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 10:01:00', 'Asia/Jakarta'));
+        $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting))->assertForbidden();
         Carbon::setTestNow();
     }
 

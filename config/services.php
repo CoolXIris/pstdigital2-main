@@ -46,6 +46,7 @@ return [
     'bps' => [
         'api_key' => env('BPS_API_KEY'),
         'catalog_csv' => env('BPS_CATALOG_CSV', base_path('tabel_bps_sumsel.csv')),
+        'python_binary' => env('BPS_PYTHON_BINARY', 'python'),
     ],
 
 ];
