@@ -63,6 +63,8 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
         ->name('admin.konsultasi.status');
     Route::patch('admin/konsultasi/{meeting}/open-room', [KonsultasiAdminController::class, 'openRoomNow'])
         ->name('admin.konsultasi.open-room');
+    Route::post('admin/konsultasi/{meeting}/room-invites', [KonsultasiAdminController::class, 'inviteRoomStaff'])
+        ->name('admin.konsultasi.room-invites.store');
     Route::patch('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'updateHistory'])
         ->name('admin.konsultasi.history.update');
     Route::delete('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'deleteHistory'])

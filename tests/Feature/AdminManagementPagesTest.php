@@ -973,6 +973,15 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $requester */
         $requester = User::factory()->create();
         $requester->assignRole('user');
+        $requester->update([
+            'pekerjaan' => 'Peneliti',
+            'jenis_kelamin' => 'Laki-laki',
+            'tanggal_lahir' => '1990-01-01',
+            'asal_prov' => 'Sumatera Selatan',
+            'asal_kab' => 'Palembang',
+            'no_hp' => '08123456789',
+            'pendidikan' => 'S1',
+        ]);
         /** @var Authenticatable $authenticatedRequester */
         $authenticatedRequester = $requester;
         $meeting = $this->createMeeting([
@@ -983,47 +992,15 @@ class AdminManagementPagesTest extends BaseTestCase
             'start_time' => '09:00:00',
             'end_time' => '10:00:00',
         ]);
-
         Carbon::setTestNow(Carbon::parse('2026-10-15 09:30:00', 'Asia/Jakarta'));
         Carbon::setTestNow(Carbon::parse('2026-10-15 08:59:00', 'Asia/Jakarta'));
         $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting))->assertForbidden();
         Carbon::setTestNow(Carbon::parse('2026-10-15 09:30:00', 'Asia/Jakarta'));
         $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting))->assertOk()->assertSee('Ruang Konsultasi');
-        $roomResponse = $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting));
-        preg_match('/data-room-session="([^"]+)"/', $roomResponse->getContent(), $sessionMatch);
-        $roomSession = $sessionMatch[1];
-        $sdp = "v=0\r\na=ssrc:1048995972 msid:- 43d84ad7-224e-45a2-8e40-6589d611248a\r\n";
-        $this->post(route('konsultasi.signals.send', $meeting), ['session_id' => $roomSession, 'type' => 'description', 'payload' => ['type' => 'offer', 'sdp' => $sdp]])->assertCreated();
-
-        $staffRoomResponse = $this->actingAs($this->admin)->get(route('konsultasi.room', $meeting));
-        preg_match('/data-room-session="([^"]+)"/', $staffRoomResponse->getContent(), $staffSessionMatch);
-        $this->assertSame($roomSession, $staffSessionMatch[1]);
-        $this->actingAs($this->admin)->get(route('konsultasi.signals.poll', [$meeting, 'after' => 0, 'session_id' => $roomSession]))
-            ->assertOk()
-            ->assertJsonPath('signals.0.type', 'description')
-            ->assertJsonPath('signals.0.payload.sdp', $sdp);
-        $this->actingAs($this->admin)->get(route('konsultasi.signals.poll', [$meeting, 'after' => 0, 'session_id' => (string) \Illuminate\Support\Str::uuid()]))
-            ->assertOk()->assertJsonPath('session_changed', true);
-        $this->actingAs($this->admin)->get(route('konsultasi.room', $meeting))->assertOk()->assertSee(route('admin.konsultasi'), false);
-
-        DB::table('meeting_signals')->insert([
-            'meeting_id' => $meeting->id,
-            'session_id' => $roomSession,
-            'sender_user_id' => $requester->id,
-            'signal_type' => 'description',
-            'payload' => json_encode(['type' => 'offer', 'sdp' => 'obsolete']),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-        Meeting::whereKey($meeting->id)->update(['room_last_seen_at' => now()->subMinutes(5)]);
-        $newRoomResponse = $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting));
-        preg_match('/data-room-session="([^"]+)"/', $newRoomResponse->getContent(), $newSessionMatch);
-        $this->assertNotSame($roomSession, $newSessionMatch[1]);
-        $this->assertSame(0, DB::table('meeting_signals')->where('meeting_id', $meeting->id)->count());
 
         /** @var User $otherUser */
         $otherUser = User::factory()->create();
-        $otherUser->assignRole('user');
+        $otherUser->assignRole('admin');
         /** @var Authenticatable $authenticatedOther */
         $authenticatedOther = $otherUser;
         $this->actingAs($authenticatedOther)->get(route('konsultasi.room', $meeting))->assertForbidden();

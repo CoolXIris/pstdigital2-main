@@ -73,8 +73,10 @@
                         <div class="admin-confirmed-detail"><span><i class="fe fe-calendar"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('D, d M Y') }}</span><span><i class="fe fe-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span><span><i class="fe fe-user"></i>{{ $meeting->assigned_staff ?: 'Petugas belum ditentukan' }}</span></div>
                         @if ($meeting->room_open)
                             <div class="admin-room-actions">
-                                <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kehadiran...</span>
-                                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}"><button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button></form>
+                                <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kapasitas ruang...</span>
+                                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" data-room-join-form hidden>
+                                    <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button>
+                                </form>
                             </div>
                         @elseif ($meeting->can_open_room_now)
                             <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
@@ -294,14 +296,16 @@
             try {
                 const response = await fetch(indicator.dataset.presenceUrl, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
                 if (!response.ok) throw new Error('presence unavailable');
-                const { peer_present: present } = await response.json();
-                indicator.classList.toggle('is-present', present);
-                indicator.innerHTML = present
-                    ? '<i class="fe fe-user-check"></i> Pengguna sudah masuk ruang'
-                    : '<i class="fe fe-clock"></i> Belum ada pengguna di ruang';
+                const { participant_count: participantCount, capacity, can_join: canJoin } = await response.json();
+                const joinForm = indicator.parentElement.querySelector('[data-room-join-form]');
+                joinForm.hidden = !canJoin;
+                indicator.classList.toggle('is-present', participantCount > 1);
+                indicator.innerHTML = `<i class="fe ${participantCount > 1 ? 'fe-user-check' : 'fe-clock'}"></i> ${participantCount}/${capacity} peserta di ruang`;
             } catch {
+                const joinForm = indicator.parentElement.querySelector('[data-room-join-form]');
+                joinForm.hidden = true;
                 indicator.classList.remove('is-present');
-                indicator.innerHTML = '<i class="fe fe-refresh-cw"></i> Status ruang belum tersedia';
+                indicator.innerHTML = '<i class="fe fe-refresh-cw"></i> Kapasitas ruang belum tersedia';
             }
         };
         const refreshPresence = () => {
@@ -313,7 +317,7 @@
             });
         };
         refreshPresence();
-        if (indicators.length) window.setInterval(refreshPresence, 15000);
+        if (indicators.length) window.setInterval(refreshPresence, 5000);
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) refreshPresence();
         });
