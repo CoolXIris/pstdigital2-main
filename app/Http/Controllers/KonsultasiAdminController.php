@@ -159,6 +159,7 @@ class KonsultasiAdminController extends Controller
                         'status' => 1,
                         'ringkasan' => $validated['ringkasan'],
                         'documentation_path' => $storedDocumentation,
+                        'documentation_uploader_user_id' => $storedDocumentation ? $approver->id : null,
                         'documentation_original_name' => $request->file('documentation')?->getClientOriginalName(),
                         'link_dokumentasi' => $validated['documentation_url'] ?? null,
                     ]);
@@ -299,24 +300,40 @@ class KonsultasiAdminController extends Controller
 
     public function deleteHistory(Meeting $meeting, ConsultationDocumentationService $documentation): RedirectResponse
     {
-        $documentationPath = DB::transaction(function () use ($meeting): ?string {
+        $record = DB::transaction(function () use ($meeting): array {
             $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
             if (! in_array((int) $lockedMeeting->status, [1, 9], true)) {
                 throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat dihapus dari riwayat.']);
             }
 
-            $path = $lockedMeeting->documentation_path;
-            $lockedMeeting->delete();
-
-            return $path;
+            return [
+                'path' => $lockedMeeting->documentation_path,
+                'uploader_id' => $lockedMeeting->documentation_uploader_user_id,
+            ];
         });
 
-        if ($documentationPath) {
-            if (Str::startsWith($documentationPath, 'gdrive:')) {
-                $documentation->delete($documentationPath, Auth::user());
-            } else {
-                Storage::disk('local')->delete($documentationPath);
+        $documentationPath = $record['path'];
+        if ($documentationPath && Str::startsWith($documentationPath, 'gdrive:')) {
+            $uploader = $record['uploader_id'] ? User::find($record['uploader_id']) : null;
+            if (!$documentation->delete($documentationPath, $uploader)) {
+                return back()->with('error', 'Dokumentasi Google Drive belum dapat dihapus. Riwayat dan referensi berkas tetap tersimpan; silakan coba lagi.');
             }
+        }
+
+        $deletedPath = DB::transaction(function () use ($meeting, $documentationPath): ?string {
+            $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            if (! in_array((int) $lockedMeeting->status, [1, 9], true)
+                || $lockedMeeting->documentation_path !== $documentationPath) {
+                throw ValidationException::withMessages(['meeting' => 'Riwayat konsultasi telah berubah. Muat ulang halaman lalu coba kembali.']);
+            }
+
+            $lockedMeeting->delete();
+
+            return $lockedMeeting->documentation_path;
+        });
+
+        if ($deletedPath && !Str::startsWith($deletedPath, 'gdrive:')) {
+            Storage::disk('local')->delete($deletedPath);
         }
 
         return back()->with('message', 'Riwayat konsultasi beserta data dan dokumentasi terkait berhasil dihapus.');

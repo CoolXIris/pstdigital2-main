@@ -60,6 +60,9 @@ def _has_payload_data(payload: dict) -> bool:
             return bool(value)
         return value is not None and bool(str(value).strip())
 
+    if "datacontent" in payload:
+        return has_content(payload["datacontent"])
+
     data = payload.get("data")
     if isinstance(data, list):
         if len(data) < 2:

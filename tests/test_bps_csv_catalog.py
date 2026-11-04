@@ -88,6 +88,35 @@ class BpsCsvCatalogTests(unittest.TestCase):
                     "Penduduk Menurut Jenis Kelamin",
                 )
 
+    def test_audit_link_status_is_merged_without_a_pull_status(self):
+        row = self._row(
+            "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/262/th/125/key/"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "catalog.csv"
+            audit_path = Path(directory) / "catalog_audit.csv"
+            self._write_catalog(catalog_path, [row])
+            with audit_path.open("w", encoding="utf-8-sig", newline="") as target:
+                writer = csv.DictWriter(target, fieldnames=[
+                    "id_tabel", "tahun", "link_json", "status_tarik", "status_link",
+                    "status_link_detail",
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "id_tabel": row["id_tabel"],
+                    "tahun": row["tahun"],
+                    "link_json": row["link_json"],
+                    "status_tarik": "",
+                    "status_link": "gagal",
+                    "status_link_detail": "halaman tidak ditemukan",
+                })
+
+            with patch.object(bps_csv_catalog, "_catalog_path", return_value=catalog_path):
+                loaded = bps_csv_catalog.load_catalog()
+
+        self.assertEqual(loaded[0]["status_link"], "gagal")
+        self.assertEqual(loaded[0]["status_link_detail"], "halaman tidak ditemukan")
+
     def test_fetch_uses_environment_key_and_caches_without_exposing_key(self):
         row = self._row(
             "https://webapi.bps.go.id/v1/api/list/model/data/domain/1600/var/262/th/125/key/"

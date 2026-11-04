@@ -98,6 +98,7 @@ class ConsultationGoogleCalendarService
                 'timeZone' => $timezone,
             ],
             'status' => 'confirmed',
+            'visibility' => 'private',
             'reminders' => [
                 'useDefault' => false,
                 'overrides' => [

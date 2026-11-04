@@ -147,11 +147,16 @@ class BpsWebApiService
 
     public function verifyCanonicalGoldens(array $cases): array
     {
-        $indicatorNames = array_values(array_unique(array_map(
-            fn (array $case) => (string) ($case['indicator'] ?? ''),
-            $cases
-        )));
-        $observations = $this->checkCanonicalCoverage($indicatorNames);
+        $latestCases = array_values(array_filter(
+            $cases,
+            fn (array $case) => (int) ($case['expected_year'] ?? 0) <= 0
+        ));
+        $observations = $latestCases === []
+            ? []
+            : $this->checkCanonicalCoverage(array_values(array_unique(array_map(
+                fn (array $case) => (string) ($case['indicator'] ?? ''),
+                $latestCases
+            ))));
         $results = [];
         foreach ($cases as $case) {
             $indicatorName = (string) ($case['indicator'] ?? '');
@@ -162,18 +167,28 @@ class BpsWebApiService
             $expectedValue = $case['expected_value'] ?? null;
             $routedVariables = $this->curatedVariables($this->keywords($question));
             $routedId = (int) ($routedVariables[0]['var_id'] ?? 0);
-            $actual = null;
-            foreach ($observations as $observation) {
-                if ($observation['name'] === $indicatorName && $observation['region'] === $regionName) {
-                    $actual = $observation;
-                    break;
+            if ($expectedYear > 0 && $routedId === $expectedId) {
+                $actual = $this->canonicalObservationForYear(
+                    $expectedId,
+                    $expectedYear,
+                    $regionName,
+                    (string) ($routedVariables[0]['title'] ?? ''),
+                    $routedVariables[0]
+                );
+            } else {
+                $actual = null;
+                foreach ($observations as $observation) {
+                    if ($observation['name'] === $indicatorName && $observation['region'] === $regionName) {
+                        $actual = $observation;
+                        break;
+                    }
                 }
             }
 
             $passed = $actual !== null
                 && $routedId === $expectedId
                 && $actual['var_id'] === $expectedId
-                && $actual['status'] === 'current'
+                && ($expectedYear > 0 || $actual['status'] === 'current')
                 && ($expectedYear === 0 || $actual['latest_year'] === $expectedYear)
                 && (is_numeric($actual['value'] ?? null))
                 && ($expectedValue === null || (float) $actual['value'] === (float) $expectedValue);
@@ -191,6 +206,77 @@ class BpsWebApiService
         }
 
         return $results;
+    }
+
+    private function canonicalObservationForYear(
+        int $variableId,
+        int $year,
+        string $regionName,
+        string $title,
+        array $variable
+    ): ?array {
+        $apiKey = $this->apiKey();
+        if ($apiKey === null) {
+            throw new RuntimeException('API key WebAPI BPS belum dikonfigurasi.');
+        }
+
+        $period = collect($this->canonicalPeriods($variableId, $apiKey))
+            ->first(fn (array $item) => (int) ($item['th'] ?? 0) === $year);
+        if (!is_array($period) || (int) ($period['th_id'] ?? 0) <= 0) {
+            return null;
+        }
+
+        $response = $this->canonicalDataForPeriod(
+            $variableId,
+            (int) $period['th_id'],
+            $apiKey,
+            $title,
+            (string) $year
+        );
+        if ($response === null) {
+            return null;
+        }
+
+        $values = $response->json('datacontent');
+        $vervar = $response->json('vervar');
+        if (!is_array($values) || !is_array($vervar)) {
+            return null;
+        }
+
+        $province = $this->provinceFallbackRegion();
+        $target = $regionName === $province['label']
+            ? $province
+            : collect(config('sumsel_regions', []))->first(
+                fn (array $region) => ($region['label'] ?? null) === $regionName
+            );
+        if (!is_array($target)) {
+            return null;
+        }
+
+        $regionRow = $regionName === $province['label']
+            ? (isset($variable['vervar_label'])
+                ? $this->vervarRowByLabel($vervar, (string) $variable['vervar_label'])
+                : $this->provinceVervarRow($vervar))
+            : $this->regionVervarRow($target, $vervar);
+        if ($regionRow === null) {
+            return null;
+        }
+
+        foreach ($this->valuesForRegion($values, $regionRow) as $value) {
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return [
+                    'name' => (string) ($variable['name'] ?? ''),
+                    'var_id' => $variableId,
+                    'title' => $title,
+                    'region' => $regionName,
+                    'latest_year' => $year,
+                    'value' => $value,
+                    'status' => 'historical',
+                ];
+            }
+        }
+
+        return null;
     }
 
     public function refreshVariableIndex(): array

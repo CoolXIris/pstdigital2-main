@@ -32,6 +32,10 @@ OTHER_MODELS = {
 }
 
 
+class CatalogError(RuntimeError):
+    pass
+
+
 class Catalog:
     def __init__(self, client: httpx.Client, api_key: str, domain: str):
         self.client = client
@@ -45,19 +49,24 @@ class Catalog:
                 response = self.client.get(url)
                 response.raise_for_status()
                 payload = response.json()
-                return payload if payload.get("status") == "OK" else None
+                if isinstance(payload, dict) and payload.get("status") == "OK":
+                    return payload
             except Exception:
                 # Sengaja tanpa pesan asli: URL pada exception memuat API key.
+                pass
+            if attempt < 2:
                 time.sleep(1.5 * (attempt + 1))
-        return None
+        raise CatalogError("WebAPI BPS gagal memuat katalog setelah beberapa percobaan.")
 
     def pages(self, path: str) -> list[dict]:
         rows: list[dict] = []
         page = 1
         while True:
             payload = self.get(path if page == 1 else f"{path}/page/{page}")
-            data = payload.get("data") if payload else None
-            if not (isinstance(data, list) and len(data) >= 2 and isinstance(data[1], list)):
+            data = payload.get("data")
+            if not isinstance(data, list) or len(data) < 2 or not isinstance(data[1], list):
+                raise CatalogError("WebAPI BPS mengembalikan bentuk data katalog yang tidak valid.")
+            if not data[1]:
                 break
             rows += data[1]
             if page >= int((data[0] or {}).get("pages", 1) or 1):
@@ -83,11 +92,6 @@ def run(catalog: Catalog, with_years: bool, workers: int, out_dir: str = ".") ->
     d = catalog.domain
     print(f"[1/4] Kategori dan subjek domain {d} ...")
     subjects = catalog.pages(f"list/model/subject/domain/{d}")
-    with open(os.path.join(out_dir, f"katalog_subjek_{d}.csv"), "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["subcat_id", "kategori", "sub_id", "subjek", "jumlah_tabel"])
-        for s in subjects:
-            w.writerow([s.get("subcat_id"), s.get("subcat"), s.get("sub_id"), s.get("title"), s.get("ntabel") or s.get("ntable")])
     print(f"      {len(subjects)} subjek")
 
     print("[2/4] Variabel per subjek ...")
@@ -116,6 +120,16 @@ def run(catalog: Catalog, with_years: bool, workers: int, out_dir: str = ".") ->
     else:
         print("[3/4] Dilewati (tambahkan --tahun untuk tahun terbaru)")
 
+    lines = [f"Domain {d}", f"Subjek: {len(subjects)}", f"Variabel dinamis: {len(variables)}"]
+    for model, label in OTHER_MODELS.items():
+        lines.append(f"{label} ({model}): {catalog.total(model)}")
+
+    with open(os.path.join(out_dir, f"katalog_subjek_{d}.csv"), "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["subcat_id", "kategori", "sub_id", "subjek", "jumlah_tabel"])
+        for s in subjects:
+            w.writerow([s.get("subcat_id"), s.get("subcat"), s.get("sub_id"), s.get("title"), s.get("ntabel") or s.get("ntable")])
+
     with open(os.path.join(out_dir, f"katalog_variabel_{d}.csv"), "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(["kategori", "sub_id", "subjek", "var_id", "judul", "satuan", "tahun_terbaru", "jumlah_tahun"])
@@ -125,9 +139,6 @@ def run(catalog: Catalog, with_years: bool, workers: int, out_dir: str = ".") ->
             w.writerow([v.get("kategori"), v.get("sub_id"), v.get("subjek"), v.get("var_id"), v.get("title"), v.get("unit"), year, count])
 
     print("[4/4] Jumlah entri jenis data lain ...")
-    lines = [f"Domain {d}", f"Subjek: {len(subjects)}", f"Variabel dinamis: {len(variables)}"]
-    for model, label in OTHER_MODELS.items():
-        lines.append(f"{label} ({model}): {catalog.total(model)}")
     with open(os.path.join(out_dir, f"katalog_ringkasan_{d}.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print("\n".join(lines))

@@ -21,7 +21,7 @@ class DashboardReviewsExport implements FromQuery, WithHeadings, WithMapping
 
     public function query(): Builder
     {
-        $rangeStart = Carbon::create($this->year, $this->month, 1)->startOfDay();
+        $rangeStart = Carbon::create($this->year, $this->period === 'tahun' ? 1 : $this->month, 1)->startOfDay();
         $rangeEnd = $this->period === 'tahun'
             ? $rangeStart->copy()->endOfYear()
             : $rangeStart->copy()->endOfMonth();
@@ -31,7 +31,8 @@ class DashboardReviewsExport implements FromQuery, WithHeadings, WithMapping
             ->whereBetween('tanggal', [$rangeStart->toDateString(), $rangeEnd->toDateString()])
             ->whereNotNull('kritik_saran')
             ->when($this->rating > 0, fn (Builder $query) => $query->where('rating', $this->rating))
-            ->orderBy($this->sort === 'baru' ? 'id' : 'tanggal', $this->sort === 'baru' ? 'desc' : 'asc');
+            ->orderBy('tanggal', $this->sort === 'baru' ? 'desc' : 'asc')
+            ->orderBy('id', $this->sort === 'baru' ? 'desc' : 'asc');
     }
 
     public function map($meeting): array

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+from numbers import Real
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -90,6 +91,8 @@ def escape_secrets(text: str, secrets: Iterable[str] = ()) -> str:
 
 
 def parse_indonesian_number(value: Any) -> float | None:
+    if isinstance(value, Real) and not isinstance(value, bool):
+        return float(value)
     text = str(value or "").strip().replace(" ", "")
     if not text:
         return None

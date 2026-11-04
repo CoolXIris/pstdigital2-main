@@ -129,6 +129,34 @@ class AdminManagementPagesTest extends BaseTestCase
 
     }
 
+    public function test_empty_bps_catalog_environment_value_uses_the_project_catalog(): void
+    {
+        $original = getenv('BPS_CATALOG_CSV');
+        $originalEnv = $_ENV['BPS_CATALOG_CSV'] ?? null;
+        $hadEnv = array_key_exists('BPS_CATALOG_CSV', $_ENV);
+        $originalServer = $_SERVER['BPS_CATALOG_CSV'] ?? null;
+        $hadServer = array_key_exists('BPS_CATALOG_CSV', $_SERVER);
+        putenv('BPS_CATALOG_CSV=');
+        unset($_ENV['BPS_CATALOG_CSV'], $_SERVER['BPS_CATALOG_CSV']);
+        try {
+            $services = require config_path('services.php');
+        } finally {
+            if ($original === false) {
+                putenv('BPS_CATALOG_CSV');
+            } else {
+                putenv('BPS_CATALOG_CSV='.$original);
+            }
+            if ($hadEnv) {
+                $_ENV['BPS_CATALOG_CSV'] = $originalEnv;
+            }
+            if ($hadServer) {
+                $_SERVER['BPS_CATALOG_CSV'] = $originalServer;
+            }
+        }
+
+        $this->assertSame(base_path('tabel_bps_sumsel.csv'), $services['bps']['catalog_csv']);
+    }
+
     public function test_bps_catalog_refresh_reports_process_failure_without_exposing_process_output(): void
     {
         config(['services.bps.api_key' => 'bps-test-secret']);
@@ -304,6 +332,37 @@ class AdminManagementPagesTest extends BaseTestCase
         Excel::assertDownloaded('kritik-saran-pengguna.xlsx', fn (DashboardReviewsExport $export) => $export->query()->count() === 1);
     }
 
+    public function test_annual_review_export_starts_in_january_and_matches_dashboard_order(): void
+    {
+        $october = $this->createMeeting([
+            'tanggal' => '2026-10-15',
+            'rating' => 5,
+            'kritik_saran' => 'Review Oktober',
+        ]);
+        $januaryFirst = $this->createMeeting([
+            'tanggal' => '2026-01-20',
+            'rating' => 5,
+            'kritik_saran' => 'Review Januari pertama',
+        ]);
+        $januarySecond = $this->createMeeting([
+            'tanggal' => '2026-01-20',
+            'rating' => 4,
+            'kritik_saran' => 'Review Januari kedua',
+        ]);
+        $november = $this->createMeeting([
+            'tanggal' => '2026-11-02',
+            'rating' => 5,
+            'kritik_saran' => 'Review November',
+        ]);
+
+        $export = new DashboardReviewsExport('tahun', 2026, 11, 0, 'baru');
+
+        $this->assertSame(
+            [$november->id, $october->id, $januarySecond->id, $januaryFirst->id],
+            $export->query()->pluck('id')->all()
+        );
+    }
+
     public function test_admin_can_export_searched_consultation_history(): void
     {
         $user = User::factory()->create(['name' => 'Pemohon Dicari']);
@@ -406,6 +465,62 @@ class AdminManagementPagesTest extends BaseTestCase
 
         $this->assertDatabaseMissing('meeting', ['id' => $meeting->id]);
         Storage::disk('local')->assertMissing('consultation/history-file.jpg');
+    }
+
+    public function test_admin_deletes_drive_documentation_using_its_uploader_and_keeps_history_on_failure(): void
+    {
+        $uploader = User::factory()->create();
+        $uploader->assignRole('admin');
+        $meeting = $this->createMeeting([
+            'status' => 1,
+            'documentation_path' => 'gdrive:owned-file',
+            'documentation_uploader_user_id' => $uploader->id,
+        ]);
+        $this->mock(\App\Services\ConsultationDocumentationService::class, function ($mock) use ($uploader) {
+            $mock->shouldReceive('delete')
+                ->once()
+                ->with('gdrive:owned-file', \Mockery::on(
+                    fn (?User $user) => $user?->is($uploader)
+                ))
+                ->andReturn(false);
+        });
+
+        $this->actingAs($this->admin)
+            ->delete(route('admin.konsultasi.history.destroy', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseHas('meeting', [
+            'id' => $meeting->id,
+            'documentation_path' => 'gdrive:owned-file',
+            'documentation_uploader_user_id' => $uploader->id,
+        ]);
+    }
+
+    public function test_admin_can_delete_drive_documentation_as_its_uploader(): void
+    {
+        $uploader = User::factory()->create();
+        $uploader->assignRole('admin');
+        $meeting = $this->createMeeting([
+            'status' => 1,
+            'documentation_path' => 'gdrive:owned-file',
+            'documentation_uploader_user_id' => $uploader->id,
+        ]);
+        $this->mock(\App\Services\ConsultationDocumentationService::class, function ($mock) use ($uploader) {
+            $mock->shouldReceive('delete')
+                ->once()
+                ->with('gdrive:owned-file', \Mockery::on(
+                    fn (?User $user) => $user?->is($uploader)
+                ))
+                ->andReturn(true);
+        });
+
+        $this->actingAs($this->admin)
+            ->delete(route('admin.konsultasi.history.destroy', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('message');
+
+        $this->assertDatabaseMissing('meeting', ['id' => $meeting->id]);
     }
 
     public function test_regular_user_cannot_open_admin_management_pages(): void
@@ -1006,6 +1121,63 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertTrue($goldens[0]['passed']);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/model/data/domain/1600/var/262/th/2026/'));
         Carbon::setTestNow();
+    }
+
+    public function test_canonical_goldens_fetch_the_requested_historical_year(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Cache::flush();
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/model/th/domain/1600/var/860/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[], [
+                        ['th' => '2025', 'th_id' => '125'],
+                        ['th' => '2024', 'th_id' => '124'],
+                    ]],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/860/th/125/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'vervar' => [['val' => 1671, 'label' => 'Palembang']],
+                    'datacontent' => ['1671860125' => 226466.1],
+                ]);
+            }
+            if (str_contains($url, '/model/data/domain/1600/var/860/th/124/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'vervar' => [['val' => 1671, 'label' => 'Palembang']],
+                    'datacontent' => ['1671860124' => 208196.7],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $results = app(BpsWebApiService::class)->verifyCanonicalGoldens([
+            [
+                'question' => 'Berapa PDRB atas dasar harga berlaku Kota Palembang tahun 2025?',
+                'indicator' => 'pdrb_adhb_kab_kota',
+                'expected_var_id' => 860,
+                'region' => 'Kota Palembang',
+                'expected_year' => 2025,
+                'expected_value' => 226466.1,
+            ],
+            [
+                'question' => 'Berapa PDRB Kota Palembang tahun 2024?',
+                'indicator' => 'pdrb_adhb_kab_kota',
+                'expected_var_id' => 860,
+                'region' => 'Kota Palembang',
+                'expected_year' => 2024,
+                'expected_value' => 208196.7,
+            ],
+        ]);
+
+        $this->assertSame([true, true], array_column($results, 'passed'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/var/860/th/125/'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/var/860/th/124/'));
     }
 
     public function test_latest_bps_indicator_uses_latest_available_period_when_current_period_is_missing(): void
@@ -3830,8 +4002,33 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->assertSame(1, (int) $completed->status);
         $this->assertSame('catatan.png', $completed->documentation_original_name);
         $this->assertSame('gdrive:test-file-id', $completed->documentation_path);
+        $this->assertSame($this->admin->id, $completed->documentation_uploader_user_id);
         $this->actingAs($this->admin)->get(route('konsultasi.documentation', $meeting))
             ->assertRedirect('https://drive.google.com/file/d/test-file-id/view');
+    }
+
+    public function test_approver_calendar_reminder_is_explicitly_private(): void
+    {
+        $approver = User::findOrFail($this->admin->getAuthIdentifier());
+        $approver->forceFill(['google_access_token' => 'calendar-test-token'])->save();
+        $meeting = $this->createMeeting([
+            'approved_by_user_id' => $approver->id,
+            'tanggal' => '2026-11-05',
+            'start_time' => '13:00:00',
+            'end_time' => '14:00:00',
+        ]);
+        Http::fake([
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events' => Http::response([
+                'id' => str_repeat('a', 40),
+            ]),
+        ]);
+
+        $status = app(\App\Services\ConsultationGoogleCalendarService::class)
+            ->createForApprover($meeting);
+
+        $this->assertSame('created', $status);
+        Http::assertSent(fn ($request) => $request->url() === 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+            && $request['visibility'] === 'private');
     }
 
     private function seedWilayahCatalog(): void

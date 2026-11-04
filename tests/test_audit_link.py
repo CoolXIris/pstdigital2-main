@@ -15,6 +15,18 @@ class AuditLinkTests(unittest.TestCase):
             "data": [{"page": 1}, {"kolom": {"x": {}}, "data": [{"label": "Lahat"}]}],
         }))
 
+    def test_dynamic_payload_uses_root_datacontent(self):
+        self.assertTrue(audit_link._has_payload_data({
+            "status": "OK",
+            "var": [{"val": 362}],
+            "datacontent": {"16003621250": 4024},
+        }))
+        self.assertFalse(audit_link._has_payload_data({
+            "status": "OK",
+            "var": [{"val": 362}],
+            "datacontent": {},
+        }))
+
     def test_audit_reports_http_status_without_logging_request_url(self):
         response = Mock(
             status_code=403,

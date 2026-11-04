@@ -67,21 +67,30 @@ class ConsultationDocumentationService
         }
     }
 
-    public function delete(string $storedPath, User $uploader): void
+    public function delete(string $storedPath, ?User $uploader): bool
     {
         if (!str_starts_with($storedPath, 'gdrive:')) {
-            return;
+            return true;
         }
 
         $fileId = substr($storedPath, strlen('gdrive:'));
         if ($fileId === '') {
-            return;
+            return true;
+        }
+        if (!$uploader) {
+            return false;
         }
 
         try {
             $this->driveApi($uploader)->files->delete($fileId);
+            return true;
         } catch (Throwable $exception) {
+            if ((int) $exception->getCode() === 404) {
+                return true;
+            }
             report($exception);
+
+            return false;
         }
     }
 

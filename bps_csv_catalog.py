@@ -110,7 +110,7 @@ def _merge_audit_status(rows: list[dict[str, str]], catalog_path: Path) -> None:
                     str(row.get("link_json") or "").strip(),
                 ): row
                 for row in audited
-                if row.get("status_tarik")
+                if row.get("status_tarik") or row.get("status_link")
             }
     except (OSError, UnicodeError, csv.Error):
         logger.warning("File status audit katalog BPS tidak dapat dibaca.")
