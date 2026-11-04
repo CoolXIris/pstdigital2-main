@@ -37,7 +37,17 @@ class KonsultasiController extends Controller
             return $meeting;
         });
 
-        return view('konsultasi.index', compact('data_mendatang','data_riwayat', 'user'));
+        return view('konsultasi.index', [
+            'data_mendatang' => $data_mendatang,
+            'data_riwayat' => $data_riwayat,
+            'user' => $user,
+            'consultationStartTimes' => config('pst.consultation_start_times'),
+            'consultationDuration' => config('pst.consultation_duration_minutes'),
+            'consultationHolidays' => config('pst.consultation_holidays'),
+            'jakartaToday' => now('Asia/Jakarta')->toDateString(),
+            'jakartaNowTime' => now('Asia/Jakarta')->format('H:i'),
+            'jakartaNowTimestamp' => now('Asia/Jakarta')->timestamp,
+        ]);
     }
 
     public function store(Request $request)
@@ -67,7 +77,7 @@ class KonsultasiController extends Controller
                 'description' => $validated['deskripsi'],
                 'tanggal' => $validated['tanggal'],
                 'start_time' => $validated['waktu_mulai'],
-                'end_time' => $validated['waktu_selesai'],
+                'end_time' => $endTime,
                 'google_event_id' => null,
                 'google_meet_link' => null,
                 'status' => 0

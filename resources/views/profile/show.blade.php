@@ -5,7 +5,7 @@
 
 @section('content')
 @php
-$profileFields = ['name', 'pekerjaan', 'jenis_kelamin', 'tanggal_lahir', 'asal_prov', 'asal_kab', 'no_hp', 'pendidikan'];
+$profileFields = \App\Models\User::PROFILE_FIELDS;
 $filledFields = collect($profileFields)->filter(fn ($field) => filled($data->{$field}))->count();
 $completion = (int) round($filledFields / count($profileFields) * 100);
 $jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/BUMD', 'Wiraswasta', 'ASN/TNI/Polri', 'Lainnya'];
@@ -29,6 +29,10 @@ $jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/
         <div class="portal-completion-track"><span></span></div>
     </div>
 </div>
+
+@if (!Auth::user()->hasCompleteProfile())
+<div class="alert alert-warning portal-alert" role="status"><i class="bi bi-info-circle"></i><span>Lengkapi dan simpan semua data profil hingga kelengkapan mencapai 100% agar dapat mengakses konsultasi virtual, chatbot, dan fitur layanan lainnya.</span></div>
+@endif
 
 <form method="POST" action="{{ route('profile.update', $data) }}">
     @csrf @method('PUT')

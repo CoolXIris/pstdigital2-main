@@ -45,16 +45,35 @@
                 <span><i class="bi bi-person-badge"></i>{{ $meeting->assigned_staff ?: 'Petugas ditentukan saat persetujuan' }}</span>
             </div>
             @if ($isConfirmed)
-                <div class="portal-meeting-actions">
-                    <div class="portal-meeting-presence-chat">
-                        <span class="portal-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="bi bi-arrow-repeat"></i> Memeriksa kehadiran...</span>
-                    <button class="portal-btn portal-btn-outline consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->assigned_staff ?: 'Petugas konsultasi' }}" aria-label="Buka chat konsultasi"><i class="bi bi-chat-dots-fill"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
+                <div class="portal-meeting-actions" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+
+                    <!-- Bagian 1: Teks Status (Otomatis menetap di paling kiri) -->
+                    <span class="portal-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite">
+                        <i class="bi bi-arrow-repeat"></i> Status ruang belum tersedia
+                    </span>
+
+                    <!-- Bagian 2: Grup Tombol (Otomatis bersanding menetap di paling kanan) -->
+                    <div class="portal-meeting-presence-chat" style="display: flex; gap: 10px; align-items: center;">
+
+                        <!-- Tombol Chat -->
+                        <button class="portal-btn portal-btn-outline consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->assigned_staff ?: 'Petugas konsultasi' }}" aria-label="Buka chat konsultasi">
+                            <i class="bi bi-chat-dots-fill"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span>
+                        </button>
+
+                        <!-- Tombol Masuk / Status Ruang -->
+                        @if ($meeting->room_open)
+                            <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" style="margin: 0;">
+                                <button class="portal-btn portal-btn-primary portal-meeting-join" type="submit">
+                                    <i class="bi bi-camera-video-fill"></i> Masuk ruang meeting
+                                </button>
+                            </form>
+                        @else
+                            <button class="portal-btn portal-btn-outline portal-meeting-join" type="button" disabled>
+                                <i class="bi bi-lock"></i> Ruang belum dapat diakses
+                            </button>
+                        @endif
+
                     </div>
-                    @if ($meeting->room_open)
-                        <form method="GET" action="{{ route('konsultasi.room', $meeting) }}"><button class="portal-btn portal-btn-primary portal-meeting-join" type="submit"><i class="bi bi-camera-video-fill"></i> Masuk ruang meeting</button></form>
-                    @else
-                        <button class="portal-btn portal-btn-outline portal-meeting-join" type="button" disabled><i class="bi bi-lock"></i> Ruang belum dapat diakses</button>
-                    @endif
                 </div>
                 @unless ($meeting->room_open)<p class="portal-meeting-hint"><i class="bi bi-clock me-1"></i>Tombol masuk aktif pada tanggal dan rentang waktu sesi.</p>@endunless
             @else
@@ -112,6 +131,7 @@
     @if ($data_riwayat->hasPages())<div class="mt-3">{{ $data_riwayat->links() }}</div>@endif
 </section>
 
+@php($pendingRatingId = $data_riwayat->getCollection()->first(fn ($item) => (int) $item->status === 1 && !$item->rating)?->id)
 @foreach ($data_riwayat as $meeting)
 <div class="modal fade portal-modal" id="meetingDetailModal{{ $meeting->id }}" tabindex="-1" aria-labelledby="meetingDetailTitle{{ $meeting->id }}" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
@@ -129,17 +149,18 @@
     </div></div>
 </div>
 @if ((int) $meeting->status === 1 && !$meeting->rating)
-<div class="modal fade portal-modal" id="ratingModal{{ $meeting->id }}" tabindex="-1" aria-labelledby="ratingTitle{{ $meeting->id }}" aria-hidden="true">
+<div class="modal fade portal-modal" id="ratingModal{{ $meeting->id }}" data-open-on-load="{{ (int) $meeting->id === (int) $pendingRatingId ? 'true' : 'false' }}" tabindex="-1" aria-labelledby="ratingTitle{{ $meeting->id }}" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <form method="POST" action="{{ url('konsultasi_rating/'.$meeting->id) }}">@csrf
                 <div class="modal-header">
                     <div><span class="portal-eyebrow">Umpan balik layanan</span>
-                        <h2 class="modal-title" id="ratingTitle{{ $meeting->id }}">Nilai konsultasi</h2>
+                        <h2 class="modal-title" id="ratingTitle{{ $meeting->id }}">Bagaimana sesi konsultasi Anda?</h2>
                         <p class="portal-panel-head p-0 m-0">{{ $meeting->name }}</p>
                     </div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button>
                 </div>
                 <div class="modal-body">
+                    <p class="text-muted">Sesi ini sudah selesai. Bagikan penilaian dan saran Anda untuk membantu kami meningkatkan layanan.</p>
                     <fieldset class="portal-rating-fieldset">
                         <legend>Bagaimana pengalaman Anda?</legend>
                         <div class="portal-star-picker">@for ($star = 5; $star >= 1; $star--)<input id="rating-{{ $meeting->id }}-{{ $star }}" type="radio" name="rating" value="{{ $star }}" required><label for="rating-{{ $meeting->id }}-{{ $star }}" aria-label="{{ $star }} bintang">★</label>@endfor</div>
@@ -256,7 +277,10 @@
         start.addEventListener('change', () => start.setCustomValidity(''));
         updateStartTimes();
 
-        if (document.getElementById('newMeetingModal').dataset.openOnLoad === 'true') {
+        const pendingRating = document.querySelector('[id^="ratingModal"][data-open-on-load="true"]');
+        if (pendingRating) {
+            new bootstrap.Modal(pendingRating).show();
+        } else if (document.getElementById('newMeetingModal').dataset.openOnLoad === 'true') {
             new bootstrap.Modal(document.getElementById('newMeetingModal')).show();
         }
     })();

@@ -565,6 +565,11 @@
                         <a class="nav-link dropdown-toggle" href="#" role="button"
                             data-bs-toggle="dropdown">Layanan</a>
                         <ul class="dropdown-menu shadow">
+                            @if (request()->routeIs('/'))
+                            <li><a class="dropdown-item" href="#layanan">Layanan Unggulan</a></li>
+                            <li><a class="dropdown-item" href="#layanan-tambahan">Layanan Utama Tambahan</a></li>
+                            <li><hr class="dropdown-divider border-light opacity-25"></li>
+                            @endif
                             <li>
                                 @if ($profileComplete)
                                     <a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>
@@ -572,7 +577,7 @@
                                     <span class="dropdown-item disabled" aria-disabled="true">Konsultasi Virtual (lengkapi profil)</span>
                                 @endif
                             </li>
-                            <li><a class="dropdown-item" href="{{ url('chatbot') }}">Chatbot</a></li>
+                            <li>@if ($profileComplete)<a class="dropdown-item" href="{{ url('chatbot') }}">Chatbot</a>@else<span class="dropdown-item disabled" aria-disabled="true">Chatbot (lengkapi profil)</span>@endif</li>
                             <li>
                                 <a class="dropdown-item" target="_blank"
                                     href="https://perpustakaan.bps.go.id/opac/">Katalog
@@ -640,6 +645,11 @@
             @endif
             <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
             <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
+            @else
+            <span class="link-item text-muted" aria-disabled="true">Konsultasi (lengkapi profil)</span>
+            <span class="link-item text-muted" aria-disabled="true">Chatbot (lengkapi profil)</span>
+            <span class="link-item text-muted" aria-disabled="true">Katalog Publikasi (lengkapi profil)</span>
+            @endif
             <a href="{{ url('profile') }}" class="link-item active-link">Profil Saya</a>
             <a href="{{ url('logout') }}" class="link-item">Keluar</a>
         </div>

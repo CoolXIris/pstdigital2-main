@@ -30,6 +30,23 @@ class User extends Authenticatable
     // ];
     protected $guarded = [];
 
+    /** Fields a user must complete before using the service features. */
+    public const PROFILE_FIELDS = [
+        'name', 'pekerjaan', 'jenis_kelamin', 'tanggal_lahir',
+        'asal_prov', 'asal_kab', 'no_hp', 'pendidikan',
+    ];
+
+    public function hasCompleteProfile(): bool
+    {
+        foreach (self::PROFILE_FIELDS as $field) {
+            if (! filled($this->{$field})) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
      * The attributes that should be hidden for serialization.
      *
