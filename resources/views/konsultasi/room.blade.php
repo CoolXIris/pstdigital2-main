@@ -16,7 +16,12 @@
     <div class="portal-room-layout" id="consultation-room"
         data-meeting-id="{{ $meeting->id }}"
         data-current-user-id="{{ $currentUserId }}"
+        data-current-user-name="{{ Auth::user()->name }}"
+        data-current-user-picture="{{ Auth::user()->picture }}"
         data-is-requester="{{ $isRequester ? 'true' : 'false' }}"
+        data-can-moderate="{{ $canModerateRoom ? 'true' : 'false' }}"
+        data-room-ends-at="{{ $roomEndsAt }}"
+        data-room-server-now="{{ $roomServerNow }}"
         data-room-session="{{ $roomSessionId }}"
         data-room-capacity="{{ $roomCapacity }}"
         data-last-signal-id="{{ $roomLastSignalId }}"
@@ -30,6 +35,12 @@
                     <video id="room-screen-video" autoplay playsinline></video>
                     <span id="room-screen-label"></span>
                 </div>
+                <div class="portal-room-pinned-stage" id="room-pinned-stage" hidden>
+                    <video id="room-pinned-video" autoplay playsinline></video>
+                    <div class="portal-room-camera-off portal-room-pinned-avatar" id="room-pinned-avatar" hidden></div>
+                    <span id="room-pinned-label"></span>
+                    <button class="portal-room-unpin" id="room-unpin-camera" type="button">Lepas sematan</button>
+                </div>
                 <div class="portal-room-camera-strip" id="room-camera-strip" aria-live="polite">
                     <div class="portal-room-placeholder" id="remote-placeholder">
                         <span><i class="bi bi-person-video3"></i></span>
@@ -42,6 +53,11 @@
                 <span class="portal-room-live-dot"></span>
                 <span id="room-status">Menghubungkan ke ruang...</span>
                 <span class="ms-auto" id="room-participant-count">1/{{ $roomCapacity }} peserta</span>
+            </div>
+            <div class="portal-room-notice" id="room-moderation-notice" role="status" hidden></div>
+            <div class="portal-room-ending-notice" id="room-ending-notice" role="alert" aria-live="assertive" aria-atomic="true" hidden>
+                <strong>Sesi konsultasi segera berakhir</strong>
+                <span>Ruang akan ditutup dalam <b id="room-ending-countdown">05:00</b>.</span>
             </div>
             <div class="portal-room-controls">
                 <button class="portal-room-control" id="toggle-mic" type="button" aria-label="Matikan mikrofon"><i class="bi bi-mic-fill"></i></button>
@@ -65,26 +81,28 @@
                 <details class="portal-room-invite">
                     <summary><i class="bi bi-person-plus"></i> Tambah petugas (maksimal 2)</summary>
                     <p>Pilih satu atau dua akun petugas admin. Setelah disimpan, tombol bergabung tersedia pada halaman mereka.</p>
-                    @if ($invitedUsers->isNotEmpty())
-                        <div class="portal-room-invited">
+                    <div class="portal-room-invited" data-room-invited-list @if ($invitedUsers->isEmpty()) hidden @endif>
+                        @if ($invitedUsers->isNotEmpty())
                             <strong>Petugas yang diundang:</strong>
                             @foreach ($invitedUsers as $invitedUser)
                                 <span>{{ $invitedUser->name }}</span>
                             @endforeach
-                        </div>
-                    @endif
+                        @endif
+                    </div>
                     @if ($availableStaff->isNotEmpty() && $invitedUsers->count() < 2)
                         <form method="POST" action="{{ route('admin.konsultasi.room-invites.store', $meeting) }}"
-                            data-room-invite-form data-max-invites="{{ 2 - $invitedUsers->count() }}">
+                            data-room-invite-form data-max-invites="{{ 2 - $invitedUsers->count() }}"
+                            data-total-invites="{{ $invitedUsers->count() }}">
                             @csrf
                             @foreach ($availableStaff as $staffUser)
                                 <label><input type="checkbox" name="staff_user_ids[]" value="{{ $staffUser->id }}"> {{ $staffUser->name }}</label>
                             @endforeach
                             @error('staff_user_ids')<small class="text-danger">{{ $message }}</small>@enderror
                             <button class="portal-btn portal-btn-primary" type="submit">Undang petugas</button>
+                            <small data-room-invite-status role="status" aria-live="polite"></small>
                         </form>
                     @elseif ($invitedUsers->count() >= 2)
-                        <small>Batas dua petugas tambahan sudah tercapai.</small>
+                        <small data-room-invite-capacity>Batas dua petugas tambahan sudah tercapai.</small>
                     @else
                         <small>Tidak ada akun petugas lain yang tersedia.</small>
                     @endif
@@ -121,6 +139,6 @@
 @endsection
 
 @section('scripts')
-    <script src="{{ asset('consultation-room.js') }}?v=5" defer></script>
+    <script src="{{ asset('consultation-room.js') }}?v=10" defer></script>
     @include('konsultasi.partials.text-chat-script')
 @endsection
