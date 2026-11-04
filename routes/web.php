@@ -7,6 +7,7 @@ use App\Http\Controllers\KonsultasiAdminController;
 use App\Http\Controllers\KonsultasiController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
+use App\Services\WilayahService;
 use Illuminate\Support\Facades\Route;
 
 // Route::get('/', function () {
@@ -55,23 +56,22 @@ Route::get('logout', [AuthController::class, 'logout'])->name('logout');
 
 Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::get('dashboard', [HomeController::class, 'index'])->name('dashboard');
+    Route::get('dashboard/reviews/export', [HomeController::class, 'exportReviews'])->name('dashboard.reviews.export');
     Route::resource('users', UserController::class);
     Route::get('users_export', [UserController::class, 'export'])->name('users_export');
     Route::put('admin/consultation-staff', [UserController::class, 'updateConsultationStaff'])->name('admin.consultation-staff.update');
     Route::get('admin/konsultasi', [KonsultasiAdminController::class, 'index'])->name('admin.konsultasi');
+    Route::get('admin/konsultasi/riwayat/export', [KonsultasiAdminController::class, 'exportHistory'])->name('admin.konsultasi.history.export');
     Route::patch('admin/konsultasi/{meeting}/status', [KonsultasiAdminController::class, 'updateStatus'])
         ->name('admin.konsultasi.status');
-    Route::patch('admin/konsultasi/{meeting}/open-room', [KonsultasiAdminController::class, 'openRoomNow'])
-        ->name('admin.konsultasi.open-room');
+    Route::post('admin/konsultasi/{meeting}/open-room', [KonsultasiAdminController::class, 'openRoomNow'])->name('admin.konsultasi.open-room');
+    Route::put('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'updateHistory'])->name('admin.konsultasi.history.update');
+    Route::delete('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'deleteHistory'])->name('admin.konsultasi.history.destroy');
     Route::post('admin/konsultasi/{meeting}/room-invites', [KonsultasiAdminController::class, 'inviteRoomStaff'])
         ->name('admin.konsultasi.room-invites.store');
-    Route::patch('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'updateHistory'])
-        ->name('admin.konsultasi.history.update');
-    Route::delete('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'deleteHistory'])
-        ->name('admin.konsultasi.history.destroy');
     Route::get('admin/chatbot', [ChatbotController::class, 'management'])->name('admin.chatbot');
+    Route::post('admin/chatbot/catalog/refresh', [ChatbotController::class, 'refreshBpsCatalog'])->name('admin.chatbot.catalog.refresh');
     Route::post('admin/chatbot/test', [ChatbotController::class, 'testMessage'])->name('admin.chatbot.test');
-    Route::post('admin/chatbot/bps-api-key', [ChatbotController::class, 'saveBpsApiKey'])->name('admin.chatbot.bps-api-key');
     Route::post('admin/chatbot/knowledge', [ChatbotController::class, 'uploadKnowledge'])->name('admin.chatbot.knowledge.store');
     Route::delete('admin/chatbot/knowledge/{source}', [ChatbotController::class, 'deleteKnowledge'])->name('admin.chatbot.knowledge.destroy');
 });
@@ -79,6 +79,9 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
 Route::group(['middleware' => ['auth']], function () {
     Route::get('profile', [ProfileController::class, 'index'])->name('profile');
     Route::put('profile/{id}', [ProfileController::class, 'update'])->name('profile.update');
+    Route::get('profile/regions/provinces', fn (WilayahService $wilayah) => response()->json($wilayah->provinces()))->name('profile.regions.provinces');
+    Route::get('profile/regions/provinces/{provinceCode}/regencies', fn (string $provinceCode, WilayahService $wilayah) => response()->json($wilayah->regencies($provinceCode)))->where('provinceCode', '[0-9]{2}')->name('profile.regions.regencies');
+
     Route::middleware('profile.complete')->group(function () {
         Route::get('konsultasi', [KonsultasiController::class, 'index'])->name('konsultasi.index');
         Route::post('konsultasi', [KonsultasiController::class, 'store']);

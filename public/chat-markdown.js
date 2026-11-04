@@ -13,7 +13,7 @@
         return out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
     };
 
-    const render = (source) => {
+    const renderBasic = (source) => {
         const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
         const html = [];
         let i = 0;
@@ -81,6 +81,137 @@
             html.push(`<p>${inline(para.join('\n')).replace(/\n/g, '<br>')}</p>`);
         }
         return html.join('');
+    };
+
+    const allowedTags = new Set([
+        'a', 'b', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3',
+        'h4', 'h5', 'h6', 'hr', 'i', 'li', 'ol', 'p', 'pre', 's', 'strong',
+        'sub', 'sup', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
+    ]);
+    const blockedTags = new Set([
+        'embed', 'iframe', 'math', 'object', 'script', 'style', 'svg', 'template',
+    ]);
+
+    const safeHref = (value) => {
+        const href = String(value || '').trim();
+        if (!href || /[\u0000-\u001f]/.test(href)) return null;
+        if (/^(https?:|mailto:)/i.test(href)) {
+            return href;
+        }
+        return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith('//') ? null : href;
+    };
+
+    const sanitizeNode = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return document.createTextNode(node.nodeValue || '');
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+            return document.createDocumentFragment();
+        }
+
+        const tag = node.tagName.toLowerCase();
+        if (blockedTags.has(tag)) {
+            return document.createDocumentFragment();
+        }
+
+        if (!allowedTags.has(tag)) {
+            const fragment = document.createDocumentFragment();
+            node.childNodes.forEach((child) => fragment.append(sanitizeNode(child)));
+            return fragment;
+        }
+
+        const cleanNode = document.createElement(tag);
+        if (tag === 'a') {
+            const href = safeHref(node.getAttribute('href'));
+            if (href) {
+                cleanNode.setAttribute('href', href);
+                cleanNode.setAttribute('target', '_blank');
+                cleanNode.setAttribute('rel', 'noopener noreferrer');
+            }
+        }
+        node.childNodes.forEach((child) => cleanNode.append(sanitizeNode(child)));
+        return cleanNode;
+    };
+
+    const normalizeTableSpacing = (source) => {
+        const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
+        const output = [];
+        let fenceCharacter = null;
+        let index = 0;
+        const isTableRow = (line) => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('|') && (trimmed.match(/\|/g) || []).length >= 2;
+        };
+        const isTableSeparator = (line) => {
+            if (!isTableRow(line)) return false;
+            const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+            return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim().replace(/\s/g, '')));
+        };
+
+        while (index < lines.length) {
+            let line = lines[index];
+            const fence = line.match(/^\s*(```+|~~~+)/);
+            if (fence) {
+                output.push(line);
+                const marker = fence[1][0];
+                fenceCharacter = fenceCharacter === marker ? null : marker;
+                index++;
+                continue;
+            }
+            let sourcePrefix = null;
+            if (fenceCharacter === null && !isTableRow(line) && isTableSeparator(lines[index + 1] || '')) {
+                const pipeIndex = line.indexOf('|');
+                const embeddedHeader = pipeIndex >= 0 ? line.slice(pipeIndex).trim() : '';
+                if (isTableRow(embeddedHeader)) {
+                    sourcePrefix = line.slice(0, pipeIndex).trim();
+                    line = embeddedHeader;
+                }
+            }
+            if (
+                fenceCharacter === null
+                && isTableRow(line)
+                && isTableSeparator(lines[index + 1] || '')
+            ) {
+                if (output.length && output[output.length - 1].trim()) output.push('');
+                if (sourcePrefix) {
+                    output.push(sourcePrefix, '');
+                }
+                output.push(line, lines[index + 1]);
+                index += 2;
+                while (index < lines.length && isTableRow(lines[index])) output.push(lines[index++]);
+                if (index < lines.length && lines[index].trim()) output.push('');
+                continue;
+            }
+            output.push(line);
+            index++;
+        }
+        return output.join('\n').trim();
+    };
+
+    const sanitizeHtml = (html) => {
+        const parsed = new DOMParser().parseFromString(String(html), 'text/html');
+        const container = document.createElement('div');
+        parsed.body.childNodes.forEach((node) => container.append(sanitizeNode(node)));
+        container.querySelectorAll('table').forEach((table) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chat-md-table';
+            table.replaceWith(wrapper);
+            wrapper.append(table);
+        });
+        return container.innerHTML;
+    };
+
+    const render = (source) => {
+        const markdown = normalizeTableSpacing(source);
+        const html = window.marked && typeof window.marked.parse === 'function'
+            ? window.marked.parse(markdown, {
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false,
+            })
+            : renderBasic(markdown);
+        return sanitizeHtml(html);
     };
 
     window.renderChatMarkdown = render;

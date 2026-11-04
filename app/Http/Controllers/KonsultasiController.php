@@ -53,25 +53,23 @@ class KonsultasiController extends Controller
     public function store(Request $request)
     {
         try {
+            $jakartaNow = now('Asia/Jakarta');
             $validated = $request->validate([
                 'name' => ['required', 'string', 'max:255'],
-                'deskripsi' => ['required', 'string', 'min:50', 'max:3000'],
-                'tanggal' => ['required', 'date_format:Y-m-d', 'after_or_equal:' . now('Asia/Jakarta')->toDateString()],
-                'waktu_mulai' => ['required', 'date_format:H:i', \Illuminate\Validation\Rule::in(config('pst.consultation_start_times'))],
+                'deskripsi' => ['required', 'string', 'min:10', 'max:3000'],
+                'tanggal' => ['required', 'date', 'after_or_equal:'.$jakartaNow->toDateString()],
+                'waktu_mulai' => ['required', 'date_format:H:i'],
+                'waktu_selesai' => ['required', 'date_format:H:i', 'after:waktu_mulai'],
             ]);
 
-            $meetingDate = Carbon::createFromFormat('Y-m-d', $validated['tanggal'], 'Asia/Jakarta');
-            if ($meetingDate->isWeekend() || in_array($validated['tanggal'], config('pst.consultation_holidays', []), true)) {
-                throw ValidationException::withMessages(['tanggal' => 'Pilih tanggal hari kerja. Konsultasi tidak tersedia pada akhir pekan, hari libur nasional, atau cuti bersama.']);
-            }
-
-            if ($validated['tanggal'] === now('Asia/Jakarta')->toDateString() && $validated['waktu_mulai'] <= now('Asia/Jakarta')->format('H:i')) {
+            if ($validated['tanggal'] === $jakartaNow->toDateString() && $validated['waktu_mulai'] <= $jakartaNow->format('H:i')) {
                 throw ValidationException::withMessages(['waktu_mulai' => 'Pilih waktu konsultasi yang masih akan datang.']);
             }
 
-            $endTime = Carbon::createFromFormat('H:i', $validated['waktu_mulai'], 'Asia/Jakarta')
-                ->addMinutes((int) config('pst.consultation_duration_minutes', 45))
-                ->format('H:i');
+            $expectedEndTime = Carbon::createFromFormat('H:i', $validated['waktu_mulai'])->addMinutes(45)->format('H:i');
+            if ($validated['waktu_selesai'] !== $expectedEndTime) {
+                throw ValidationException::withMessages(['waktu_selesai' => 'Waktu selesai ditetapkan otomatis 45 menit setelah waktu mulai.']);
+            }
 
             Meeting::create([
                 'user_id' => Auth::id(),

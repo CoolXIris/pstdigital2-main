@@ -6,9 +6,10 @@ use App\Exports\UsersExport;
 use App\Models\ConsultationStaff;
 use App\Models\Meeting;
 use App\Models\User;
+use App\Services\WilayahService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -18,7 +19,7 @@ use Spatie\Permission\Models\Role;
 
 class UserController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, WilayahService $wilayah)
     {
         $search = trim((string) $request->query('q', ''));
         $roleFilter = (string) $request->query('role', '');
@@ -27,7 +28,8 @@ class UserController extends Controller
                 $query->where(function ($userQuery) use ($search) {
                     $userQuery->where('name', 'like', "%{$search}%")
                         ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('instansi', 'like', "%{$search}%");
+                        ->orWhere('instansi', 'like', "%{$search}%")
+                        ->orWhere('jabatan', 'like', "%{$search}%");
                 });
             })
             ->when($roleFilter !== '', fn ($query) => $query->whereHas('roles', fn ($roleQuery) => $roleQuery->where('name', $roleFilter)))
@@ -42,9 +44,10 @@ class UserController extends Controller
             'admins' => User::role(['admin', 'super_admin'])->count(),
             'total' => User::count(),
         ];
+        $provinces = $wilayah->provinces();
         $consultationStaff = ConsultationStaff::query()->orderBy('sort_order')->orderBy('id')->get();
 
-        return view('admin.users.index', compact('data', 'roles', 'search', 'roleFilter', 'stats', 'consultationStaff'));
+        return view('admin.users.index', compact('data', 'roles', 'search', 'roleFilter', 'stats', 'provinces', 'consultationStaff'));
     }
 
     public function updateConsultationStaff(Request $request)
@@ -80,21 +83,7 @@ class UserController extends Controller
             return back()->withErrors($validator, 'consultationStaff')->withInput();
         }
 
-        $existingStaff = ConsultationStaff::query()->get()->keyBy('id');
         $submittedStaff = collect($staffInput);
-        $unknownIds = $submittedStaff->keys()->diff($existingStaff->keys());
-        if ($unknownIds->isNotEmpty()) {
-            return back()->withErrors(['staff' => 'Daftar petugas berubah. Muat ulang halaman lalu coba lagi.'], 'consultationStaff')->withInput();
-        }
-
-        foreach ($existingStaff as $staffMember) {
-            if (!$submittedStaff->has($staffMember->id)
-                && Meeting::query()->where('assigned_staff_id', $staffMember->id)->where('status', 2)->exists()) {
-                return back()->withErrors([
-                    'staff' => "{$staffMember->name} masih bertugas pada konsultasi terkonfirmasi. Ubah namanya atau selesaikan konsultasi sebelum menghapusnya.",
-                ], 'consultationStaff')->withInput();
-            }
-        }
 
         $allNames = $submittedStaff->values()->merge($newStaffInput);
         if ($allNames->isEmpty()) {
@@ -106,20 +95,35 @@ class UserController extends Controller
             return back()->withErrors(['staff' => 'Nama petugas tidak boleh duplikat.'], 'consultationStaff')->withInput();
         }
 
-        DB::transaction(function () use ($submittedStaff, $newStaffInput) {
+        $error = DB::transaction(function () use ($submittedStaff, $newStaffInput) {
             $currentStaff = ConsultationStaff::query()->lockForUpdate()->get()->keyBy('id');
+            if ($submittedStaff->keys()->diff($currentStaff->keys())->isNotEmpty()) {
+                return 'Daftar petugas berubah. Muat ulang halaman lalu coba lagi.';
+            }
+
             $submittedIds = $submittedStaff->keys()->map(fn ($id) => (string) $id);
 
             foreach ($currentStaff as $staffMember) {
-                if (!$submittedIds->contains((string) $staffMember->id)) {
+                if ($submittedIds->contains((string) $staffMember->id)) {
+                    continue;
+                }
+                if (Meeting::query()->where('assigned_staff_id', $staffMember->id)->where('status', 2)->exists()) {
+                    return "{$staffMember->name} masih bertugas pada konsultasi terkonfirmasi. Ubah namanya atau selesaikan konsultasi sebelum menghapusnya.";
+                }
+            }
+
+            foreach ($currentStaff as $staffMember) {
+                if (! $submittedIds->contains((string) $staffMember->id)) {
                     $staffMember->delete();
+                } elseif ($staffMember->name !== $submittedStaff->get($staffMember->id)) {
+                    $staffMember->update(['name' => '__pending__'.$staffMember->id.'_'.Str::random(16)]);
                 }
             }
 
             $sortOrder = 0;
             foreach ($submittedStaff as $id => $name) {
                 $staffMember = $currentStaff->get($id);
-                if (!$staffMember) {
+                if (! $staffMember) {
                     continue;
                 }
 
@@ -136,7 +140,13 @@ class UserController extends Controller
             foreach ($newStaffInput as $name) {
                 ConsultationStaff::query()->create(['name' => $name, 'sort_order' => $sortOrder++]);
             }
+
+            return null;
         });
+
+        if ($error !== null) {
+            return back()->withErrors(['staff' => $error], 'consultationStaff')->withInput();
+        }
 
         return redirect()->route('users.index')->with('message', 'Daftar petugas konsultasi berhasil diperbarui.');
     }
@@ -172,6 +182,13 @@ class UserController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'instansi' => ['nullable', 'string', 'max:255'],
             'jabatan' => ['nullable', 'string', 'max:255'],
+            'pekerjaan' => ['nullable', 'string', 'max:100'],
+            'jenis_kelamin' => ['nullable', Rule::in(['1', '2'])],
+            'tanggal_lahir' => ['nullable', 'date', 'before:today'],
+            'asal_prov' => ['nullable', 'string', 'max:100'],
+            'asal_kab' => ['nullable', 'string', 'max:100'],
+            'no_hp' => ['nullable', 'string', 'max:30'],
+            'pendidikan' => ['nullable', 'string', 'max:100'],
             'role' => ['required', Rule::exists('roles', 'name')],
         ]);
         $this->authorizeRoleAssignment($validated['role']);
@@ -185,6 +202,13 @@ class UserController extends Controller
             'email' => $validated['email'],
             'instansi' => $validated['instansi'] ?? null,
             'jabatan' => $validated['jabatan'] ?? null,
+            'pekerjaan' => $validated['pekerjaan'] ?? null,
+            'jenis_kelamin' => $validated['jenis_kelamin'] ?? null,
+            'tanggal_lahir' => $validated['tanggal_lahir'] ?? null,
+            'asal_prov' => $validated['asal_prov'] ?? null,
+            'asal_kab' => $validated['asal_kab'] ?? null,
+            'no_hp' => $validated['no_hp'] ?? null,
+            'pendidikan' => $validated['pendidikan'] ?? null,
         ]);
         $user->syncRoles($validated['role']);
 

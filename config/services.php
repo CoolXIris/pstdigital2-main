@@ -39,5 +39,14 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI') ?: env('APP_URL').'/google_callback',
     ],
+    'gemini' => [
+        'chat_url' => env('GEMINI_CHAT_API_URL', 'http://127.0.0.1:8001/api/chat'),
+        'chat_token' => env('GEMINI_CHAT_API_TOKEN'),
+    ],
+    'bps' => [
+        'api_key' => env('BPS_API_KEY'),
+        'catalog_csv' => env('BPS_CATALOG_CSV', base_path('tabel_bps_sumsel.csv')),
+        'python_binary' => env('BPS_PYTHON_BINARY', 'python'),
+    ],
 
 ];

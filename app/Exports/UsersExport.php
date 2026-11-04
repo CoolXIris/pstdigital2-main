@@ -20,6 +20,8 @@ class UsersExport implements FromCollection, WithHeadings
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'instansi' => $this->spreadsheetText($user->instansi),
+                'jabatan' => $this->spreadsheetText($user->jabatan),
                 'pekerjaan' => $user->pekerjaan,
                 'tanggal_lahir' => $user->tanggal_lahir,
                 'jenis_kelamin' => $user->jenis_kelamin,
@@ -38,6 +40,8 @@ class UsersExport implements FromCollection, WithHeadings
             '#',
             'name',
             'email',
+            'instansi',
+            'jabatan',
             'pekerjaan',
             'tanggal_lahir',
             'jenis_kelamin',
@@ -47,5 +51,12 @@ class UsersExport implements FromCollection, WithHeadings
             'pendidikan',
             'roles'
         ];
+    }
+
+    private function spreadsheetText(?string $value): string
+    {
+        $value ??= '';
+
+        return preg_match('/^[\x00-\x20]*[=+\-@]/', $value) ? "'".$value : $value;
     }
 }

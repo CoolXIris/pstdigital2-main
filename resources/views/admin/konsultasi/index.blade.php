@@ -72,22 +72,44 @@
             <h2>Konsultasi Mendatang</h2>
             <p>Jadwal terkonfirmasi dan petugas yang bertanggung jawab.</p>
         </div>
-        <span class="admin-badge admin-badge-blue">{{ $counts['confirmed'] }} terkonfirmasi</span>
-    </div>
-    @if ($upcoming->isNotEmpty())
-    <div class="admin-confirmed-grid">
-        @foreach ($upcoming as $meeting)
-        <article class="admin-confirmed-card">
-            <span class="admin-badge admin-badge-green"><i class="fe fe-check-circle"></i> Terkonfirmasi</span>
-            <h3>{{ $meeting->user?->name ?? 'Pengguna dihapus' }}</h3>
-            <p class="admin-confirmed-topic">{{ $meeting->name }}</p>
-            <div class="admin-confirmed-detail"><span><i class="fe fe-calendar"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('D, d M Y') }}</span><span><i class="fe fe-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span><span><i class="fe fe-user"></i>{{ $meeting->assigned_staff ?: 'Petugas belum ditentukan' }}</span></div>
-            @if ($meeting->room_open)
-            <div class="admin-room-actions">
-                <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kapasitas ruang...</span>
-                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" data-room-join-form hidden>
-                    <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button>
-                </form>
+        @if ($upcoming->isNotEmpty())
+            <div class="admin-confirmed-grid">
+                @foreach ($upcoming as $meeting)
+                    <article class="admin-confirmed-card">
+                        <span class="admin-badge admin-badge-green"><i class="fe fe-check-circle"></i> Terkonfirmasi</span>
+                        <h3>{{ $meeting->user?->name ?? 'Pengguna dihapus' }}</h3>
+                        <p class="admin-confirmed-topic">{{ $meeting->name }}</p>
+                        <div class="admin-confirmed-detail"><span><i class="fe fe-calendar"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('D, d M Y') }}</span><span><i class="fe fe-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span><span><i class="fe fe-user"></i>{{ $meeting->assigned_staff ?: 'Petugas belum ditentukan' }}</span></div>
+                        @if ($meeting->room_open)
+                            <div class="admin-room-actions">
+                                <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kapasitas ruang...</span>
+                                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" data-room-join-form hidden>
+                                    <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button>
+                                </form>
+                            </div>
+                        @elseif ($meeting->can_open_room_now)
+                            <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
+                                @csrf @method('PATCH')
+                                <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang konsultasi sekarang</button>
+                            </form>
+                            <p class="admin-room-window-note">Pemohon dapat masuk lebih awal. Jam selesai tetap sesuai jadwal.</p>
+                        @else
+                            <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
+                        @endif
+                        @if ($meeting->can_open_room_now)
+                            <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}" class="mt-2">
+                                @csrf
+                                <button class="admin-btn admin-btn-outline admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang lebih awal</button>
+                            </form>
+                        @elseif (!$meeting->room_open)
+                            <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
+                        @endif
+                        @if (!$meeting->approved_by_user_id || (int) $meeting->approved_by_user_id === (int) Auth::id())
+                            <button class="admin-btn admin-btn-outline admin-confirmed-button consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->user?->name ?? 'Pengguna' }}"><i class="fe fe-message-circle"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
+                        @endif
+                        <button class="admin-btn admin-btn-success admin-confirmed-button" type="button" data-bs-toggle="modal" data-bs-target="#completeMeetingModal" data-meeting-id="{{ $meeting->id }}" data-topic="{{ $meeting->name }}"><i class="fe fe-check"></i> Selesaikan konsultasi</button>
+                    </article>
+                @endforeach
             </div>
             @elseif ($meeting->can_open_room_now)
             <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
@@ -113,31 +135,17 @@
     @endif
 </section>
 
-<section class="admin-consultation-section">
-    <div class="admin-section-heading">
-        <div><span class="admin-eyebrow">Arsip layanan</span>
-            <h2>Riwayat Konsultasi</h2>
-            <p>Sesi yang telah selesai atau dibatalkan.</p>
+    <section class="admin-consultation-section">
+        <div class="admin-section-heading">
+            <div><span class="admin-eyebrow">Arsip layanan</span><h2>Riwayat Konsultasi</h2><p>Sesi yang telah selesai atau dibatalkan.</p></div>
+            <div class="admin-history-actions">
+                <form class="admin-search" method="GET" action="{{ route('admin.konsultasi') }}"><i class="fe fe-search" aria-hidden="true"></i><input class="form-control" type="search" name="q" value="{{ $search }}" placeholder="Cari pengguna atau topik" aria-label="Cari riwayat konsultasi"></form>
+                <a class="admin-btn admin-btn-outline" href="{{ route('admin.konsultasi.history.export', ['q' => $search]) }}"><i class="fe fe-download" aria-hidden="true"></i> Ekspor XLSX</a>
+            </div>
         </div>
-        <form class="admin-search" method="GET" action="{{ route('admin.konsultasi') }}"><i class="fe fe-search" aria-hidden="true"></i><input class="form-control" type="search" name="q" value="{{ $search }}" placeholder="Cari pengguna atau topik" aria-label="Cari riwayat konsultasi"></form>
-    </div>
-    <section class="admin-panel">
-        <div class="admin-table-wrap">
-            <table class="admin-table">
-                <thead>
-                    <tr>
-                        <th>Pengguna</th>
-                        <th>Topik konsultasi</th>
-                        <th>Tanggal</th>
-                        <th>Waktu</th>
-                        <th>Petugas</th>
-                        <th>Status akhir</th>
-                        <th>Rating</th>
-                        <th>Tindakan</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($history as $meeting)
+        <section class="admin-panel">
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Pengguna</th><th>Topik konsultasi</th><th>Tanggal</th><th>Waktu</th><th>Petugas</th><th>Status akhir</th><th>Rating</th><th>Detail</th><th>Tindakan</th></tr></thead><tbody>
+                @forelse ($history as $meeting)
                     <tr>
                         <td>
                             <div class="admin-person"><span class="admin-person-avatar">{{ strtoupper(substr($meeting->user?->name ?? 'P', 0, 1)) }}</span><span><strong>{{ $meeting->user?->name ?? 'Pengguna dihapus' }}</strong><small>{{ $meeting->user?->email ?? '' }}</small></span></div>
@@ -148,27 +156,29 @@
                         <td>{{ $meeting->assigned_staff ?: '—' }}</td>
                         <td><span class="admin-badge {{ (int) $meeting->status === 1 ? 'admin-badge-green' : 'admin-badge-red' }}">{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}</span></td>
                         <td>@if ($meeting->rating)<span class="admin-stars">{{ str_repeat('★', (int) $meeting->rating) }}</span>@else<span class="text-muted">—</span>@endif</td>
+                        <td><button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#meetingDetailModal" data-user="{{ $meeting->user?->name ?? 'Pengguna dihapus' }}" data-email="{{ $meeting->user?->email ?? '' }}" data-topic="{{ $meeting->name }}" data-description="{{ $meeting->description }}" data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}" data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}" data-staff="{{ $meeting->assigned_staff }}" data-status="{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}" data-reason="{{ $meeting->cancellation_reason }}" data-summary="{{ $meeting->ringkasan }}" data-feedback="{{ $meeting->kritik_saran }}" data-rating="{{ $meeting->rating }}" data-doc-url="{{ $meeting->link_dokumentasi ? $meeting->link_dokumentasi : ($meeting->documentation_path ? route('konsultasi.documentation', $meeting) : '') }}" aria-label="Detail konsultasi" title="Lihat detail"><i class="fe fe-eye"></i></button></td>
                         <td>
-                            <div class="d-flex gap-1">
-                                <button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#meetingDetailModal" data-user="{{ $meeting->user?->name ?? 'Pengguna dihapus' }}" data-email="{{ $meeting->user?->email ?? '' }}" data-topic="{{ $meeting->name }}" data-description="{{ $meeting->description }}" data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}" data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}" data-staff="{{ $meeting->assigned_staff }}" data-status="{{ (int) $meeting->status === 1 ? 'Selesai' : 'Dibatalkan' }}" data-reason="{{ $meeting->cancellation_reason }}" data-summary="{{ $meeting->ringkasan }}" data-feedback="{{ $meeting->kritik_saran }}" data-rating="{{ $meeting->rating }}" data-doc-url="{{ $meeting->link_dokumentasi ? $meeting->link_dokumentasi : ($meeting->documentation_path ? route('konsultasi.documentation', $meeting) : '') }}" aria-label="Detail konsultasi" title="Lihat detail"><i class="fe fe-eye"></i></button>
-                                <button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#editHistoryModal" data-edit-url="{{ route('admin.konsultasi.history.update', $meeting) }}" data-status-code="{{ (int) $meeting->status }}" data-topic="{{ $meeting->name }}" data-description="{{ $meeting->description }}" data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->format('Y-m-d') }}" data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}" data-staff="{{ $meeting->assigned_staff }}" data-summary="{{ $meeting->ringkasan }}" data-reason="{{ $meeting->cancellation_reason }}" data-documentation-url="{{ $meeting->link_dokumentasi }}" aria-label="Edit riwayat konsultasi {{ $meeting->name }}" title="Edit riwayat"><i class="fe fe-edit-2"></i></button>
-                                <button class="admin-action-icon is-danger" type="button" data-bs-toggle="modal" data-bs-target="#deleteHistoryModal" data-delete-url="{{ route('admin.konsultasi.history.destroy', $meeting) }}" data-topic="{{ $meeting->name }}" aria-label="Hapus riwayat konsultasi {{ $meeting->name }}" title="Hapus riwayat"><i class="fe fe-trash-2"></i></button>
+                            <div class="admin-action-group">
+                                <button class="admin-action-icon" type="button" data-bs-toggle="modal" data-bs-target="#editHistoryModal"
+                                    data-meeting-id="{{ $meeting->id }}" data-status="{{ (int) $meeting->status }}"
+                                    data-name="{{ $meeting->name }}" data-description="{{ $meeting->description }}"
+                                    data-date="{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->format('Y-m-d') }}"
+                                    data-start="{{ substr($meeting->start_time, 0, 5) }}" data-end="{{ substr($meeting->end_time, 0, 5) }}"
+                                    data-staff="{{ $meeting->assigned_staff }}" data-summary="{{ $meeting->ringkasan }}"
+                                    data-reason="{{ $meeting->cancellation_reason }}" data-documentation-url="{{ $meeting->link_dokumentasi }}"
+                                    aria-label="Edit riwayat" title="Edit riwayat"><i class="fe fe-edit-2"></i></button>
+                                <button class="admin-action-icon is-danger" type="button" data-bs-toggle="modal" data-bs-target="#deleteHistoryModal"
+                                    data-meeting-id="{{ $meeting->id }}" data-topic="{{ $meeting->name }}"
+                                    aria-label="Hapus riwayat" title="Hapus riwayat"><i class="fe fe-trash-2"></i></button>
                             </div>
                         </td>
                     </tr>
-                    @empty
-                    <tr>
-                        <td colspan="8">
-                            <div class="admin-empty"><i class="fe fe-archive"></i><strong>Riwayat masih kosong</strong><span>Sesi selesai atau dibatalkan akan tersimpan di sini.</span></div>
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-        @if ($history->hasPages())<div class="admin-table-footer"><span>{{ $history->total() }} sesi dalam riwayat</span>
-            <div class="admin-pagination">{{ $history->links() }}</div>
-        </div>@endif
+                @empty
+                    <tr><td colspan="9"><div class="admin-empty"><i class="fe fe-archive"></i><strong>Riwayat masih kosong</strong><span>Sesi selesai atau dibatalkan akan tersimpan di sini.</span></div></td></tr>
+                @endforelse
+            </tbody></table></div>
+            @if ($history->hasPages())<div class="admin-table-footer"><span>{{ $history->total() }} sesi dalam riwayat</span><div class="admin-pagination">{{ $history->links() }}</div></div>@endif
+        </section>
     </section>
 </section>
 
@@ -295,41 +305,38 @@
     </div>
 </div>
 
-<div class="modal fade admin-modal" id="meetingDetailModal" tabindex="-1" aria-labelledby="meetingDetailTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div><span class="admin-eyebrow">Arsip sesi</span>
-                    <h2 class="modal-title" id="meetingDetailTitle">Detail konsultasi</h2>
-                </div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button>
-            </div>
+    <div class="modal fade admin-modal" id="meetingDetailModal" tabindex="-1" aria-labelledby="meetingDetailTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header"><div><span class="admin-eyebrow">Arsip sesi</span><h2 class="modal-title" id="meetingDetailTitle">Detail konsultasi</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div><div class="modal-body"><div class="admin-approval-details"><div><small>Pengguna</small><strong id="detail-user"></strong></div><div><small>Email</small><strong id="detail-email"></strong></div><div><small>Jenis konsultasi</small><strong id="detail-topic"></strong></div><div><small>Waktu</small><strong id="detail-schedule"></strong></div><div><small>Petugas</small><strong id="detail-staff"></strong></div><div><small>Status</small><strong id="detail-status"></strong></div><div class="admin-approval-description"><small>Deskripsi</small><p id="detail-description"></p></div><div class="admin-approval-description"><small>Hasil konsultasi</small><p id="detail-summary"></p></div><div class="admin-approval-description" id="detail-cancellation-wrap"><small>Alasan pembatalan</small><p id="detail-reason"></p></div><div><small>Rating pengguna</small><strong id="detail-rating"></strong></div><div><small>Kritik/saran</small><strong id="detail-feedback"></strong></div><div class="admin-approval-description" id="detail-document-wrap"><small>Dokumentasi</small><p><a id="detail-document-link" target="_blank" rel="noopener">Buka dokumentasi</a></p></div></div></div><div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Tutup</button></div></div></div></div>
+<div class="modal fade admin-modal" id="editHistoryModal" tabindex="-1" aria-labelledby="editHistoryTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
+        <form method="POST" id="edit-history-form" data-endpoint-base="{{ url('admin/konsultasi') }}">
+            @csrf @method('PUT')
+            <div class="modal-header"><div><span class="admin-eyebrow">Arsip layanan</span><h2 class="modal-title" id="editHistoryTitle">Edit riwayat konsultasi</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
             <div class="modal-body">
-                <div class="admin-approval-details">
-                    <div><small>Pengguna</small><strong id="detail-user"></strong></div>
-                    <div><small>Email</small><strong id="detail-email"></strong></div>
-                    <div><small>Jenis konsultasi</small><strong id="detail-topic"></strong></div>
-                    <div><small>Waktu</small><strong id="detail-schedule"></strong></div>
-                    <div><small>Petugas</small><strong id="detail-staff"></strong></div>
-                    <div><small>Status</small><strong id="detail-status"></strong></div>
-                    <div class="admin-approval-description"><small>Deskripsi</small>
-                        <p id="detail-description"></p>
-                    </div>
-                    <div class="admin-approval-description"><small>Hasil konsultasi</small>
-                        <p id="detail-summary"></p>
-                    </div>
-                    <div class="admin-approval-description" id="detail-cancellation-wrap"><small>Alasan pembatalan</small>
-                        <p id="detail-reason"></p>
-                    </div>
-                    <div><small>Rating pengguna</small><strong id="detail-rating"></strong></div>
-                    <div><small>Kritik/saran</small><strong id="detail-feedback"></strong></div>
-                    <div class="admin-approval-description" id="detail-document-wrap"><small>Dokumentasi</small>
-                        <p><a id="detail-document-link" target="_blank" rel="noopener">Buka dokumentasi</a></p>
-                    </div>
+                <div class="mb-3"><label class="form-label" for="history-name">Topik konsultasi</label><input class="form-control" id="history-name" name="name" required maxlength="255"></div>
+                <div class="mb-3"><label class="form-label" for="history-description">Deskripsi</label><textarea class="form-control" id="history-description" name="description" rows="3" required maxlength="3000"></textarea></div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4"><label class="form-label" for="history-date">Tanggal</label><input class="form-control" id="history-date" name="tanggal" type="date" required></div>
+                    <div class="col-md-4"><label class="form-label" for="history-start">Waktu mulai</label><input class="form-control" id="history-start" name="start_time" type="time" required></div>
+                    <div class="col-md-4"><label class="form-label" for="history-end">Waktu selesai</label><input class="form-control" id="history-end" name="end_time" type="time" required></div>
                 </div>
+                <div class="mb-3"><label class="form-label" for="history-staff">Petugas</label><input class="form-control" id="history-staff" name="assigned_staff" maxlength="255"></div>
+                <div class="mb-3" id="history-summary-wrap"><label class="form-label" for="history-summary">Hasil konsultasi</label><textarea class="form-control" id="history-summary" name="ringkasan" rows="3" maxlength="5000"></textarea></div>
+                <div class="mb-3" id="history-reason-wrap"><label class="form-label" for="history-reason">Alasan pembatalan</label><textarea class="form-control" id="history-reason" name="cancellation_reason" rows="3" maxlength="1000"></textarea></div>
+                <div><label class="form-label" for="history-documentation-url">Tautan dokumentasi</label><input class="form-control" id="history-documentation-url" name="documentation_url" type="url" maxlength="2048"></div>
             </div>
-            <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Tutup</button></div>
-        </div>
-    </div>
+            <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Batal</button><button class="admin-btn admin-btn-primary" type="submit"><i class="fe fe-save"></i> Simpan perubahan</button></div>
+        </form>
+    </div></div>
+</div>
+<div class="modal fade admin-modal" id="deleteHistoryModal" tabindex="-1" aria-labelledby="deleteHistoryTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <form method="POST" id="delete-history-form" data-endpoint-base="{{ url('admin/konsultasi') }}">
+            @csrf @method('DELETE')
+            <div class="modal-header"><div><span class="admin-eyebrow">Hapus arsip</span><h2 class="modal-title" id="deleteHistoryTitle">Hapus riwayat konsultasi</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+            <div class="modal-body"><p>Riwayat <strong id="delete-history-topic"></strong> beserta dokumentasi terkait akan dihapus permanen.</p></div>
+            <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Batal</button><button class="admin-btn admin-btn-danger" type="submit">Hapus riwayat</button></div>
+        </form>
+    </div></div>
 </div>
 @include('konsultasi.partials.text-chat-modal')
 
@@ -434,6 +441,32 @@
             const documentWrap = document.getElementById('detail-document-wrap');
             documentWrap.hidden = !data.docUrl;
             if (data.docUrl) document.getElementById('detail-document-link').href = data.docUrl;
+        });
+
+        const editHistoryForm = document.getElementById('edit-history-form');
+        editHistoryForm.closest('.modal').addEventListener('show.bs.modal', (event) => {
+            const data = event.relatedTarget.dataset;
+            editHistoryForm.action = `${editHistoryForm.dataset.endpointBase}/${data.meetingId}/history`;
+            for (const [id, value] of Object.entries({
+                'history-name': data.name,
+                'history-description': data.description,
+                'history-date': data.date,
+                'history-start': data.start,
+                'history-end': data.end,
+                'history-staff': data.staff,
+                'history-summary': data.summary,
+                'history-reason': data.reason,
+                'history-documentation-url': data.documentationUrl
+            })) document.getElementById(id).value = value || '';
+            document.getElementById('history-summary-wrap').hidden = data.status !== '1';
+            document.getElementById('history-reason-wrap').hidden = data.status !== '9';
+        });
+
+        const deleteHistoryForm = document.getElementById('delete-history-form');
+        deleteHistoryForm.closest('.modal').addEventListener('show.bs.modal', (event) => {
+            const data = event.relatedTarget.dataset;
+            deleteHistoryForm.action = `${deleteHistoryForm.dataset.endpointBase}/${data.meetingId}/history`;
+            document.getElementById('delete-history-topic').textContent = data.topic;
         });
     })();
 </script>

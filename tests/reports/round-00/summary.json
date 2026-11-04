@@ -1,0 +1,131 @@
+{
+  "split": "all",
+  "splits": {
+    "train": {
+      "tested": 22,
+      "passed": 12,
+      "failed": 10,
+      "skipped": 238,
+      "score": 54.55,
+      "by_category": {
+        "di_luar_data": {
+          "pass": 1,
+          "fail": 8,
+          "count": 9
+        },
+        "pertanyaan_umum": {
+          "pass": 11,
+          "fail": 2,
+          "count": 13
+        }
+      },
+      "by_table_type": {
+        "general": {
+          "pass": 11,
+          "fail": 2,
+          "count": 13
+        },
+        "no_data": {
+          "pass": 1,
+          "fail": 8,
+          "count": 9
+        }
+      },
+      "by_rule": {
+        "R10": {
+          "pass": 11,
+          "fail": 2,
+          "count": 13
+        },
+        "R5": {
+          "pass": 22,
+          "fail": 0,
+          "count": 22
+        },
+        "R6": {
+          "pass": 22,
+          "fail": 0,
+          "count": 22
+        },
+        "R8": {
+          "pass": 22,
+          "fail": 0,
+          "count": 22
+        },
+        "R9": {
+          "pass": 1,
+          "fail": 8,
+          "count": 9
+        }
+      }
+    },
+    "holdout": {
+      "tested": 12,
+      "passed": 4,
+      "failed": 8,
+      "skipped": 85,
+      "score": 33.33,
+      "by_category": {
+        "di_luar_data": {
+          "pass": 0,
+          "fail": 7,
+          "count": 7
+        },
+        "pertanyaan_umum": {
+          "pass": 4,
+          "fail": 1,
+          "count": 5
+        }
+      },
+      "by_table_type": {
+        "general": {
+          "pass": 4,
+          "fail": 1,
+          "count": 5
+        },
+        "no_data": {
+          "pass": 0,
+          "fail": 7,
+          "count": 7
+        }
+      },
+      "by_rule": {
+        "R10": {
+          "pass": 4,
+          "fail": 1,
+          "count": 5
+        },
+        "R5": {
+          "pass": 12,
+          "fail": 0,
+          "count": 12
+        },
+        "R6": {
+          "pass": 12,
+          "fail": 0,
+          "count": 12
+        },
+        "R8": {
+          "pass": 12,
+          "fail": 0,
+          "count": 12
+        },
+        "R9": {
+          "pass": 0,
+          "fail": 7,
+          "count": 7
+        }
+      }
+    }
+  },
+  "gemini_calls": 8,
+  "bps_calls": 0,
+  "limits": {
+    "gemini": 300,
+    "bps": 300
+  },
+  "budget_exhausted": false,
+  "environment_issues": [
+    "Tabel penyimpanan BPS belum tersedia: log_gagal."
+  ]
+}

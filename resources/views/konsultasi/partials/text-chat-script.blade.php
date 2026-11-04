@@ -9,7 +9,7 @@
         const form = document.getElementById('consultationChatForm');
         const input = document.getElementById('consultationChatInput');
         const sendButton = document.getElementById('consultationChatSend');
-        const compose = document.getElementById('consultationChatForm');
+        const compose = form;
         const chatHint = document.getElementById('consultationChatHint');
         const olderButton = document.getElementById('consultationHistoryOlder');
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content;

@@ -20,6 +20,31 @@
     <article class="admin-stat admin-stat-red"><span class="admin-stat-label">Mekanisme</span><strong class="admin-stat-value" style="font-size:16px">RAG</strong><span class="admin-stat-foot">Referensi relevan disertakan saat chat</span><span class="admin-stat-icon"><i class="fe fe-search"></i></span></article>
 </div>
 
+<section class="admin-panel mb-3">
+    <div class="admin-panel-head">
+        <div>
+            <h2 class="admin-panel-title">Katalog data BPS</h2>
+            <p class="admin-panel-subtitle">Sinkronkan judul, topik, tahun, ID, dan tautan dari WebAPI. Baris lama yang tidak lagi muncul di API tetap disimpan. Pembaruan dapat memakan beberapa menit jika batas permintaan WebAPI tercapai; jangan tutup halaman selama proses berlangsung.</p>
+        </div>
+        <form method="POST" action="{{ route('admin.chatbot.catalog.refresh') }}" onsubmit="if (!confirm('Sinkronkan katalog tabel dari WebAPI BPS sekarang?')) return false; const button = this.querySelector('button'); button.disabled = true; button.querySelector('span').textContent = 'Menyinkronkan...';">
+            @csrf
+            <button class="admin-btn admin-btn-primary" type="submit" @disabled(! $bpsApiKeyConfigured)>
+                <i class="fe fe-refresh-cw"></i> <span>Perbarui dari WebAPI</span>
+            </button>
+        </form>
+    </div>
+    <div class="admin-panel-body">
+        <p class="mb-0 text-muted">
+            Pembaruan terakhir:
+            <strong>{{ $catalogUpdatedAt?->timezone(config('app.timezone'))->translatedFormat('d M Y, H:i') ?? 'Belum tersedia' }}</strong>
+            · Zona waktu {{ config('app.timezone') }}.
+            @unless ($bpsApiKeyConfigured)
+                API key WebAPI BPS belum dikonfigurasi, sehingga pembaruan belum dapat dijalankan.
+            @endunless
+        </p>
+    </div>
+</section>
+
 <div class="row g-3 mb-3">
     <div class="col-xl-7">
         <section class="admin-panel h-100">
@@ -130,8 +155,8 @@
             </div>
             <div class="admin-panel-body">
                 <div class="admin-connection mb-3"><span class="admin-connection-indicator" id="chat-status-icon"><i class="fe fe-activity"></i></span><span><strong id="chat-status-title">Belum diperiksa</strong><small id="chat-status-description">Kirim pesan uji untuk mengecek endpoint.</small></span></div>
-                <div class="d-flex justify-content-between py-2" style="border-bottom:1px solid #edf1f5"><span class="text-muted">Endpoint</span><span class="fw-semibold">pst-chat.bpssumsel.com</span></div>
-                <div class="d-flex justify-content-between py-2"><span class="text-muted">Metode</span><span class="fw-semibold">POST /send_message</span></div>
+                <div class="d-flex justify-content-between py-2" style="border-bottom:1px solid #edf1f5"><span class="text-muted">Endpoint</span><span class="fw-semibold">Gemini API</span></div>
+                <div class="d-flex justify-content-between py-2"><span class="text-muted">Metode</span><span class="fw-semibold">POST /api/chat</span></div>
             </div>
         </section>
         <aside class="admin-muted-note"><strong>Uji sumber pengetahuan</strong><br>Percakapan uji menggunakan sesi terpisah. Tanyakan topik yang tercantum pada sumber aktif untuk memastikan referensi terbaru dipakai pada jawaban.</aside>
@@ -140,6 +165,7 @@
 @endsection
 
 @section('scripts')
+<script src="{{ asset('zanex/js/marked.min.js') }}"></script>
 <script src="{{ asset('chat-markdown.js') }}"></script>
 <script>
     (() => {

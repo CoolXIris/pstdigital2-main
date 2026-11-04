@@ -163,7 +163,15 @@ class ConsultationDocumentationService
 
     private function optimizedImageContents(UploadedFile $file): string
     {
-        if (!function_exists('imagecreatefromstring')) {
+        if (!function_exists('imagecreatefromstring')
+            || !function_exists('imagecreatetruecolor')
+            || !function_exists('imagecolorallocate')
+            || !function_exists('imagefill')
+            || !function_exists('imagecopyresampled')
+            || !function_exists('imagejpeg')
+            || !function_exists('imagesx')
+            || !function_exists('imagesy')
+            || !function_exists('imagedestroy')) {
             throw new RuntimeException('Optimasi gambar tidak tersedia pada server ini. Unggah gambar berukuran lebih kecil.');
         }
 

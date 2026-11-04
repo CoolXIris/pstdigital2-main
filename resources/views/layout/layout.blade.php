@@ -13,18 +13,20 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet" />
 
     @unless (request()->routeIs('/'))
-        <!-- STYLE CSS -->
-        <link href="https://cdn.jsdelivr.net/npm/timepicker-ui@4.3.0/dist/css/index.min.css" rel="stylesheet" />
-        <link rel="stylesheet"
-            href="https://cdnjs.cloudflare.com/ajax/libs/jquery-timepicker/1.11.13/jquery.timepicker.min.css"
-            integrity="sha512-o/EXVNKft3N3KwEPXZ+D1eizHBCXrDF91uZBZYoomlpqw9YIFYfPNt1YUoRQxt4OY1wCoMGNbWkkVc9dU3/72g=="
-            crossorigin="anonymous" referrerpolicy="no-referrer" />
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.5/css/select2.min.css"
-            integrity="sha512-2L0dEjIN/DAmTV5puHriEIuQU/IL3CoPm/4eyZp3bM8dnaXri6lK8u6DC5L96b+YSs9f3Le81dDRZUSYeX4QcQ=="
-            crossorigin="anonymous" referrerpolicy="no-referrer" />
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css"
-            integrity="sha512-aOG0c6nPNzGk+5zjwyJaoRUgCdOrfSDhmMID2u4+OIslr0GjpLKo7Xm0Ao3xmpM4T8AmIouRkqwj1nrdVsLKEQ=="
-            crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- STYLE CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/timepicker-ui@4.3.0/dist/css/index.min.css" rel="stylesheet" />
+
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/jquery-timepicker/1.11.13/jquery.timepicker.min.css"
+        integrity="sha512-o/EXVNKft3N3KwEPXZ+D1eizHBCXrDF91uZBZYoomlpqw9YIFYfPNt1YUoRQxt4OY1wCoMGNbWkkVc9dU3/72g=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.5/css/select2.min.css"
+        integrity="sha512-2L0dEjIN/DAmTV5puHriEIuQU/IL3CoPm/4eyZp3bM8dnaXri6lK8u6DC5L96b+YSs9f3Le81dDRZUSYeX4QcQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css"
+        integrity="sha512-aOG0c6nPNzGk+5zjwyJaoRUgCdOrfSDhmMID2u4+OIslr0GjpLKo7Xm0Ao3xmpM4T8AmIouRkqwj1nrdVsLKEQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
     @endunless
     {{-- <link href="{{ url('zanex/css/dark-style.css') }}" rel="stylesheet" />
     <link href="{{ url('zanex/css/skin-modes.css') }}" rel="stylesheet" />
@@ -569,7 +571,11 @@
                             <li><hr class="dropdown-divider border-light opacity-25"></li>
                             @endif
                             <li>
-                                @if ($profileComplete)<a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>@else<span class="dropdown-item disabled" aria-disabled="true">Konsultasi Virtual (lengkapi profil)</span>@endif
+                                @if ($profileComplete)
+                                    <a class="dropdown-item" href="{{ url('konsultasi') }}">Konsultasi Virtual</a>
+                                @else
+                                    <span class="dropdown-item disabled" aria-disabled="true">Konsultasi Virtual (lengkapi profil)</span>
+                                @endif
                             </li>
                             <li>@if ($profileComplete)<a class="dropdown-item" href="{{ url('chatbot') }}">Chatbot</a>@else<span class="dropdown-item disabled" aria-disabled="true">Chatbot (lengkapi profil)</span>@endif</li>
                             <li>
@@ -633,7 +639,10 @@
         <div class="sidebar-links">
             <a href="{{ url('/') }}" class="link-item">Landing page</a>
             @if ($profileComplete)
-            <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
+                <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
+            @else
+                <span class="link-item text-muted" aria-disabled="true">Konsultasi (lengkapi profil)</span>
+            @endif
             <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
             <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
             @else
@@ -747,6 +756,14 @@
 
         closeBtn?.addEventListener("click", closeMenu);
         overlay?.addEventListener("click", closeMenu);
+        @if (request()->routeIs('/'))
+            const header = document.querySelector(".header");
+            if (header) {
+                const updateHeader = () => header.classList.toggle("is-scrolled", window.scrollY > 10);
+                window.addEventListener("scroll", updateHeader, { passive: true });
+                updateHeader();
+            }
+        @endif
         // Memanggil file sidebar.html
         // fetch("sidebar.html")
         //     .then((response) => response.text())

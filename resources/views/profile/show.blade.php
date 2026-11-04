@@ -49,6 +49,8 @@ $jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/
             <div class="col-md-6"><label class="form-label" for="profile-job">Pekerjaan</label><select class="form-select" id="profile-job" name="pekerjaan" required>
                     <option value="">Pilih kategori pekerjaan</option>@foreach ($jobs as $job)<option value="{{ $job }}" @selected(old('pekerjaan', $data->pekerjaan) === $job)>{{ $job }}</option>@endforeach
                 </select></div>
+            <div class="col-md-6"><label class="form-label" for="profile-instansi">Instansi <span class="text-muted">(opsional)</span></label><input class="form-control" id="profile-instansi" name="instansi" value="{{ old('instansi', $data->instansi) }}" placeholder="Nama instansi atau organisasi" maxlength="255"></div>
+            <div class="col-md-6"><label class="form-label" for="profile-jabatan">Jabatan <span class="text-muted">(opsional)</span></label><input class="form-control" id="profile-jabatan" name="jabatan" value="{{ old('jabatan', $data->jabatan) }}" placeholder="Jabatan atau peran Anda" maxlength="255"></div>
             <div class="col-md-6"><label class="form-label" for="profile-education">Pendidikan terakhir</label><input class="form-control" id="profile-education" name="pendidikan" value="{{ old('pendidikan', $data->pendidikan) }}" placeholder="Contoh: S1 Statistik" maxlength="100" required></div>
             <div class="col-md-6"><label class="form-label" for="profile-gender">Jenis kelamin</label><select class="form-select" id="profile-gender" name="jenis_kelamin" required>
                     <option value="">Pilih jenis kelamin</option>
@@ -63,8 +65,9 @@ $jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/
         <h2><i class="bi bi-geo-alt me-2"></i>Domisili dan kontak</h2>
         <p>Informasi ini membantu petugas memahami konteks permintaan Anda.</p>
         <div class="row g-3">
-            <div class="col-md-6"><label class="form-label" for="profile-province">Provinsi</label><input class="form-control" id="profile-province" name="asal_prov" value="{{ old('asal_prov', $data->asal_prov) }}" placeholder="Nama provinsi" maxlength="100" required></div>
-            <div class="col-md-6"><label class="form-label" for="profile-city">Kabupaten / kota</label><input class="form-control" id="profile-city" name="asal_kab" value="{{ old('asal_kab', $data->asal_kab) }}" placeholder="Nama kabupaten atau kota" maxlength="100" required></div>
+            <div class="col-md-6"><label class="form-label" for="profile-province">Provinsi</label><input class="form-control" id="profile-province" name="asal_prov" value="{{ old('asal_prov', $data->asal_prov) }}" placeholder="Ketik atau pilih provinsi" list="profile-provinces" autocomplete="off" maxlength="100" required><datalist id="profile-provinces"></datalist></div>
+            <div class="col-md-6"><label class="form-label" for="profile-city">Kabupaten / kota</label><input class="form-control" id="profile-city" name="asal_kab" value="{{ old('asal_kab', $data->asal_kab) }}" placeholder="Pilih provinsi terlebih dahulu" list="profile-regencies" autocomplete="off" maxlength="100" required disabled><datalist id="profile-regencies"></datalist></div>
+            <div class="col-12"><p class="form-text portal-region-status mb-0" id="profile-region-status" role="status" aria-live="polite">{{ empty($regions['provinces']) ? 'Daftar wilayah belum tersedia. Silakan hubungi admin.' : 'Pilih provinsi untuk memuat kabupaten/kota yang tersedia.' }}</p></div>
             <div class="col-md-6"><label class="form-label" for="profile-phone">Nomor telepon</label>
                 <div class="portal-input-icon"><i class="bi bi-telephone"></i><input class="form-control" id="profile-phone" name="no_hp" value="{{ old('no_hp', $data->no_hp) }}" type="tel" autocomplete="tel" placeholder="08xxxxxxxxxx" maxlength="30" required></div>
             </div>
@@ -80,5 +83,55 @@ $jobs = ['Pelajar/Mahasiswa', 'Peneliti/Dosen', 'Pegawai Swasta', 'Pegawai BUMN/
     document.querySelectorAll('[data-completion]').forEach((indicator) => {
         indicator.querySelector('.portal-completion-track span').style.width = `${indicator.dataset.completion}%`;
     });
+
+    (() => {
+        const provinceInput = document.querySelector('#profile-province');
+        const cityInput = document.querySelector('#profile-city');
+        const provinceList = document.querySelector('#profile-provinces');
+        const cityList = document.querySelector('#profile-regencies');
+        const status = document.querySelector('#profile-region-status');
+        const catalog = @json($regions);
+        const provinces = catalog.provinces;
+        const regenciesByProvince = catalog.regencies;
+
+        const loadRegencies = (province, preferredCity = '') => {
+            cityList.replaceChildren();
+            if (!province) {
+                cityInput.disabled = true;
+                cityInput.value = '';
+                cityInput.placeholder = 'Pilih provinsi terlebih dahulu';
+                status.textContent = provinces.length
+                    ? 'Pilih provinsi untuk memuat kabupaten/kota yang tersedia.'
+                    : 'Daftar wilayah belum tersedia. Silakan hubungi admin.';
+                return;
+            }
+
+            const regencies = regenciesByProvince[province.code] || [];
+            regencies.forEach((regency) => {
+                const option = document.createElement('option');
+                option.value = regency.name;
+                cityList.append(option);
+            });
+            cityInput.disabled = regencies.length === 0;
+            cityInput.value = regencies.some((regency) => regency.name === preferredCity) ? preferredCity : '';
+            cityInput.placeholder = regencies.length ? 'Ketik atau pilih kabupaten/kota' : 'Kabupaten/kota belum tersedia';
+            status.textContent = regencies.length
+                ? 'Pilih kabupaten/kota yang berada di provinsi tersebut.'
+                : 'Kabupaten/kota untuk provinsi ini belum tersedia.';
+        };
+
+        provinces.forEach((province) => {
+            const option = document.createElement('option');
+            option.value = province.name;
+            provinceList.append(option);
+        });
+
+        const savedCity = cityInput.value;
+        provinceInput.addEventListener('input', () => {
+            const province = provinces.find((item) => item.name === provinceInput.value);
+            loadRegencies(province);
+        });
+        loadRegencies(provinces.find((item) => item.name === provinceInput.value), savedCity);
+    })();
 </script>
 @endsection

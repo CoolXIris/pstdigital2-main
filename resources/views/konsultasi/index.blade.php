@@ -34,7 +34,10 @@
                     <h3>{{ $meeting->name }}</h3>
                     <span class="portal-status {{ $isConfirmed ? 'is-confirmed' : '' }}"><i class="bi {{ $isConfirmed ? 'bi-check-circle' : 'bi-hourglass-split' }}"></i>{{ $isConfirmed ? 'Terkonfirmasi' : 'Menunggu persetujuan' }}</span>
                 </div>
-                <div class="portal-meeting-description-wrap" style="display: flex; justify-content: flex-end;"><button class="portal-detail-button" type="button" data-bs-toggle="modal" data-bs-target="#meetingDetailModal{{ $meeting->id }}"><i class="bi bi-eye"></i> Detail</button></div>
+                <div class="portal-meeting-description-wrap">
+                    <p class="portal-meeting-description mb-0">{{ \Illuminate\Support\Str::limit($meeting->description, 150) }}</p>
+                    <button class="portal-detail-button" type="button" data-bs-toggle="modal" data-bs-target="#meetingDetailModal{{ $meeting->id }}"><i class="bi bi-eye"></i> Detail</button>
+                </div>
             </div>
             <div class="portal-meeting-meta mt-3">
                 <span><i class="bi bi-calendar3"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('l, d F Y') }}</span>
@@ -80,7 +83,12 @@
         <div class="modal fade portal-modal" id="meetingDetailModal{{ $meeting->id }}" tabindex="-1" aria-labelledby="meetingDetailTitle{{ $meeting->id }}" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
                 <div class="modal-header"><div><span class="portal-eyebrow">Detail konsultasi</span><h2 class="modal-title" id="meetingDetailTitle{{ $meeting->id }}">{{ $meeting->name }}</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
-                <div class="modal-body"><dl class="portal-meeting-detail-list"><div><dt>Jadwal</dt><dd>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('l, d F Y') }}, {{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</dd></div><div><dt>Petugas</dt><dd>{{ $meeting->assigned_staff ?: 'Belum ditentukan' }}</dd></div><div><dt>Status</dt><dd>{{ $isConfirmed ? 'Terkonfirmasi' : 'Menunggu persetujuan' }}</dd></div><div><dt>Deskripsi kebutuhan</dt><dd class="portal-detail-long-text">{{ $meeting->description }}</dd></div></dl></div>
+                <div class="modal-body"><dl class="portal-meeting-detail-list">
+                    <div><dt>Jadwal</dt><dd>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('l, d F Y') }}, {{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</dd></div>
+                    <div><dt>Petugas</dt><dd>{{ $meeting->assigned_staff ?: 'Belum ditentukan' }}</dd></div>
+                    <div><dt>Status</dt><dd>{{ $isConfirmed ? 'Terkonfirmasi' : 'Menunggu persetujuan' }}</dd></div>
+                    <div><dt>Deskripsi kebutuhan</dt><dd class="portal-detail-long-text">{{ $meeting->description }}</dd></div>
+                </dl></div>
             </div></div>
         </div>
         @empty
@@ -99,7 +107,9 @@
     </div>
     <div class="portal-table-wrap">
         <table class="portal-table portal-history-table">
-            <thead><tr><th>Rating</th><th>Konsultasi</th><th>Jadwal</th><th>Petugas</th><th>Status</th><th>Riwayat chat</th></tr></thead>
+            <thead>
+                <tr><th>Rating</th><th>Konsultasi</th><th>Jadwal</th><th>Petugas</th><th>Status</th><th>Riwayat chat</th></tr>
+            </thead>
             <tbody>
                 @forelse ($data_riwayat as $meeting)
                 <tr>
@@ -111,7 +121,9 @@
                     <td>@if ((int) $meeting->status === 1)<button class="portal-btn portal-btn-outline portal-history-button" type="button" data-consultation-history data-history-url="{{ route('konsultasi.messages.history', $meeting) }}" data-chat-topic="{{ $meeting->name }}"><i class="bi bi-chat-left-text"></i> Riwayat chat</button>@else<span class="text-muted">—</span>@endif</td>
                 </tr>
                 @empty
-                <tr><td colspan="6" class="text-center py-4 text-muted">Riwayat konsultasi akan tampil setelah sesi selesai atau dibatalkan.</td></tr>
+                <tr>
+                    <td colspan="6" class="text-center py-4 text-muted">Riwayat konsultasi akan tampil setelah sesi selesai atau dibatalkan.</td>
+                </tr>
                 @endforelse
             </tbody>
         </table>
@@ -132,6 +144,7 @@
             @if ($meeting->ringkasan)<div><dt>Ringkasan hasil</dt><dd class="portal-detail-long-text">{{ $meeting->ringkasan }}</dd></div>@endif
             @if ((int) $meeting->status === 9 && $meeting->cancellation_reason)<div><dt>Alasan pembatalan</dt><dd class="portal-detail-long-text">{{ $meeting->cancellation_reason }}</dd></div>@endif
             @if ($meeting->rating)<div><dt>Penilaian Anda</dt><dd><span class="portal-rating-stars">{{ str_repeat('★', (int) $meeting->rating) }}</span>@if ($meeting->kritik_saran)<p class="mb-0 mt-1">{{ $meeting->kritik_saran }}</p>@endif</dd></div>@endif
+            @if ($meeting->documentation_path || $meeting->link_dokumentasi)<div><dt>Dokumentasi</dt><dd><a href="{{ $meeting->link_dokumentasi ?: route('konsultasi.documentation', $meeting) }}" target="_blank" rel="noopener">Buka dokumentasi</a></dd></div>@endif
         </dl></div>
     </div></div>
 </div>
@@ -174,32 +187,20 @@
                 <div class="modal-body">
                     <div class="portal-form-section mb-3">
                         <h2>Topik konsultasi</h2>
-                        <p>Pilih bidang yang paling sesuai dengan kebutuhan Anda.</p><label class="form-label" for="meeting-topic">Jenis konsultasi</label><select class="form-select" name="name" id="meeting-topic" required>
-                            <option value="">Pilih jenis konsultasi</option>
+                        <p>Pilih bidang yang paling sesuai dengan kebutuhan Anda.</p><label class="form-label" for="meeting-topic">Jenis konsultasi</label><input class="form-control" type="text" name="name" id="meeting-topic" list="meeting-topics" value="{{ old('name') }}" placeholder="Ketik atau pilih jenis konsultasi" autocomplete="off" required>
+                        <datalist id="meeting-topics">
                             @foreach (['Statistik secara umum', 'Rekomendasi Statistik', 'Metodologi Statistik', 'Statistik Sektoral', 'Sains data', 'Data Spasial', 'Data Ekonomi', 'Data Sosial dan Kependudukan', 'Data Pertanian', 'Potensi Desa', 'Ekspor-Impor', 'Harga & Inflasi', 'Tenaga Kerja', 'Kemiskinan', 'Pertumbuhan Ekonomi', 'Statistik Industri', 'Statistik Produksi', 'Indeks Pembangunan Manusia', 'Data Transportasi dan Distribusi'] as $topic)
-                            <option value="{{ $topic }}" @selected(old('name')===$topic)>{{ $topic }}</option>
+                            <option value="{{ $topic }}">
                             @endforeach
-                        </select>
+                        </datalist>
                     </div>
-                    <div class="mb-3"><label class="form-label" for="meeting-description">Deskripsi kebutuhan</label><textarea class="form-control" id="meeting-description" name="deskripsi" rows="4" minlength="50" maxlength="3000" placeholder="Ceritakan data, indikator, atau metodologi yang ingin dikonsultasikan..." required>{{ old('deskripsi') }}</textarea><small class="form-text text-muted">Tuliskan minimal 50 karakter agar petugas dapat memahami kebutuhan konsultasi Anda.</small></div>
+                    <div class="mb-3"><label class="form-label" for="meeting-description">Deskripsi kebutuhan</label><textarea class="form-control" id="meeting-description" name="deskripsi" rows="4" minlength="10" maxlength="3000" placeholder="Ceritakan data, indikator, atau metodologi yang ingin dikonsultasikan..." required>{{ old('deskripsi') }}</textarea><small class="form-text text-muted">Minimal 10 karakter. Jelaskan konteks pertanyaan agar petugas dapat menyiapkan konsultasi.</small></div>
                     <div class="row g-3">
-                        <div class="col-md-4"><label class="form-label" for="meeting-date-display">Tanggal konsultasi</label>
-                            <div class="portal-date-picker" id="consultation-date-picker" data-today="{{ $jakartaToday }}" data-now-time="{{ $jakartaNowTime }}" data-now-timestamp="{{ $jakartaNowTimestamp }}" data-holidays='@json($consultationHolidays)'>
-                                <div class="portal-date-picker-control"><input class="form-control" id="meeting-date-display" type="text" placeholder="Pilih hari kerja" readonly aria-haspopup="dialog" aria-expanded="false"><button class="portal-date-picker-toggle" type="button" aria-label="Buka kalender"><i class="bi bi-calendar3"></i></button></div>
-                                <input id="meeting-date" type="hidden" name="tanggal" value="{{ old('tanggal') }}">
-                                <div class="portal-calendar" id="consultation-calendar" role="dialog" aria-label="Pilih tanggal konsultasi" hidden>
-                                    <div class="portal-calendar-header"><button type="button" data-calendar-prev aria-label="Bulan sebelumnya"><i class="bi bi-chevron-left"></i></button><strong data-calendar-month></strong><button type="button" data-calendar-next aria-label="Bulan berikutnya"><i class="bi bi-chevron-right"></i></button></div>
-                                    <div class="portal-calendar-weekdays" aria-hidden="true"><span>Sen</span><span>Sel</span><span>Rab</span><span>Kam</span><span>Jum</span><span>Sab</span><span>Min</span></div>
-                                    <div class="portal-calendar-days" data-calendar-days></div>
-                                    <small class="portal-calendar-note">Akhir pekan, hari libur nasional, dan cuti bersama tidak tersedia.</small>
-                                </div>
-                                <small class="form-text text-muted" data-calendar-message>Pilih tanggal pada hari kerja.</small>
-                            </div>
-                        </div>
-                        <div class="col-md-4"><label class="form-label" for="meeting-start">Waktu mulai</label><select class="form-select" id="meeting-start" name="waktu_mulai" required>
-                                <option value="">Pilih waktu mulai</option>@foreach ($consultationStartTimes as $time)<option value="{{ $time }}" @selected(old('waktu_mulai')===$time)>{{ $time }} WIB</option>@endforeach
-                            </select></div>
-                        <div class="col-md-4"><label class="form-label" for="meeting-end">Waktu selesai otomatis</label><input class="form-control" id="meeting-end" type="text" placeholder="Pilih waktu mulai" readonly aria-describedby="meeting-end-help"><small class="form-text text-muted" id="meeting-end-help">Durasi sesi konsultasi {{ $consultationDuration }} menit.</small></div>
+                        <div class="col-md-4"><label class="form-label" for="meeting-date">Tanggal konsultasi</label><input class="form-control" id="meeting-date" type="date" name="tanggal" min="{{ now('Asia/Jakarta')->toDateString() }}" value="{{ old('tanggal') }}" required></div>
+                        <div class="col-md-4"><label class="form-label" for="meeting-start">Waktu mulai</label><select class="form-select" id="meeting-start" name="waktu_mulai" required disabled>
+                                <option value="">Pilih waktu</option>@foreach (['09:00', '10:00', '11:00', '13:00', '14:00', '15:00'] as $time)<option value="{{ $time }}" @selected(old('waktu_mulai')===$time)>{{ $time }} WIB</option>@endforeach
+                            </select><small class="form-text text-muted">Untuk tanggal hari ini, waktu yang sudah lewat tidak tersedia.</small></div>
+                        <div class="col-md-4"><label class="form-label" for="meeting-end">Waktu selesai</label><input class="form-control" id="meeting-end" name="waktu_selesai" type="time" value="{{ old('waktu_selesai') }}" required readonly><small class="form-text text-muted">Terisi otomatis 45 menit setelah waktu mulai.</small></div>
                     </div>
                     <div class="portal-chat-note mt-3"><i class="bi bi-info-circle me-1"></i>Permintaan akan berstatus menunggu sampai admin menyetujui dan menetapkan petugas.</div>
                 </div>
@@ -216,178 +217,65 @@
 <script>
     (() => {
         const form = document.getElementById('new-meeting-form');
+        const date = document.getElementById('meeting-date');
         const start = document.getElementById('meeting-start');
         const end = document.getElementById('meeting-end');
-        const datePicker = document.getElementById('consultation-date-picker');
-        const dateInput = document.getElementById('meeting-date');
-        const dateDisplay = document.getElementById('meeting-date-display');
-        const calendar = document.getElementById('consultation-calendar');
-        const calendarDays = calendar.querySelector('[data-calendar-days]');
-        const calendarMonth = calendar.querySelector('[data-calendar-month]');
-        const calendarMessage = datePicker.querySelector('[data-calendar-message]');
-        const holidays = new Set(JSON.parse(datePicker.dataset.holidays));
-        const serverNowTimestamp = Number(datePicker.dataset.nowTimestamp) * 1000;
-        const browserStartedAt = Date.now();
-        const duration = {{ (int) $consultationDuration }};
-        const getJakartaClock = () => {
-            const serverSyncedNow = new Date(serverNowTimestamp + Date.now() - browserStartedAt);
-            const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-                timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-            }).formatToParts(serverSyncedNow).map((part) => [part.type, part.value]));
+        const jakartaDateTime = () => {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Jakarta',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hourCycle: 'h23',
+            }).formatToParts(new Date()).reduce((values, part) => {
+                values[part.type] = part.value;
+                return values;
+            }, {});
             return {
-                today: `${parts.year}-${parts.month}-${parts.day}`,
+                date: `${parts.year}-${parts.month}-${parts.day}`,
                 time: `${parts.hour}:${parts.minute}`,
             };
         };
-        let { today, time: nowTime } = getJakartaClock();
-        const asDate = (iso) => {
-            const [year, month, day] = iso.split('-').map(Number);
-            return new Date(Date.UTC(year, month - 1, day));
-        };
-        const toIso = (date) => [date.getUTCFullYear(), String(date.getUTCMonth() + 1).padStart(2, '0'), String(date.getUTCDate()).padStart(2, '0')].join('-');
-        const isValidIsoDate = (iso) => /^\d{4}-\d{2}-\d{2}$/.test(iso) && toIso(asDate(iso)) === iso;
-        const isWeekend = (iso) => isValidIsoDate(iso) && [0, 6].includes(asDate(iso).getUTCDay());
-        const isUnavailable = (iso) => !isValidIsoDate(iso) || iso < today || isWeekend(iso) || holidays.has(iso);
-        const formatDate = (iso) => new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(asDate(iso));
-        let visibleMonth = dateInput.value && !isUnavailable(dateInput.value) ? asDate(dateInput.value) : asDate(today);
-        visibleMonth.setUTCDate(1);
-
-        const setCalendarOpen = (open) => {
-            calendar.hidden = !open;
-            dateDisplay.setAttribute('aria-expanded', String(open));
-        };
-        const selectDate = (iso) => {
-            if (isUnavailable(iso)) return;
-            dateInput.value = iso;
-            dateDisplay.value = formatDate(iso);
-            calendarMessage.textContent = 'Tanggal tersedia untuk konsultasi.';
-            calendarMessage.classList.remove('text-danger');
-            dateInput.dispatchEvent(new Event('change', { bubbles: true }));
-            setCalendarOpen(false);
-        };
-        const renderCalendar = () => {
-            const year = visibleMonth.getUTCFullYear();
-            const month = visibleMonth.getUTCMonth();
-            calendarMonth.textContent = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(visibleMonth);
-            calendarDays.replaceChildren();
-            const firstWeekday = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
-            const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-            for (let blank = 0; blank < firstWeekday; blank++) {
-                const spacer = document.createElement('span');
-                spacer.className = 'portal-calendar-spacer';
-                calendarDays.append(spacer);
-            }
-            for (let day = 1; day <= daysInMonth; day++) {
-                const date = new Date(Date.UTC(year, month, day));
-                const iso = toIso(date);
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'portal-calendar-day';
-                button.textContent = String(day);
-                button.disabled = isUnavailable(iso);
-                if (iso === dateInput.value) button.classList.add('is-selected');
-                if (iso === today) button.classList.add('is-today');
-                if (button.disabled) button.title = iso < today ? 'Tanggal sudah lewat' : (isWeekend(iso) ? 'Akhir pekan' : 'Hari libur atau cuti bersama');
-                button.addEventListener('click', () => selectDate(iso));
-                calendarDays.append(button);
-            }
-            const minMonth = asDate(today);
-            minMonth.setUTCDate(1);
-            calendar.querySelector('[data-calendar-prev]').disabled = visibleMonth <= minMonth;
-        };
-        const positionCalendar = () => {
-            if (calendar.hidden) return;
-            const anchor = dateDisplay.closest('.portal-date-picker-control').getBoundingClientRect();
-            const width = Math.min(320, window.innerWidth - 24);
-            const left = Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12));
-            calendar.style.width = `${width}px`;
-            calendar.style.left = `${left}px`;
-            const below = anchor.bottom + 7;
-            calendar.style.top = `${below + calendar.offsetHeight <= window.innerHeight - 12 ? below : Math.max(12, anchor.top - calendar.offsetHeight - 7)}px`;
-        };
-        const openCalendar = () => {
-            updateTimes();
-            const currentMonth = asDate(today);
-            currentMonth.setUTCDate(1);
-            if (visibleMonth < currentMonth) visibleMonth = currentMonth;
-            renderCalendar();
-            setCalendarOpen(true);
-            positionCalendar();
-        };
-        dateDisplay.addEventListener('click', openCalendar);
-        datePicker.querySelector('.portal-date-picker-toggle').addEventListener('click', () => {
-            if (calendar.hidden) openCalendar(); else setCalendarOpen(false);
-        });
-        calendar.querySelector('[data-calendar-prev]').addEventListener('click', () => {
-            visibleMonth.setUTCMonth(visibleMonth.getUTCMonth() - 1);
-            renderCalendar();
-        });
-        calendar.querySelector('[data-calendar-next]').addEventListener('click', () => {
-            visibleMonth.setUTCMonth(visibleMonth.getUTCMonth() + 1);
-            renderCalendar();
-        });
-        document.addEventListener('click', (event) => {
-            if (!datePicker.contains(event.target) && !calendar.contains(event.target)) setCalendarOpen(false);
-        });
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') setCalendarOpen(false);
-        });
-        window.addEventListener('resize', positionCalendar);
-        document.addEventListener('scroll', positionCalendar, true);
-        document.getElementById('newMeetingModal')?.addEventListener('hidden.bs.modal', () => setCalendarOpen(false));
-        if (dateInput.value && !isUnavailable(dateInput.value)) dateDisplay.value = formatDate(dateInput.value);
-
-        const updateTimes = () => {
-            ({ today, time: nowTime } = getJakartaClock());
-            if (dateInput.value && dateInput.value < today) {
-                dateInput.value = '';
-                dateDisplay.value = '';
-            }
-            const selectedDate = dateInput.value;
-            [...start.options].forEach((option) => {
-                if (!option.value) return;
-                option.disabled = !selectedDate || isUnavailable(selectedDate) || (selectedDate === today && option.value <= nowTime);
-            });
-            if (start.selectedOptions[0]?.disabled) start.value = '';
+        const syncEndTime = () => {
+            end.setCustomValidity('');
             if (!start.value) {
                 end.value = '';
-                end.placeholder = 'Pilih waktu mulai';
                 return;
             }
-            const [hour, minute] = start.value.split(':').map(Number);
-            const endMinutes = hour * 60 + minute + duration;
-            end.value = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')} WIB`;
+
+            const [hours, minutes] = start.value.split(':').map(Number);
+            const endMinutes = hours * 60 + minutes + 45;
+            end.value = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
         };
-        dateInput.addEventListener('change', updateTimes);
-        start.addEventListener('change', updateTimes);
-        start.addEventListener('focus', updateTimes);
-        start.addEventListener('pointerdown', updateTimes);
-        updateTimes();
-        window.setInterval(() => {
-            updateTimes();
-            if (!calendar.hidden) {
-                const currentMonth = asDate(today);
-                currentMonth.setUTCDate(1);
-                if (visibleMonth < currentMonth) visibleMonth = currentMonth;
-                renderCalendar();
-                positionCalendar();
-            }
-        }, 15000);
+        const updateStartTimes = () => {
+            const now = jakartaDateTime();
+            const selectedDate = date.value;
+            start.disabled = !selectedDate || selectedDate < now.date;
+            [...start.options].forEach((option) => {
+                option.disabled = Boolean(option.value) && (
+                    selectedDate < now.date || (selectedDate === now.date && option.value <= now.time)
+                );
+            });
+            if (start.selectedOptions[0]?.disabled) start.value = '';
+            syncEndTime();
+        };
+        date.addEventListener('change', updateStartTimes);
+        start.addEventListener('change', updateStartTimes);
+        window.addEventListener('focus', updateStartTimes);
+        window.setInterval(updateStartTimes, 30000);
         form.addEventListener('submit', (event) => {
-            if (!dateInput.value || isUnavailable(dateInput.value)) {
-                event.preventDefault();
-                calendarMessage.textContent = 'Silakan pilih tanggal hari kerja yang tersedia.';
-                calendarMessage.classList.add('text-danger');
-                openCalendar();
-                dateDisplay.focus();
-                return;
-            }
             if (!start.value || !end.value) {
                 event.preventDefault();
+                start.setCustomValidity('Pilih waktu mulai untuk mengisi waktu selesai secara otomatis.');
                 start.reportValidity();
+            } else {
+                start.setCustomValidity('');
             }
         });
+        start.addEventListener('change', () => start.setCustomValidity(''));
+        updateStartTimes();
 
         const pendingRating = document.querySelector('[id^="ratingModal"][data-open-on-load="true"]');
         if (pendingRating) {

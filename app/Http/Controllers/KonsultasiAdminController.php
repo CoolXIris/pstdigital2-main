@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\ConsultationHistoryExport;
+use App\Models\ConsultationStaff;
 use App\Models\Meeting;
 use App\Models\ConsultationStaff;
 use App\Models\TelegramBot;
@@ -23,6 +25,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Maatwebsite\Excel\Facades\Excel;
 
 class KonsultasiAdminController extends Controller
 {
@@ -73,6 +76,14 @@ class KonsultasiAdminController extends Controller
         ]);
     }
 
+    public function exportHistory(Request $request)
+    {
+        return Excel::download(
+            new ConsultationHistoryExport(trim((string) $request->query('q', ''))),
+            'riwayat-konsultasi.xlsx'
+        );
+    }
+
     public function updateStatus(Request $request, Meeting $meeting, ConsultationDocumentationService $documentation, ConsultationMeetingNotificationService $notifications, ConsultationGoogleCalendarService $calendar): RedirectResponse
     {
         $validated = $request->validate([
@@ -111,7 +122,7 @@ class KonsultasiAdminController extends Controller
                         ->where('name', $validated['assigned_staff'])
                         ->lockForUpdate()
                         ->first();
-                    if (!$staffMember) {
+                    if (! $staffMember) {
                         throw ValidationException::withMessages(['assigned_staff' => 'Petugas sudah diubah. Muat ulang halaman lalu pilih petugas yang tersedia.']);
                     }
 
@@ -221,7 +232,7 @@ class KonsultasiAdminController extends Controller
             }
 
             $start = Carbon::parse($lockedMeeting->tanggal, 'Asia/Jakarta')->setTimeFromTimeString((string) $lockedMeeting->start_time);
-            if (!$now->lt($start)) {
+            if (! $now->lt($start)) {
                 return 'scheduled_open';
             }
 
@@ -256,7 +267,7 @@ class KonsultasiAdminController extends Controller
 
         DB::transaction(function () use ($meeting, $validated) {
             $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
-            if (!in_array((int) $lockedMeeting->status, [1, 9], true)) {
+            if (! in_array((int) $lockedMeeting->status, [1, 9], true)) {
                 throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat diedit di riwayat.']);
             }
 
@@ -288,16 +299,16 @@ class KonsultasiAdminController extends Controller
 
     public function deleteHistory(Meeting $meeting, ConsultationDocumentationService $documentation): RedirectResponse
     {
-        $documentationPath = null;
-
-        DB::transaction(function () use ($meeting, &$documentationPath) {
+        $documentationPath = DB::transaction(function () use ($meeting): ?string {
             $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
-            if (!in_array((int) $lockedMeeting->status, [1, 9], true)) {
+            if (! in_array((int) $lockedMeeting->status, [1, 9], true)) {
                 throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi yang sudah selesai atau dibatalkan yang dapat dihapus dari riwayat.']);
             }
 
-            $documentationPath = $lockedMeeting->documentation_path;
+            $path = $lockedMeeting->documentation_path;
             $lockedMeeting->delete();
+
+            return $path;
         });
 
         if ($documentationPath) {
@@ -311,7 +322,12 @@ class KonsultasiAdminController extends Controller
         return back()->with('message', 'Riwayat konsultasi beserta data dan dokumentasi terkait berhasil dihapus.');
     }
 
-    public function inviteRoomStaff(Request $request, Meeting $meeting): RedirectResponse|JsonResponse
+    private function isRoomOpen(Meeting $meeting): bool
+    {
+        return $meeting->isRoomOpen();
+    }
+
+    public function inviteRoomStaff(Request $request, Meeting $meeting): RedirectResponse
     {
         abort_unless((int) $meeting->approved_by_user_id === (int) Auth::id(), 403);
         abort_unless((int) $meeting->status === 2 && $meeting->isRoomOpen(), 403, 'Undangan hanya dapat diatur saat ruang konsultasi aktif.');
@@ -852,7 +868,7 @@ class KonsultasiAdminController extends Controller
                 ->where('last_seen_at', '>=', now()->subSeconds(30))->exists(),
             'participant_count' => $activeCount,
             'capacity' => $capacity,
-            'can_join' => $isAuthorized && !$wasKicked && $activeCount < $capacity && (!$participantActive || $sameClient),
+            'can_join' => $isAuthorized && ($sameClient || (!$participantActive && $activeCount < $capacity)),
         ]);
     }
 
