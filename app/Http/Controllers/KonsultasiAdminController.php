@@ -26,7 +26,7 @@ use Illuminate\View\View;
 
 class KonsultasiAdminController extends Controller
 {
-    private const ROOM_PROTOCOL_VERSION = 'sdp-mesh-v5';
+    private const ROOM_PROTOCOL_VERSION = 'sdp-mesh-v6';
 
     public function index(Request $request): View
     {
@@ -311,7 +311,7 @@ class KonsultasiAdminController extends Controller
         return back()->with('message', 'Riwayat konsultasi beserta data dan dokumentasi terkait berhasil dihapus.');
     }
 
-    public function inviteRoomStaff(Request $request, Meeting $meeting): RedirectResponse
+    public function inviteRoomStaff(Request $request, Meeting $meeting): RedirectResponse|JsonResponse
     {
         abort_unless((int) $meeting->approved_by_user_id === (int) Auth::id(), 403);
         abort_unless((int) $meeting->status === 2 && $meeting->isRoomOpen(), 403, 'Undangan hanya dapat diatur saat ruang konsultasi aktif.');
@@ -322,7 +322,7 @@ class KonsultasiAdminController extends Controller
         ]);
         $selectedIds = collect($validated['staff_user_ids'])->map(fn ($id) => (int) $id)->unique();
 
-        DB::transaction(function () use ($meeting, $selectedIds) {
+        $inviteSummary = DB::transaction(function () use ($meeting, $selectedIds) {
             $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
             abort_unless(
                 (int) $lockedMeeting->approved_by_user_id === (int) Auth::id()
@@ -363,7 +363,18 @@ class KonsultasiAdminController extends Controller
                     'updated_at' => now(),
                 ]);
             }
+
+            $invitedUsers = User::query()->whereIn('id', $existingIds->merge($newIds))->orderBy('name')->get(['id', 'name']);
+
+            return [
+                'invited_users' => $invitedUsers->map(fn (User $user) => ['id' => $user->id, 'name' => $user->name])->all(),
+                'capacity' => min(4, 2 + $existingIds->count() + $newIds->count()),
+            ];
         });
+
+        if ($request->expectsJson()) {
+            return response()->json($inviteSummary);
+        }
 
         return back()->with('message', 'Petugas berhasil diundang ke ruang konsultasi.');
     }
@@ -401,11 +412,21 @@ class KonsultasiAdminController extends Controller
     {
         $this->authorizeParticipant($meeting);
         $this->ensureRoomOpen($meeting);
+        abort_if(
+            DB::table('meeting_room_kicks')->where('meeting_id', $meeting->id)->where('user_id', Auth::id())->exists(),
+            403,
+            'Anda telah dikeluarkan dari ruang konsultasi ini.'
+        );
         $clientSessionHash = hash('sha256', session()->getId());
         $lastSignalBeforeJoin = (int) DB::table('meeting_signals')->where('meeting_id', $meeting->id)->max('id');
 
         $sessionId = DB::transaction(function () use ($meeting, $clientSessionHash) {
             $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+            abort_if(
+                DB::table('meeting_room_kicks')->where('meeting_id', $meeting->id)->where('user_id', Auth::id())->exists(),
+                403,
+                'Anda telah dikeluarkan dari ruang konsultasi ini.'
+            );
             $protocolChanged = $lockedMeeting->room_protocol_version !== self::ROOM_PROTOCOL_VERSION;
             if ($protocolChanged) {
                 DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
@@ -473,6 +494,10 @@ class KonsultasiAdminController extends Controller
             'isRequester' => (int) $meeting->user_id === (int) Auth::id(),
             'currentUserId' => (int) Auth::id(),
             'canManageRoomInvites' => (int) $meeting->approved_by_user_id === (int) Auth::id(),
+            'canModerateRoom' => $this->isRoomModerator($meeting, (int) Auth::id()),
+            'roomEndsAt' => Carbon::parse($meeting->tanggal, 'Asia/Jakarta')
+                ->setTimeFromTimeString((string) $meeting->end_time)->toIso8601String(),
+            'roomServerNow' => now('Asia/Jakarta')->toIso8601String(),
             'returnUrl' => Auth::user()->hasRole(['admin', 'super_admin']) ? route('admin.konsultasi') : url('konsultasi'),
             'roomSessionId' => $sessionId,
             'roomLastSignalId' => $lastSignalBeforeJoin,
@@ -486,7 +511,16 @@ class KonsultasiAdminController extends Controller
     public function signals(Request $request, Meeting $meeting): JsonResponse
     {
         $this->authorizeParticipant($meeting);
-        $this->ensureRoomOpen($meeting);
+        if (!$meeting->isRoomOpen()) {
+            if ($request->isMethod('get')) {
+                DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
+                    ->whereNull('left_at')
+                    ->update(['left_at' => now(), 'last_seen_at' => now(), 'updated_at' => now()]);
+
+                return response()->json(['session_ended' => true], 410);
+            }
+            abort_unless($request->input('type') === 'leave', 403, 'Sesi konsultasi telah berakhir.');
+        }
         $this->ensureJoinedRoom($meeting);
 
         if ($request->isMethod('get')) {
@@ -518,7 +552,7 @@ class KonsultasiAdminController extends Controller
             $participants = $this->activeRoomParticipants($meeting);
             $capacity = min(4, 2 + DB::table('meeting_room_invites')->where('meeting_id', $meeting->id)->count());
 
-            return response()->json(['participants' => $participants, 'capacity' => $capacity, 'signals' => $signals->map(fn ($signal) => [
+            return response()->json(['participants' => $participants, 'capacity' => $capacity, 'server_now' => now('Asia/Jakarta')->toIso8601String(), 'signals' => $signals->map(fn ($signal) => [
                 'id' => $signal->id,
                 'sender_user_id' => (int) $signal->sender_user_id,
                 'recipient_user_id' => $signal->recipient_user_id ? (int) $signal->recipient_user_id : null,
@@ -527,12 +561,16 @@ class KonsultasiAdminController extends Controller
             ])]);
         }
 
-        $validated = $request->validate([
-            'type' => ['required', Rule::in(['description', 'candidate', 'media-state', 'leave'])],
+        $signalRules = [
+            'type' => ['required', Rule::in(['description', 'candidate', 'media-state', 'moderation', 'leave'])],
             'payload' => ['required_unless:type,leave', 'nullable', 'array'],
             'session_id' => ['required', 'uuid'],
             'recipient_user_id' => ['required_unless:type,leave', 'nullable', 'integer', 'exists:users,id'],
-        ]);
+        ];
+        if ($request->input('type') === 'moderation') {
+            $signalRules['payload.action'] = ['required', Rule::in(['request-camera', 'request-mic', 'mute-mic', 'kick'])];
+        }
+        $validated = $request->validate($signalRules);
         abort_unless(hash_equals((string) $meeting->room_session_id, $validated['session_id']), 409, 'Sesi ruang telah diperbarui. Muat ulang halaman meeting.');
         if ($validated['type'] === 'leave') {
             $notifiedParticipants = DB::transaction(function () use ($meeting, $validated) {
@@ -566,6 +604,64 @@ class KonsultasiAdminController extends Controller
             });
 
             return response()->json(['left' => true, 'notified_participants' => $notifiedParticipants]);
+        }
+        if ($validated['type'] === 'moderation') {
+            abort_unless($this->isRoomModerator($meeting, (int) Auth::id()), 403, 'Hanya petugas ruang yang dapat mengelola peserta.');
+            abort_unless((int) $validated['recipient_user_id'] !== (int) Auth::id(), 422, 'Petugas tidak dapat menerapkan tindakan ini kepada dirinya sendiri.');
+
+            $action = $validated['payload']['action'];
+            $now = now();
+            $activeParticipant = DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
+                ->where('user_id', $validated['recipient_user_id'])->whereNull('left_at')
+                ->where('last_seen_at', '>=', $now->copy()->subSeconds(30))->exists();
+            abort_unless($activeParticipant, 409, 'Peserta tujuan sudah keluar dari ruang.');
+
+            if ($action === 'kick') {
+                DB::transaction(function () use ($meeting, $validated, $now) {
+                    Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
+                    DB::table('meeting_room_kicks')->insertOrIgnore([
+                        'meeting_id' => $meeting->id,
+                        'user_id' => $validated['recipient_user_id'],
+                        'kicked_by_user_id' => Auth::id(),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                    DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
+                        ->where('user_id', $validated['recipient_user_id'])->whereNull('left_at')
+                        ->update(['left_at' => $now, 'last_seen_at' => $now, 'updated_at' => $now]);
+
+                    $remainingParticipantIds = DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
+                        ->where('user_id', '!=', $validated['recipient_user_id'])->whereNull('left_at')
+                        ->where('last_seen_at', '>=', $now->copy()->subSeconds(30))->pluck('user_id');
+                    foreach ($remainingParticipantIds as $recipientUserId) {
+                        DB::table('meeting_signals')->insert([
+                            'meeting_id' => $meeting->id,
+                            'session_id' => $validated['session_id'],
+                            'sender_user_id' => $validated['recipient_user_id'],
+                            'recipient_user_id' => $recipientUserId,
+                            'signal_type' => 'leave',
+                            'payload' => json_encode([]),
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+                    }
+                });
+
+                return response()->json(['kicked' => true]);
+            }
+
+            DB::table('meeting_signals')->insert([
+                'meeting_id' => $meeting->id,
+                'session_id' => $validated['session_id'],
+                'sender_user_id' => Auth::id(),
+                'recipient_user_id' => $validated['recipient_user_id'],
+                'signal_type' => 'moderation',
+                'payload' => json_encode($validated['payload']),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+            return response()->json(['accepted' => true], 201);
         }
         abort_unless(
             DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
@@ -747,6 +843,8 @@ class KonsultasiAdminController extends Controller
             ->count();
         $capacity = min(4, 2 + DB::table('meeting_room_invites')->where('meeting_id', $meeting->id)->count());
         $isAuthorized = $this->isAuthorizedRoomMember($meeting, (int) Auth::id());
+        $wasKicked = DB::table('meeting_room_kicks')->where('meeting_id', $meeting->id)
+            ->where('user_id', Auth::id())->exists();
 
         return response()->json([
             'peer_present' => DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
@@ -754,7 +852,7 @@ class KonsultasiAdminController extends Controller
                 ->where('last_seen_at', '>=', now()->subSeconds(30))->exists(),
             'participant_count' => $activeCount,
             'capacity' => $capacity,
-            'can_join' => $isAuthorized && $activeCount < $capacity && (!$participantActive || $sameClient),
+            'can_join' => $isAuthorized && !$wasKicked && $activeCount < $capacity && (!$participantActive || $sameClient),
         ]);
     }
 
@@ -787,6 +885,17 @@ class KonsultasiAdminController extends Controller
     private function authorizeParticipant(Meeting $meeting): void
     {
         abort_unless($this->isAuthorizedRoomMember($meeting, (int) Auth::id()), 403);
+    }
+
+    private function isRoomModerator(Meeting $meeting, int $userId): bool
+    {
+        $user = User::find($userId);
+        if (!$user?->hasRole(['admin', 'super_admin'])) {
+            return false;
+        }
+
+        return (int) $meeting->approved_by_user_id === $userId
+            || DB::table('meeting_room_invites')->where('meeting_id', $meeting->id)->where('user_id', $userId)->exists();
     }
 
     private function isAuthorizedRoomMember(Meeting $meeting, int $userId): bool
@@ -829,10 +938,11 @@ class KonsultasiAdminController extends Controller
             ->whereNull('meeting_room_participants.left_at')
             ->where('meeting_room_participants.last_seen_at', '>=', now()->subSeconds(30))
             ->orderBy('meeting_room_participants.joined_at')
-            ->get(['users.id', 'users.name'])
+            ->get(['users.id', 'users.name', 'users.picture'])
             ->map(fn ($participant) => [
                 'id' => (int) $participant->id,
                 'name' => $participant->name,
+                'picture' => $participant->picture,
                 'is_requester' => (int) $participant->id === (int) $meeting->user_id,
             ])
             ->all();

@@ -7,13 +7,24 @@
     const screenStage = document.getElementById('room-screen-stage');
     const screenVideo = document.getElementById('room-screen-video');
     const screenLabel = document.getElementById('room-screen-label');
+    const pinnedStage = document.getElementById('room-pinned-stage');
+    const pinnedVideo = document.getElementById('room-pinned-video');
+    const pinnedLabel = document.getElementById('room-pinned-label');
+    const unpinCameraButton = document.getElementById('room-unpin-camera');
+    const pinnedAvatar = document.getElementById('room-pinned-avatar');
     const status = document.getElementById('room-status');
     const countLabel = document.getElementById('room-participant-count');
     const placeholder = document.getElementById('remote-placeholder');
+    const moderationNotice = document.getElementById('room-moderation-notice');
+    const endingNotice = document.getElementById('room-ending-notice');
+    const endingCountdown = document.getElementById('room-ending-countdown');
     const localVideo = document.createElement('video');
     const requester = room.dataset.isRequester === 'true';
+    const canModerate = room.dataset.canModerate === 'true';
     const currentUserId = Number(room.dataset.currentUserId);
     const roomSession = room.dataset.roomSession;
+    const roomEndsAt = new Date(room.dataset.roomEndsAt).getTime();
+    let serverTimeOffset = new Date(room.dataset.roomServerNow).getTime() - Date.now();
     let roomCapacity = Number(room.dataset.roomCapacity || 2);
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
     const iceServers = JSON.parse(room.dataset.iceServers || '[]');
@@ -38,6 +49,66 @@
     localTile.append(localLabel);
     cameraStrip.insertBefore(localTile, placeholder);
 
+    const createMediaIndicators = (tile) => {
+        const indicators = document.createElement('div');
+        indicators.className = 'portal-room-media-indicators';
+        indicators.setAttribute('aria-label', 'Status mikrofon dan kamera');
+        const controls = {};
+        for (const [kind, icon, label] of [
+            ['audio', 'bi-mic-fill', 'Mikrofon'],
+            ['video', 'bi-camera-video-fill', 'Kamera']
+        ]) {
+            const indicator = document.createElement('span');
+            indicator.className = 'portal-room-media-indicator';
+            indicator.dataset.mediaKind = kind;
+            indicator.dataset.enabled = 'false';
+            indicator.setAttribute('role', 'img');
+            indicator.setAttribute('aria-label', `${label} mati`);
+            indicator.title = `${label} mati`;
+            const glyph = document.createElement('i');
+            glyph.className = `bi ${icon}`;
+            indicator.append(glyph);
+            indicators.append(indicator);
+            controls[kind] = indicator;
+        }
+        tile.append(indicators);
+        return controls;
+    };
+
+    const localMediaIndicators = createMediaIndicators(localTile);
+    const renderAvatarContent = (avatar, participant) => {
+        avatar.replaceChildren();
+        avatar.dataset.participantId = String(participant.id || '');
+        avatar.hidden = false;
+        const initials = (participant.name || '?').trim().charAt(0).toUpperCase() || '?';
+        if (participant.picture) {
+            const image = document.createElement('img');
+            image.src = participant.picture;
+            image.alt = '';
+            image.referrerPolicy = 'no-referrer';
+            image.addEventListener('error', () => {
+                image.remove();
+                avatar.textContent = initials;
+            }, { once: true });
+            avatar.append(image);
+        } else {
+            avatar.textContent = initials;
+        }
+    };
+    const createCameraOffAvatar = (tile, participant) => {
+        const avatar = document.createElement('div');
+        avatar.className = 'portal-room-camera-off';
+        avatar.hidden = true;
+        renderAvatarContent(avatar, participant);
+        avatar.hidden = true;
+        tile.append(avatar);
+        return avatar;
+    };
+    const localAvatar = createCameraOffAvatar(localTile, {
+        id: currentUserId,
+        name: room.dataset.currentUserName,
+        picture: room.dataset.currentUserPicture
+    });
     let localStream;
     let screenStream;
     let screenQualityTimer = null;
@@ -47,6 +118,10 @@
     let goodNetworkSamples = 0;
     let lastSignal = Number(room.dataset.lastSignalId || 0);
     let polling = true;
+    let roomEnding = false;
+    let pinnedParticipantId = null;
+    let moderationNoticeTimer = null;
+    let roomEndTimer = null;
     const peers = new Map();
     const screenQualitySelect = document.getElementById('screen-share-quality');
     const screenQualityStatus = document.getElementById('screen-share-quality-status');
@@ -147,11 +222,12 @@
         }
     };
 
-    const sendSignal = async (type, payload, recipientUserId = null) => {
+    const sendSignal = async (type, payload, recipientUserId = null, options = {}) => {
         const response = await fetch(room.dataset.signalsUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
-            body: JSON.stringify({ type, payload, session_id: roomSession, recipient_user_id: recipientUserId })
+            body: JSON.stringify({ type, payload, session_id: roomSession, recipient_user_id: recipientUserId }),
+            signal: options.signal
         });
         if (!response.ok) {
             const result = await response.json().catch(() => ({}));
@@ -167,38 +243,240 @@
         }
     }));
 
+    const getLocalDeviceState = () => ({
+        audio: Boolean(localStream?.getAudioTracks().some((track) => track.readyState === 'live' && track.enabled)),
+        video: Boolean(localStream?.getVideoTracks().some((track) => track.readyState === 'live' && track.enabled))
+    });
+
+    const updateMediaIndicators = (indicators, state) => {
+        for (const kind of ['audio', 'video']) {
+            const enabled = Boolean(state[kind]);
+            const indicator = indicators[kind];
+            const label = kind === 'audio' ? 'Mikrofon' : 'Kamera';
+            indicator.dataset.enabled = enabled ? 'true' : 'false';
+            indicator.setAttribute('aria-label', `${label} ${enabled ? 'aktif' : 'mati'}`);
+            indicator.title = `${label} ${enabled ? 'aktif' : 'mati'}`;
+            indicator.firstElementChild.className = `bi ${kind === 'audio'
+                ? (enabled ? 'bi-mic-fill' : 'bi-mic-mute-fill')
+                : (enabled ? 'bi-camera-video-fill' : 'bi-camera-video-off-fill')}`;
+        }
+    };
+
+    const updateCameraAvatar = (avatar, enabled) => {
+        avatar.hidden = enabled;
+    };
+
+    const publishDeviceState = async (recipientUserId = null) => {
+        const state = getLocalDeviceState();
+        updateMediaIndicators(localMediaIndicators, state);
+        const recipients = recipientUserId === null ? [...peers.keys()] : [recipientUserId];
+        await Promise.all(recipients.map(async (id) => {
+            try {
+                await sendSignal('media-state', { source: 'devices', ...state }, id);
+            } catch (error) {
+                status.textContent = `Status mic/kamera tidak tersinkron: ${error.message}`;
+            }
+        }));
+    };
+
+    const updateMediaControl = (kind, enabled) => {
+        const button = document.getElementById(kind === 'audio' ? 'toggle-mic' : 'toggle-camera');
+        button.classList.toggle('is-muted', !enabled);
+        button.setAttribute('aria-label', `${enabled ? 'Matikan' : 'Nyalakan'} ${kind === 'audio' ? 'mikrofon' : 'kamera'}`);
+        if (kind === 'video') updateCameraAvatar(localAvatar, enabled);
+        publishDeviceState();
+    };
+
+    const monitorLocalTrack = (track) => {
+        track.addEventListener('ended', () => {
+            updateMediaControl(track.kind, false);
+        }, { once: true });
+    };
+
+    const enableLocalMedia = async (kind) => {
+        let track = localStream?.getTracks().find((item) => item.kind === kind && item.readyState === 'live');
+        if (!track) {
+            const captured = await navigator.mediaDevices.getUserMedia(kind === 'audio'
+                ? { audio: true, video: false }
+                : { audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } } });
+            track = captured.getTracks().find((item) => item.kind === kind);
+            if (!track) {
+                captured.getTracks().forEach((item) => item.stop());
+                throw new Error('Perangkat media tidak menghasilkan track yang diminta.');
+            }
+            if (!localStream) localStream = new MediaStream();
+            localStream.addTrack(track);
+            monitorLocalTrack(track);
+            localVideo.srcObject = localStream;
+            for (const peer of peers.values()) {
+                const senderKey = kind === 'audio' ? 'audioSender' : 'videoSender';
+                const transceiverKey = kind === 'audio' ? 'audioTransceiver' : 'videoTransceiver';
+                let sender = peer[senderKey];
+                let transceiver = peer[transceiverKey]
+                    || peer.connection.getTransceivers().find((item) => item.sender === sender);
+                if (!sender) {
+                    sender = peer.connection.addTrack(track, localStream);
+                    peer[senderKey] = sender;
+                } else {
+                    await sender.replaceTrack(track);
+                }
+                if (transceiver?.direction === 'recvonly') transceiver.direction = 'sendrecv';
+                peer[transceiverKey] = transceiver || null;
+                requestNegotiation(peer);
+            }
+        }
+        track.enabled = true;
+        updateMediaControl(kind, true);
+    };
+
+    const showModerationNotice = (message, actionLabel, onAction) => {
+        if (moderationNoticeTimer) window.clearTimeout(moderationNoticeTimer);
+        moderationNotice.replaceChildren();
+        const text = document.createElement('span');
+        text.textContent = message;
+        moderationNotice.append(text);
+        if (actionLabel && onAction) {
+            const acceptButton = document.createElement('button');
+            acceptButton.type = 'button';
+            acceptButton.textContent = actionLabel;
+            acceptButton.addEventListener('click', async () => {
+                acceptButton.disabled = true;
+                try {
+                    await onAction();
+                    moderationNotice.hidden = true;
+                } catch (error) {
+                    text.textContent = `${message} (${error.message})`;
+                    acceptButton.disabled = false;
+                }
+            }, { once: true });
+            moderationNotice.append(acceptButton);
+        }
+        const dismissButton = document.createElement('button');
+        dismissButton.type = 'button';
+        dismissButton.textContent = 'Tutup';
+        dismissButton.addEventListener('click', () => { moderationNotice.hidden = true; });
+        moderationNotice.append(dismissButton);
+        moderationNotice.hidden = false;
+        moderationNoticeTimer = window.setTimeout(() => { moderationNotice.hidden = true; }, 20000);
+    };
+
+    const requestParticipantAction = async (participant, action) => {
+        if (!canModerate) return;
+        if (action === 'kick' && !window.confirm(`Keluarkan ${participant.name} dari ruang sampai sesi berakhir?`)) return;
+        try {
+            await sendSignal('moderation', { action }, Number(participant.id));
+            if (action === 'kick') status.textContent = `${participant.name} dikeluarkan dari ruang.`;
+        } catch (error) {
+            status.textContent = `Tindakan peserta gagal: ${error.message}`;
+        }
+    };
+
     const createTile = (participant) => {
         const tile = document.createElement('article');
         tile.className = 'portal-room-tile';
         tile.dataset.participantId = String(participant.id);
+        const cameraAvatar = createCameraOffAvatar(tile, participant);
+        const mediaIndicators = createMediaIndicators(tile);
+        updateMediaIndicators(mediaIndicators, { audio: false, video: false });
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
         tile.append(video);
+        const actions = document.createElement('details');
+        actions.className = 'portal-room-tile-actions';
+        const menuToggle = document.createElement('summary');
+        menuToggle.textContent = 'Opsi';
+        menuToggle.setAttribute('aria-label', `Opsi kamera ${participant.name}`);
+        actions.append(menuToggle);
+        const actionList = document.createElement('div');
+        actionList.className = 'portal-room-tile-options';
+        const pinButton = document.createElement('button');
+        pinButton.type = 'button';
+        pinButton.textContent = 'Sematkan';
+        pinButton.setAttribute('aria-label', `Sematkan kamera ${participant.name}`);
+        pinButton.addEventListener('click', () => {
+            pinnedParticipantId = pinnedParticipantId === Number(participant.id) ? null : Number(participant.id);
+            actions.open = false;
+            updateScreenLayout();
+        });
+        actionList.append(pinButton);
+        if (canModerate) {
+            const controls = [
+                ['request-camera', 'Minta kamera'],
+                ['request-mic', 'Minta mikrofon'],
+                ['mute-mic', 'Bisukan mikrofon'],
+                ['kick', 'Keluarkan']
+            ];
+            for (const [action, label] of controls) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = label;
+                button.title = `${label} ${participant.name}`;
+                if (action === 'kick') button.classList.add('is-danger');
+                button.addEventListener('click', async () => {
+                    await requestParticipantAction(participant, action);
+                    actions.open = false;
+                });
+                actionList.append(button);
+            }
+        }
+        actions.append(actionList);
+        tile.append(actions);
         const label = document.createElement('span');
         label.textContent = `${participant.name}${participant.is_requester ? ' · Pemohon' : ' · Petugas'}`;
         tile.append(label);
         cameraStrip.insertBefore(tile, placeholder);
-        return { tile, video };
+        return { tile, video, pinButton, mediaIndicators, cameraAvatar };
     };
 
     const updateScreenLayout = () => {
         const activeSharer = [...peers.values()].find((peer) => peer.screenStream);
         const localSharing = Boolean(screenStream);
         const sharing = localSharing || Boolean(activeSharer);
+        const pinnedPeer = pinnedParticipantId === null ? null : peers.get(pinnedParticipantId);
+        const pinnedCamera = !sharing && pinnedPeer;
         gallery.classList.toggle('has-screen-share', sharing);
+        gallery.classList.toggle('has-pinned-camera', Boolean(pinnedCamera));
+        gallery.classList.toggle('has-feature-stage', sharing || Boolean(pinnedCamera));
         screenStage.hidden = !sharing;
-        if (localSharing) {
-            screenVideo.srcObject = screenStream;
-            screenLabel.textContent = 'Berbagi layar · Anda';
-        } else if (activeSharer) {
-            screenVideo.srcObject = activeSharer.screenStream;
-            screenLabel.textContent = `Berbagi layar · ${activeSharer.name}`;
+        pinnedStage.hidden = !pinnedCamera;
+        const screenSource = localSharing ? screenStream : activeSharer?.screenStream || null;
+        if (screenSource) {
+            if (screenVideo.srcObject !== screenSource) screenVideo.srcObject = screenSource;
+            screenLabel.textContent = localSharing
+                ? 'Berbagi layar · Anda'
+                : `Berbagi layar · ${activeSharer.name}`;
         } else {
-            screenVideo.srcObject = null;
+            if (screenVideo.srcObject) screenVideo.srcObject = null;
             screenLabel.textContent = '';
         }
+        if (pinnedCamera) {
+            if (pinnedVideo.srcObject !== pinnedPeer.cameraStream) pinnedVideo.srcObject = pinnedPeer.cameraStream;
+            pinnedLabel.textContent = `Disematkan · ${pinnedPeer.name}`;
+            if (pinnedAvatar.dataset.participantId !== String(pinnedPeer.id)) {
+                renderAvatarContent(pinnedAvatar, {
+                    id: pinnedPeer.id,
+                    name: pinnedPeer.name,
+                    picture: pinnedPeer.picture
+                });
+            }
+            pinnedAvatar.hidden = Boolean(pinnedPeer.deviceState.video);
+        } else {
+            if (pinnedVideo.srcObject) pinnedVideo.srcObject = null;
+            pinnedLabel.textContent = '';
+            pinnedAvatar.hidden = true;
+        }
+        for (const [id, peer] of peers) {
+            peer.tile.classList.toggle('is-pinned', id === pinnedParticipantId);
+            peer.pinButton.classList.toggle('is-active', id === pinnedParticipantId);
+            peer.pinButton.textContent = id === pinnedParticipantId ? 'Lepas sematan' : 'Sematkan';
+            peer.pinButton.setAttribute('aria-pressed', id === pinnedParticipantId ? 'true' : 'false');
+        }
     };
+    unpinCameraButton.addEventListener('click', () => {
+        pinnedParticipantId = null;
+        updateScreenLayout();
+    });
 
     const setRoomStatus = () => {
         const connectedCount = [...peers.values()].filter((peer) => peer.connection.connectionState === 'connected').length;
@@ -251,16 +529,24 @@
     const createPeer = (participant) => {
         const id = Number(participant.id);
         const connection = new RTCPeerConnection({ iceServers, iceCandidatePoolSize: 2, bundlePolicy: 'max-bundle' });
-        const { tile, video } = createTile(participant);
+        const { tile, video, pinButton, mediaIndicators, cameraAvatar } = createTile(participant);
         const remoteStream = new MediaStream();
         const audioTrack = localStream?.getAudioTracks()[0];
         const videoTrack = localStream?.getVideoTracks()[0] || null;
         let audioSender = null;
+        let audioTransceiver = null;
         let videoSender = null;
+        let videoTransceiver = null;
         if (audioTrack) audioSender = connection.addTrack(audioTrack, localStream);
-        else connection.addTransceiver('audio', { direction: 'recvonly' });
+        else {
+            audioTransceiver = connection.addTransceiver('audio', { direction: 'recvonly' });
+            audioSender = audioTransceiver.sender;
+        }
         if (videoTrack) videoSender = connection.addTrack(videoTrack, localStream);
-        else videoSender = connection.addTransceiver('video', { direction: 'sendrecv' }).sender;
+        else {
+            videoTransceiver = connection.addTransceiver('video', { direction: 'sendrecv' });
+            videoSender = videoTransceiver.sender;
+        }
         const activeScreenTrack = screenStream?.getVideoTracks()[0] || null;
         const screenSender = activeScreenTrack ? connection.addTrack(activeScreenTrack, screenStream) : null;
 
@@ -270,8 +556,15 @@
             connection,
             tile,
             video,
+            pinButton,
+            mediaIndicators,
+            cameraAvatar,
+            picture: participant.picture,
+            deviceState: { audio: false, video: false },
             audioSender,
+            audioTransceiver,
             videoSender,
+            videoTransceiver,
             screenStream: null,
             screenSender,
             screenStreamId: null,
@@ -292,6 +585,7 @@
             iceRestarts: 0
         };
         peers.set(id, peer);
+        publishDeviceState(id);
         connection.onnegotiationneeded = () => {
             if (!peer.initialized && !peer.screenSender) return;
             requestNegotiation(peer);
@@ -312,7 +606,7 @@
                 peer.screenStream = new MediaStream([event.track]);
             } else if (event.track.kind === 'video') {
                 peer.cameraStream = incomingStream || new MediaStream([event.track]);
-                video.srcObject = peer.cameraStream;
+                if (video.srcObject !== peer.cameraStream) video.srcObject = peer.cameraStream;
             } else if (!remoteStream.getTracks().some((track) => track.id === event.track.id)) {
                 remoteStream.addTrack(event.track);
                 if (!video.srcObject) video.srcObject = remoteStream;
@@ -358,6 +652,7 @@
             peer.connection.close();
             peer.tile.remove();
             peers.delete(id);
+            if (pinnedParticipantId === id) pinnedParticipantId = null;
         }
         setRoomStatus();
     };
@@ -369,7 +664,32 @@
             peer.connection.close();
             peer.tile.remove();
             peers.delete(peer.id);
+            if (pinnedParticipantId === peer.id) pinnedParticipantId = null;
             setRoomStatus();
+            return;
+        }
+        if (signal.type === 'moderation') {
+            const action = signal.payload?.action;
+            if (action === 'request-camera') {
+                showModerationNotice(`${peer.name} meminta Anda menyalakan kamera.`, 'Nyalakan kamera', () => enableLocalMedia('video'));
+            } else if (action === 'request-mic') {
+                showModerationNotice(`${peer.name} meminta Anda menyalakan mikrofon.`, 'Nyalakan mikrofon', () => enableLocalMedia('audio'));
+            } else if (action === 'mute-mic') {
+                const audioTrack = localStream?.getAudioTracks().find((track) => track.readyState === 'live');
+                if (audioTrack) audioTrack.enabled = false;
+                updateMediaControl('audio', false);
+                showModerationNotice(`${peer.name} membisukan mikrofon Anda. Anda dapat menyalakannya kembali kapan saja.`);
+            }
+            return;
+        }
+        if (signal.type === 'media-state' && signal.payload?.source === 'devices') {
+            peer.deviceState = {
+                audio: Boolean(signal.payload.audio),
+                video: Boolean(signal.payload.video)
+            };
+            updateMediaIndicators(peer.mediaIndicators, peer.deviceState);
+            updateCameraAvatar(peer.cameraAvatar, peer.deviceState.video);
+            if (pinnedParticipantId === peer.id) pinnedAvatar.hidden = peer.deviceState.video;
             return;
         }
         const connection = peer.connection;
@@ -430,6 +750,29 @@
         }
     };
 
+    const finishRoom = async (reason) => {
+        if (roomEnding) return;
+        roomEnding = true;
+        polling = false;
+        status.textContent = reason;
+        if (screenQualityTimer) window.clearInterval(screenQualityTimer);
+        if (roomEndTimer) window.clearInterval(roomEndTimer);
+        if (moderationNoticeTimer) window.clearTimeout(moderationNoticeTimer);
+        const leaveController = new AbortController();
+        const leaveTimeout = window.setTimeout(() => leaveController.abort(), 1500);
+        try {
+            await sendSignal('leave', null, null, { signal: leaveController.signal });
+        } catch {
+            // The server may already have expired or removed this participant's lease.
+        } finally {
+            window.clearTimeout(leaveTimeout);
+        }
+        localStream?.getTracks().forEach((track) => track.stop());
+        screenStream?.getTracks().forEach((track) => track.stop());
+        for (const peer of peers.values()) peer.connection.close();
+        window.location.assign(room.dataset.returnUrl);
+    };
+
     const consumeSignals = async () => {
         while (polling) {
             try {
@@ -443,12 +786,21 @@
                     window.setTimeout(() => window.location.reload(), 500);
                     break;
                 }
+                if (response.status === 410) {
+                    await finishRoom('Sesi konsultasi telah berakhir.');
+                    break;
+                }
+                if (response.status === 403) {
+                    await finishRoom('Anda sudah tidak berada di ruang konsultasi.');
+                    break;
+                }
                 if (!response.ok) {
                     polling = false;
                     status.textContent = 'Sesi konsultasi telah berakhir.';
                     break;
                 }
                 const result = await response.json();
+                if (result.server_now) serverTimeOffset = new Date(result.server_now).getTime() - Date.now();
                 roomCapacity = Number(result.capacity || roomCapacity);
                 reconcileParticipants(result.participants || []);
                 for (const signal of result.signals || []) {
@@ -467,6 +819,7 @@
     };
 
     const startRoom = async () => {
+        if (roomEnding) return;
         if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
             status.textContent = 'Browser ini tidak mendukung WebRTC.';
             return;
@@ -480,25 +833,47 @@
             navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } } })
         ]);
         const tracks = mediaParts.flatMap((result) => result.status === 'fulfilled' ? result.value.getTracks() : []);
+        if (roomEnding) {
+            tracks.forEach((track) => track.stop());
+            return;
+        }
         localStream = new MediaStream(tracks);
+        localStream.getTracks().forEach(monitorLocalTrack);
         localVideo.srcObject = localStream;
+        const deviceState = getLocalDeviceState();
+        updateMediaIndicators(localMediaIndicators, deviceState);
+        updateCameraAvatar(localAvatar, deviceState.video);
+        updateMediaControl('audio', deviceState.audio);
+        updateMediaControl('video', deviceState.video);
         if (!localStream.getTracks().length) status.textContent = 'Kamera dan mikrofon tidak tersedia; bergabung dalam mode dengar.';
         consumeSignals();
     };
 
-    document.getElementById('toggle-mic').addEventListener('click', (event) => {
-        const track = localStream?.getAudioTracks()[0];
-        if (!track) return;
-        track.enabled = !track.enabled;
-        event.currentTarget.classList.toggle('is-muted', !track.enabled);
-        event.currentTarget.setAttribute('aria-label', track.enabled ? 'Matikan mikrofon' : 'Nyalakan mikrofon');
+    document.getElementById('toggle-mic').addEventListener('click', async () => {
+        const track = localStream?.getAudioTracks().find((item) => item.readyState === 'live');
+        try {
+            if (!track) {
+                await enableLocalMedia('audio');
+                return;
+            }
+            track.enabled = !track.enabled;
+            updateMediaControl('audio', track.enabled);
+        } catch (error) {
+            status.textContent = `Mikrofon tidak dapat diaktifkan: ${error.message}`;
+        }
     });
-    document.getElementById('toggle-camera').addEventListener('click', (event) => {
-        const track = localStream?.getVideoTracks()[0];
-        if (!track) return;
-        track.enabled = !track.enabled;
-        event.currentTarget.classList.toggle('is-muted', !track.enabled);
-        event.currentTarget.setAttribute('aria-label', track.enabled ? 'Matikan kamera' : 'Nyalakan kamera');
+    document.getElementById('toggle-camera').addEventListener('click', async () => {
+        const track = localStream?.getVideoTracks().find((item) => item.readyState === 'live');
+        try {
+            if (!track) {
+                await enableLocalMedia('video');
+                return;
+            }
+            track.enabled = !track.enabled;
+            updateMediaControl('video', track.enabled);
+        } catch (error) {
+            status.textContent = `Kamera tidak dapat diaktifkan: ${error.message}`;
+        }
     });
 
     const stopScreenShare = async () => {
@@ -560,22 +935,75 @@
         await applyScreenQuality();
     });
     const inviteForm = document.querySelector('[data-room-invite-form]');
-    inviteForm?.addEventListener('submit', (event) => {
+    inviteForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
         const selectedCount = inviteForm.querySelectorAll('input[name="staff_user_ids[]"]:checked').length;
         const limit = Number(inviteForm.dataset.maxInvites);
-        let error = inviteForm.querySelector('[data-invite-client-error]');
-        if (!error) {
-            error = document.createElement('small');
-            error.className = 'text-danger';
-            error.dataset.inviteClientError = '';
-            error.setAttribute('role', 'alert');
-            inviteForm.prepend(error);
-        }
+        const inviteStatus = inviteForm.querySelector('[data-room-invite-status]');
         if (selectedCount < 1 || selectedCount > limit) {
-            event.preventDefault();
-            error.textContent = `Pilih antara 1 hingga ${limit} petugas tambahan.`;
-        } else {
-            error.remove();
+            inviteStatus.className = 'text-danger';
+            inviteStatus.textContent = `Pilih antara 1 hingga ${limit} petugas tambahan.`;
+            return;
+        }
+        const submitButton = inviteForm.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+        inviteStatus.className = '';
+        inviteStatus.textContent = 'Menyimpan undangan...';
+        try {
+            const response = await fetch(inviteForm.action, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: new FormData(inviteForm)
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                const message = result.errors?.staff_user_ids?.[0]
+                    || result.message
+                    || 'Undangan petugas gagal disimpan.';
+                throw new Error(message);
+            }
+
+            const invitedList = document.querySelector('[data-room-invited-list]');
+            invitedList.replaceChildren();
+            if (result.invited_users.length) {
+                const heading = document.createElement('strong');
+                heading.textContent = 'Petugas yang diundang:';
+                invitedList.append(heading);
+                for (const invitedUser of result.invited_users) {
+                    const name = document.createElement('span');
+                    name.textContent = invitedUser.name;
+                    invitedList.append(name);
+                }
+                invitedList.hidden = false;
+            } else {
+                invitedList.hidden = true;
+            }
+            for (const checkbox of inviteForm.querySelectorAll('input[name="staff_user_ids[]"]:checked')) {
+                checkbox.closest('label').remove();
+            }
+            inviteForm.dataset.totalInvites = String(result.invited_users.length);
+            inviteForm.dataset.maxInvites = String(Math.max(0, 2 - result.invited_users.length));
+            roomCapacity = Number(result.capacity);
+            room.dataset.roomCapacity = String(roomCapacity);
+            setRoomStatus();
+            if (Number(inviteForm.dataset.maxInvites) === 0) {
+                inviteForm.remove();
+                const capacityNotice = document.createElement('small');
+                capacityNotice.dataset.roomInviteCapacity = '';
+                capacityNotice.textContent = 'Batas dua petugas tambahan sudah tercapai.';
+                document.querySelector('.portal-room-invite').append(capacityNotice);
+            } else if (!inviteForm.querySelector('input[name="staff_user_ids[]"]')) {
+                inviteForm.remove();
+                const availabilityNotice = document.createElement('small');
+                availabilityNotice.textContent = 'Tidak ada akun petugas lain yang tersedia.';
+                document.querySelector('.portal-room-invite').append(availabilityNotice);
+            }
+            inviteStatus.className = 'text-success';
+            inviteStatus.textContent = 'Petugas berhasil diundang tanpa memutus koneksi ruang.';
+        } catch (error) {
+            inviteStatus.className = 'text-danger';
+            inviteStatus.textContent = error.message;
+            submitButton.disabled = false;
         }
     });
     document.getElementById('toggle-fullscreen').addEventListener('click', async () => {
@@ -586,23 +1014,33 @@
             status.textContent = 'Mode layar penuh tidak tersedia pada browser ini.';
         }
     });
-    document.getElementById('leave-room').addEventListener('click', async () => {
-        polling = false;
-        if (screenQualityTimer) window.clearInterval(screenQualityTimer);
-        await sendSignal('leave', null).catch(() => {});
-        localStream?.getTracks().forEach((track) => track.stop());
-        screenStream?.getTracks().forEach((track) => track.stop());
-        for (const peer of peers.values()) peer.connection.close();
-        window.location.assign(room.dataset.returnUrl);
-    });
+    document.getElementById('leave-room').addEventListener('click', () => finishRoom('Anda keluar dari ruang konsultasi.'));
     window.addEventListener('beforeunload', () => {
         polling = false;
         localStream?.getTracks().forEach((track) => track.stop());
         screenStream?.getTracks().forEach((track) => track.stop());
         if (screenQualityTimer) window.clearInterval(screenQualityTimer);
+        if (roomEndTimer) window.clearInterval(roomEndTimer);
         for (const peer of peers.values()) peer.connection.close();
     });
 
+    const updateRoomEndCountdown = () => {
+        const remaining = roomEndsAt - (Date.now() + serverTimeOffset);
+        if (remaining <= 0) {
+            finishRoom('Waktu konsultasi telah berakhir.');
+            return;
+        }
+        if (remaining <= 5 * 60 * 1000) {
+            endingNotice.hidden = false;
+            const totalSeconds = Math.ceil(remaining / 1000);
+            const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+            endingCountdown.textContent = `${minutes}:${seconds}`;
+        }
+    };
+
+    updateRoomEndCountdown();
+    roomEndTimer = window.setInterval(updateRoomEndCountdown, 1000);
     updateScreenQualityLabel();
     startRoom().catch((error) => { status.textContent = `Gagal bergabung: ${error.message}`; });
 })();

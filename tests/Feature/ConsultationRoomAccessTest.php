@@ -42,9 +42,59 @@ class ConsultationRoomAccessTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $this->actingAs($approver)->get(route('konsultasi.room', $meeting))->assertOk();
-        $this->actingAs($invited)->get(route('konsultasi.room', $meeting))->assertOk();
+        $this->actingAs($approver)->get(route('konsultasi.room', $meeting))
+            ->assertOk()->assertSee('data-can-moderate="true"', false);
+        $this->actingAs($invited)->get(route('konsultasi.room', $meeting))
+            ->assertOk()->assertSee('data-can-moderate="true"', false);
+        $this->actingAs(User::findOrFail($meeting->user_id))->get(route('konsultasi.room', $meeting))
+            ->assertOk()->assertSee('data-can-moderate="false"', false);
         $this->actingAs($otherAdmin)->get(route('konsultasi.room', $meeting))->assertForbidden();
+    }
+
+    public function test_kicked_participant_cannot_rejoin_the_room(): void
+    {
+        $approver = $this->admin();
+        $meeting = $this->meeting($approver);
+        $requester = User::findOrFail($meeting->user_id);
+        DB::table('meeting_room_kicks')->insert([
+            'meeting_id' => $meeting->id,
+            'user_id' => $requester->id,
+            'kicked_by_user_id' => $approver->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($requester)->get(route('konsultasi.room', $meeting))->assertForbidden();
+        $this->getJson(route('konsultasi.presence', $meeting))->assertOk()->assertJsonPath('can_join', false);
+    }
+
+    public function test_expired_room_rejects_polling_and_releases_all_participant_seats(): void
+    {
+        $approver = $this->admin();
+        $meeting = $this->meeting($approver);
+        $meeting->update(['tanggal' => now('Asia/Jakarta')->subDay()->toDateString()]);
+        $requester = User::findOrFail($meeting->user_id);
+
+        foreach ([$approver, $requester] as $participant) {
+            DB::table('meeting_room_participants')->insert([
+                'meeting_id' => $meeting->id,
+                'user_id' => $participant->id,
+                'client_session_hash' => hash('sha256', 'expired-room-'.$participant->id),
+                'joined_at' => now(),
+                'last_seen_at' => now(),
+                'left_at' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($approver)->getJson(route('konsultasi.signals.poll', $meeting).'?after=0&session_id='.str()->uuid())
+            ->assertStatus(410)
+            ->assertJsonPath('session_ended', true);
+        $this->assertDatabaseMissing('meeting_room_participants', [
+            'meeting_id' => $meeting->id,
+            'left_at' => null,
+        ]);
     }
 
     public function test_only_approver_can_invite_up_to_two_distinct_admin_accounts(): void
@@ -57,9 +107,19 @@ class ConsultationRoomAccessTest extends TestCase
         $inviteUrl = route('admin.konsultasi.room-invites.store', $meeting);
 
         $this->actingAs($otherAdmin)->post($inviteUrl, ['staff_user_ids' => [$invitedOne->id]])->assertForbidden();
-        $this->actingAs($approver)->post($inviteUrl, [
+        $this->actingAs($approver)->get(route('konsultasi.room', $meeting))->assertOk();
+        $roomSessionId = $meeting->fresh()->room_session_id;
+        $this->postJson($inviteUrl, [
             'staff_user_ids' => [$invitedOne->id, $invitedTwo->id],
-        ])->assertRedirect();
+        ])->assertOk()
+            ->assertJsonPath('capacity', 4)
+            ->assertJsonCount(2, 'invited_users');
+        $this->assertSame($roomSessionId, $meeting->fresh()->room_session_id);
+        $this->assertDatabaseHas('meeting_room_participants', [
+            'meeting_id' => $meeting->id,
+            'user_id' => $approver->id,
+            'left_at' => null,
+        ]);
         $this->assertDatabaseCount('meeting_room_invites', 2);
 
         $thirdInvite = $this->admin();
@@ -76,7 +136,7 @@ class ConsultationRoomAccessTest extends TestCase
         $inviteTwo = $this->admin();
         $extraParticipant = $this->admin();
         $meeting = $this->meeting($approver);
-        $meeting->update(['room_protocol_version' => 'sdp-mesh-v5']);
+        $meeting->update(['room_protocol_version' => 'sdp-mesh-v6']);
 
         foreach ([$inviteOne, $inviteTwo] as $invite) {
             DB::table('meeting_room_invites')->insert([
@@ -99,6 +159,7 @@ class ConsultationRoomAccessTest extends TestCase
                 'updated_at' => now(),
             ]);
         }
+        $this->assertSame(4, DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)->count());
 
         $this->actingAs($approver)->get(route('konsultasi.room', $meeting))
             ->assertStatus(409);
