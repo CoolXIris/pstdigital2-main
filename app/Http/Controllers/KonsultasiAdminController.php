@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Exports\ConsultationHistoryExport;
 use App\Models\ConsultationStaff;
 use App\Models\Meeting;
-use App\Models\ConsultationStaff;
 use App\Models\TelegramBot;
 use App\Models\User;
 use App\Services\ConsultationDocumentationService;
@@ -327,7 +326,7 @@ class KonsultasiAdminController extends Controller
         return $meeting->isRoomOpen();
     }
 
-    public function inviteRoomStaff(Request $request, Meeting $meeting): RedirectResponse
+    public function inviteRoomStaff(Request $request, Meeting $meeting): RedirectResponse|JsonResponse
     {
         abort_unless((int) $meeting->approved_by_user_id === (int) Auth::id(), 403);
         abort_unless((int) $meeting->status === 2 && $meeting->isRoomOpen(), 403, 'Undangan hanya dapat diatur saat ruang konsultasi aktif.');
@@ -868,7 +867,7 @@ class KonsultasiAdminController extends Controller
                 ->where('last_seen_at', '>=', now()->subSeconds(30))->exists(),
             'participant_count' => $activeCount,
             'capacity' => $capacity,
-            'can_join' => $isAuthorized && ($sameClient || (!$participantActive && $activeCount < $capacity)),
+            'can_join' => $isAuthorized && !$wasKicked && ($sameClient || (!$participantActive && $activeCount < $capacity)),
         ]);
     }
 

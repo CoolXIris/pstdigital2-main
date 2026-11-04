@@ -2242,6 +2242,8 @@ def _format_indicator_fallback(
             else:
                 value_text = str(value)
             label = str(row.get("wilayah") or "Wilayah")
+            if row.get("periode"):
+                label += f" ({row['periode']})"
             if (
                 include_categories
                 or category_question
@@ -2288,6 +2290,8 @@ def _format_indicator_fallback(
             else:
                 value_text = str(value)
             label = str(row.get("wilayah") or row.get("kategori") or "Nilai")
+            if row.get("periode"):
+                label += f" ({row['periode']})"
             if (include_categories or category_question) and row.get("kategori"):
                 label += f" ({row['kategori']})"
             lines.append(f"{label}: {value_text}")
@@ -2326,10 +2330,82 @@ def _format_indicator_fallback(
         scope = f"{scope} ({row['kategori']})"
     return (
         subregional_notice
-        + f"{year_note}{data.get('judul', 'Indikator BPS')} di {scope} tahun {actual_year}: "
+        + f"{year_note}{data.get('judul', 'Indikator BPS')} di {scope}"
+        + (f" pada {row['periode']}" if row.get("periode") else "")
+        + f" tahun {actual_year}: "
         f"{value_text}{' ' + unit if unit else ''}.{unavailable_note}{nature_note}"
         + source_note
     )
+
+
+def _latest_ntp_period_data(question: str, data: dict) -> dict | None:
+    if not re.search(
+        r"\b(terbaru|terkini|paling\s+baru|saat\s+ini|sekarang|bulan\s+ini)\b",
+        question,
+        re.IGNORECASE,
+    ):
+        return None
+
+    month_names = bps_tools._EDITORIAL_MONTHS
+    if any(
+        re.search(rf"\b{re.escape(month)}\b", question, re.IGNORECASE)
+        for month in month_names
+    ):
+        return None
+
+    title = str(data.get("judul") or "").casefold()
+    if not re.search(r"\bntp\b|nilai\s+tukar\s+petani", question, re.IGNORECASE) and not re.search(
+        r"nilai\s+tukar\s+petani", title
+    ):
+        return None
+
+    rows = data.get("data")
+    if not isinstance(rows, list):
+        return None
+
+    month_order = {
+        month.casefold(): index
+        for month, index in month_names.items()
+    }
+
+    def row_month(row: dict) -> int | None:
+        period = str(row.get("periode") or "").strip().casefold()
+        if period in month_order:
+            return month_order[period]
+        if period.isdecimal() and 1 <= int(period) <= 12:
+            return int(period)
+        return None
+
+    dated_rows = [
+        (row_month(row), row)
+        for row in rows
+        if isinstance(row, dict) and row.get("nilai") is not None
+    ]
+    dated_rows = [(month, row) for month, row in dated_rows if month is not None]
+    if not dated_rows:
+        return None
+
+    latest_month = max(month for month, _ in dated_rows)
+    latest_rows = [row for month, row in dated_rows if month == latest_month]
+    asks_ntup = re.search(r"\bntup\b", question, re.IGNORECASE) is not None
+    asks_ntp = re.search(r"\bntp\b|nilai\s+tukar\s+petani", question, re.IGNORECASE) is not None
+    if asks_ntp and asks_ntup:
+        requested_series = {"ntp", "ntup"}
+    elif asks_ntup:
+        requested_series = {"ntup"}
+    else:
+        requested_series = {"ntp"}
+
+    matching_rows = [
+        row for row in latest_rows
+        if str(row.get("wilayah") or "").strip().casefold() in requested_series
+    ]
+    if not matching_rows:
+        return None
+
+    result = dict(data)
+    result["data"] = matching_rows
+    return result
 
 
 def _uses_non_geographic_province_dimension(data: dict, region: Optional[str]) -> bool:
@@ -3030,6 +3106,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     static_table_checked = False
     static_table_query = static_table_keyword
     force_deterministic_fallback = False
+    latest_ntp_period_applied = False
     if static_table_keyword:
         try:
             static_options = {}
@@ -3768,6 +3845,15 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
                             year_range,
                             **candidate_category_args,
                         )
+                    latest_ntp_data = (
+                        _latest_ntp_period_data(question, canonical_data)
+                        if isinstance(canonical_data, dict) and not year_range
+                        else None
+                    )
+                    if latest_ntp_data is not None:
+                        canonical_data = latest_ntp_data
+                        force_deterministic_fallback = True
+                        latest_ntp_period_applied = True
                     if year_range:
                         requested_year = f"{year_range[0]}-{year_range[1]}"
                     if len(requested_regions) > 1:
@@ -3871,11 +3957,10 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
 
     def answer_with_verified_sources(reply: str) -> dict[str, object]:
         payloads = [canonical_data] if canonical_data is not None else []
-        payloads.extend(
-            record["result"]
-            for record in tool_records
-            if isinstance(record.get("result"), dict)
-        )
+        for record in tool_records:
+            payload = record.get("result")
+            if isinstance(payload, dict) and all(payload is not item for item in payloads):
+                payloads.append(payload)
         statuses = [_tool_result_status(payload) for payload in payloads]
         status = (
             "tidak_ditemukan"
@@ -3886,7 +3971,7 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
             reply,
             payloads,
             tools_used=bool(payloads),
-            context=request.context,
+            context=None if latest_ntp_period_applied else request.context,
             status=status,
             question=question,
         )

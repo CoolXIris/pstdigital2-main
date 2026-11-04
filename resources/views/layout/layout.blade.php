@@ -640,15 +640,12 @@
             <a href="{{ url('/') }}" class="link-item">Landing page</a>
             @if ($profileComplete)
                 <a href="{{ url('konsultasi') }}" class="link-item">Konsultasi</a>
+                <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
+                <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
             @else
                 <span class="link-item text-muted" aria-disabled="true">Konsultasi (lengkapi profil)</span>
-            @endif
-            <a href="{{ url('chatbot') }}" class="link-item">Chatbot</a>
-            <a href="https://perpustakaan.bps.go.id/opac/" target="_blank" rel="noopener" class="link-item">Katalog Publikasi <i class="bi bi-box-arrow-up-right ms-1"></i></a>
-            @else
-            <span class="link-item text-muted" aria-disabled="true">Konsultasi (lengkapi profil)</span>
-            <span class="link-item text-muted" aria-disabled="true">Chatbot (lengkapi profil)</span>
-            <span class="link-item text-muted" aria-disabled="true">Katalog Publikasi (lengkapi profil)</span>
+                <span class="link-item text-muted" aria-disabled="true">Chatbot (lengkapi profil)</span>
+                <span class="link-item text-muted" aria-disabled="true">Katalog Publikasi (lengkapi profil)</span>
             @endif
             <a href="{{ url('profile') }}" class="link-item active-link">Profil Saya</a>
             <a href="{{ url('logout') }}" class="link-item">Keluar</a>

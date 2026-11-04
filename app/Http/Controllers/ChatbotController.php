@@ -715,6 +715,14 @@ class ChatbotController extends Controller
         }
 
         $cleanReply = trim(implode("\n", $lines));
+        $cleanReply = preg_replace(
+            '/\b(?:tautan|link)\s+(?:sumber(?:\s*\/\s*(?:PDF|halaman))?\s+)?'
+                .'(?:tidak|belum)\s+(?:tersedia|ada|ditemukan)'
+                .'(?:\s+(?:pada|dari)\s+(?:(?:respons|detail)\s+)?API)?[.!?]?/iu',
+            'Tautan sumber BPS tersedia pada bagian Sumber.',
+            $cleanReply
+        ) ?? $cleanReply;
+
         return $cleanReply === ''
             ? $sourceLines
             : $cleanReply."\n\n".$sourceLines;

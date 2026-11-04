@@ -985,7 +985,7 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertEqual(result["reply"], "Pada 2025 tercatat 42 kasus penderita penyakit.")
         self.assertEqual(result["tools_used"], True)
 
-    def test_ntp_sumsel_latest_uses_the_current_variable_instead_of_static_tables(self):
+    def test_ntp_latest_uses_newest_month_and_only_its_table_source(self):
         response = main.types.GenerateContentResponse(
             candidates=[
                 main.types.Candidate(
@@ -1021,10 +1021,19 @@ class ChatRoutingTests(unittest.TestCase):
             "judul": "Perkembangan Nilai Tukar Petani",
             "satuan": "Persen",
             "tahun": "2026",
+            "status_hasil": "ditemukan",
             "data": [
                 {"wilayah": "NTP", "periode": "Agustus", "nilai": 150.53},
                 {"wilayah": "NTUP", "periode": "Agustus", "nilai": 149.92},
+                {"wilayah": "NTP", "periode": "Oktober", "nilai": 151.23},
+                {"wilayah": "NTUP", "periode": "Oktober", "nilai": 150.61},
             ],
+            "metadata_sumber": {
+                "jenis": "Tabel Dinamis",
+                "judul": "Perkembangan Nilai Tukar Petani",
+                "url": "https://sumsel.bps.go.id/id/statistics-table/2/645/ntp.html",
+                "tahun": "2026",
+            },
         }
         with (
             patch.object(main, "verify_token"),
@@ -1033,10 +1042,26 @@ class ChatRoutingTests(unittest.TestCase):
             patch.object(main.bps_tools, "cari_variabel", return_value=search_result) as search,
             patch.object(main.bps_tools, "ambil_data", return_value=data_result) as fetch,
             patch.object(main.bps_tools, "tabel_statis") as static_table,
+            patch.object(
+                main.bps_tools,
+                "_catalog_rows",
+                return_value=[{
+                    "id_tabel": "999",
+                    "judul": "Sumber NTP lama yang tidak terkait",
+                    "jenis_tabel": "Tabel Dinamis",
+                    "url_halaman": "https://sumsel.bps.go.id/id/statistics-table/2/999/sumber-lama.html",
+                }],
+            ),
             patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}),
         ):
             result = main.chat_endpoint(
-                main.ChatRequest(question="ntp sumsel terbaru")
+                main.ChatRequest(
+                    question="ntp sumsel terbaru",
+                    context=(
+                        '[Sumber: BPS WebAPI, Sumber NTP lama yang tidak terkait] '
+                        '{"var_id": "999"}'
+                    ),
+                )
             )
 
         search.assert_called_once_with("tukar petani")
@@ -1046,7 +1071,14 @@ class ChatRoutingTests(unittest.TestCase):
             wilayah="Provinsi Sumatera Selatan",
         )
         static_table.assert_not_called()
-        self.assertIn("150,53 persen", result["reply"])
+        self.assertIn("Oktober tahun 2026", result["reply"])
+        self.assertIn("151,23 Persen", result["reply"])
+        self.assertNotIn("150,53", result["reply"])
+        self.assertEqual(len(result["sources"]), 1)
+        self.assertEqual(
+            result["sources"][0]["judul"],
+            "Perkembangan Nilai Tukar Petani",
+        )
         self.assertTrue(result["tools_used"])
 
     def test_ambiguous_gender_series_return_latest_values_with_requested_year_notice(self):

@@ -438,7 +438,7 @@ class BpsWebApiServiceTest extends TestCase
         $sources = (new BpsWebApiService)->sourceLinesForContext($context, 'BRS terbaru');
 
         $this->assertStringContainsString(
-            '- [BRS terbaru](https://sumsel.bps.go.id/id/pressrelease)',
+            '- [Daftar Berita Resmi Statistik BPS Sumatera Selatan](https://sumsel.bps.go.id/id/pressrelease)',
             $sources
         );
         $this->assertStringNotContainsString('not-a-real-key', $sources);

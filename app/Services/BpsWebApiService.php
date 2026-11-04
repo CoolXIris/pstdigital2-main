@@ -524,14 +524,17 @@ class BpsWebApiService
                 'tautan' => 'tautan',
                 'ringkasan' => 'abstrak/isi API',
             ] as $key => $detailLabel) {
+                if ($isEditorial && $key === 'tautan') {
+                    continue;
+                }
                 if (isset($item[$key])) {
                     $details[] = $detailLabel.': '.$item[$key];
                 }
             }
 
             $answer .= "\n".($index + 1).'. '.$title.($details === [] ? '' : ' ('.implode('; ', $details).')');
-            if ($isEditorial && ! isset($item['tautan'])) {
-                $answer .= ' (tautan sumber/PDF tidak tersedia pada respons API)';
+            if ($isEditorial) {
+                $answer .= $this->editorialLinkNotice($item, (string) $catalog['model']);
             }
             if ($isEditorial && ! isset($item['ringkasan'])) {
                 $answer .= ' (abstrak/isi tidak tersedia pada respons API)';
@@ -623,20 +626,21 @@ class BpsWebApiService
 
     private function sourceItems(array $items, string $model): array
     {
-        $editorialFallbacks = [
-            'pressrelease' => 'https://sumsel.bps.go.id/id/pressrelease',
-            'publication' => 'https://sumsel.bps.go.id/id/publication',
-            'news' => 'https://sumsel.bps.go.id/id/news',
-        ];
         $sources = [];
         foreach ($items as $item) {
             if (! is_array($item)) {
                 continue;
             }
             $title = trim((string) ($item['judul'] ?? ''));
-            $url = $this->verifiedSourceUrl((string) ($item['tautan'] ?? ''));
-            if ($url === '' && isset($editorialFallbacks[$model])) {
-                $url = $editorialFallbacks[$model];
+            $specificUrl = $this->verifiedSourceUrl((string) ($item['tautan'] ?? ''));
+            $url = $this->editorialSourceUrl($item, $model);
+            if ($specificUrl === '' && $url !== '') {
+                $title = match ($model) {
+                    'pressrelease' => 'Daftar Berita Resmi Statistik BPS Sumatera Selatan',
+                    'publication' => 'Daftar publikasi BPS Sumatera Selatan',
+                    'news' => 'Daftar berita BPS Sumatera Selatan',
+                    default => $title,
+                };
             }
             if ($title !== '' && $url !== '') {
                 $sources[] = ['title' => $title, 'url' => $url];
@@ -644,6 +648,40 @@ class BpsWebApiService
         }
 
         return $sources;
+    }
+
+    private function editorialSourceUrl(array $item, string $model): string
+    {
+        $specificUrl = $this->verifiedSourceUrl((string) ($item['tautan'] ?? ''));
+        if ($specificUrl !== '') {
+            return $specificUrl;
+        }
+
+        return match ($model) {
+            'pressrelease' => 'https://sumsel.bps.go.id/id/pressrelease',
+            'publication' => 'https://sumsel.bps.go.id/id/publication',
+            'news' => 'https://sumsel.bps.go.id/id/news',
+            default => '',
+        };
+    }
+
+    private function editorialLinkNotice(array $item, string $model): string
+    {
+        if ($this->verifiedSourceUrl((string) ($item['tautan'] ?? '')) !== '') {
+            return '';
+        }
+        if ($this->editorialSourceUrl($item, $model) !== '') {
+            $label = match ($model) {
+                'pressrelease' => 'BRS',
+                'publication' => 'publikasi',
+                'news' => 'berita',
+                default => 'konten',
+            };
+
+            return ' (tautan khusus artikel/PDF tidak dikembalikan API; halaman daftar '.$label.' tersedia pada bagian Sumber)';
+        }
+
+        return ' (tautan sumber/PDF tidak tersedia pada respons API)';
     }
 
     private function formatSourceLines(array $sources): string
@@ -1702,7 +1740,19 @@ class BpsWebApiService
         }
 
         $lines = [$prefix];
+        if ($isEditorial) {
+            $lines[] = 'Catatan sumber: tautan khusus artikel/PDF dapat tidak disediakan API; tautan halaman daftar sumber tetap ditambahkan oleh sistem. Jangan menyatakan bahwa sumber tidak tersedia jika tautan daftar sumber tersedia.';
+        }
         foreach ($result['items'] as $index => $item) {
+            if ($isEditorial) {
+                $item['tautan_khusus_tersedia'] = $this->verifiedSourceUrl(
+                    (string) ($item['tautan'] ?? '')
+                ) !== '';
+                $item['tautan_sumber_tersedia'] = $this->editorialSourceUrl(
+                    $item,
+                    (string) $catalog['model']
+                ) !== '';
+            }
             $lines[] = ($index + 1).'. '.json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
 
@@ -2318,13 +2368,16 @@ class BpsWebApiService
             } elseif ($item['abstrak_tidak_tersedia'] ?? false) {
                 $lines[] = '   Abstrak/isi tidak tersedia pada respons detail API.';
             }
-            $lines[] = isset($item['tautan'])
-                ? '   Sumber/PDF: '.$item['tautan']
-                : '   Tautan sumber/PDF tidak tersedia pada respons API.';
+            $lines[] = '   '.$this->editorialLinkNotice($item, 'pressrelease');
         }
         if ($regionLabel !== null) {
             $lines[] = '';
             $lines[] = str_replace('{region}', $regionLabel, config('chatbot_fallback.region_note'));
+        }
+        $sourceLines = $this->sourceLinesForItems($items, 'pressrelease');
+        if ($sourceLines !== '') {
+            $lines[] = '';
+            $lines[] = $sourceLines;
         }
         $lines[] = '';
         $lines[] = 'Ditampilkan pada '.now('Asia/Jakarta')->format('d-m-Y H:i').' WIB.';

@@ -69,18 +69,4 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
-
-    public function hasCompleteProfile(): bool
-    {
-        return collect([
-            $this->name,
-            $this->pekerjaan,
-            $this->jenis_kelamin,
-            $this->tanggal_lahir,
-            $this->asal_prov,
-            $this->asal_kab,
-            $this->no_hp,
-            $this->pendidikan,
-        ])->every(fn ($value) => filled($value));
-    }
 }

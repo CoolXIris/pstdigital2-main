@@ -55,6 +55,20 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
     }
 
+    public function test_landing_page_renders_for_guests_and_users_with_incomplete_profiles(): void
+    {
+        $this->withoutVite();
+        $this->get('/')->assertOk()->assertSee('Konsultasi')->assertSee('Chatbot');
+
+        $user = User::factory()->create(['pekerjaan' => null]);
+        $user->assignRole('user');
+        $this->actingAs($user)->get('/')
+            ->assertOk()
+            ->assertSee('Konsultasi (lengkapi profil)')
+            ->assertSee('Chatbot (lengkapi profil)')
+            ->assertSee('Katalog Publikasi (lengkapi profil)');
+    }
+
     public function test_admin_can_refresh_bps_catalog_from_webapi(): void
     {
         config(['services.bps.api_key' => 'bps-test-secret']);
@@ -663,6 +677,61 @@ class AdminManagementPagesTest extends BaseTestCase
                 && str_contains($request->url(), '/keyword/'.$record['keyword'].'/'));
             Http::assertSent(fn ($request) => str_contains($request->url(), '/view/model/'.$model.'/lang/ind/id/'.$record['id'].'/'));
         }
+    }
+
+    public function test_editorial_news_uses_a_clear_listing_fallback_when_api_omits_item_links(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Cache::flush();
+        $items = [
+            ['news_id' => 'news-1', 'title' => 'Berita pertama', 'rl_date' => '2026-11-03'],
+            ['news_id' => 'news-2', 'title' => 'Berita kedua', 'rl_date' => '2026-11-02'],
+            ['news_id' => 'news-3', 'title' => 'Berita ketiga', 'rl_date' => '2026-11-01'],
+        ];
+        Http::fake(function ($request) use ($items) {
+            if (str_contains($request->url(), '/list/model/news/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [['total' => 3, 'pages' => 1], $items],
+                ]);
+            }
+            if (str_contains($request->url(), '/view/model/news/')) {
+                return Http::response([
+                    'status' => 'OK',
+                    'data' => [[
+                        'news_id' => 'news-1',
+                        'abstract' => 'Ringkasan berita API.',
+                    ]],
+                ]);
+            }
+
+            return Http::response(['status' => 'ERROR'], 404);
+        });
+
+        $service = app(BpsWebApiService::class);
+        $answer = $service->catalogAnswerFor('berita terbaru');
+
+        foreach (['Berita pertama', 'Berita kedua', 'Berita ketiga'] as $title) {
+            $this->assertStringContainsString($title, $answer);
+        }
+        $this->assertStringContainsString(
+            'tautan khusus artikel/PDF tidak dikembalikan API; halaman daftar berita tersedia pada bagian Sumber',
+            $answer
+        );
+        $this->assertStringContainsString(
+            '- [Daftar berita BPS Sumatera Selatan](https://sumsel.bps.go.id/id/news)',
+            $answer
+        );
+        $this->assertStringNotContainsString('tautan sumber/PDF tidak tersedia pada respons API', $answer);
+        $this->assertStringNotContainsString('bps-test-secret', $answer);
+
+        $context = $service->contextFor('berita terbaru');
+        $this->assertStringContainsString('"tautan_sumber_tersedia":true', $context);
+        $sources = $service->sourceLinesForContext($context, 'berita terbaru');
+        $this->assertStringContainsString(
+            '- [Daftar berita BPS Sumatera Selatan](https://sumsel.bps.go.id/id/news)',
+            $sources
+        );
     }
 
     public function test_dynamic_bps_context_prefers_the_candidate_with_the_requested_year(): void
@@ -2408,7 +2477,7 @@ class AdminManagementPagesTest extends BaseTestCase
             ->andReturn("Sumber:\n- [Pertumbuhan ekonomi](https://sumsel.bps.go.id/id/statistics-table?subject=565)");
         $this->app->instance(BpsWebApiService::class, $bps);
         Http::fake(['*127.0.0.1:8001/api/chat*' => Http::response([
-            'reply' => 'Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.',
+            'reply' => 'Tautan sumber tidak tersedia. Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.',
         ], 200)]);
 
         $this->actingAs($user)
@@ -2416,7 +2485,8 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertOk()
             ->assertJsonPath(
                 'reply',
-                "Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.\n\n"
+                "Tautan sumber BPS tersedia pada bagian Sumber. "
+                    ."Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.\n\n"
                     ."Sumber:\n- [Pertumbuhan ekonomi](https://sumsel.bps.go.id/id/statistics-table?subject=565)"
             );
 

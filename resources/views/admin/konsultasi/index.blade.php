@@ -72,6 +72,8 @@
             <h2>Konsultasi Mendatang</h2>
             <p>Jadwal terkonfirmasi dan petugas yang bertanggung jawab.</p>
         </div>
+        <span class="admin-badge admin-badge-blue">{{ $counts['confirmed'] }} terkonfirmasi</span>
+    </div>
         @if ($upcoming->isNotEmpty())
             <div class="admin-confirmed-grid">
                 @foreach ($upcoming as $meeting)
@@ -89,19 +91,11 @@
                             </div>
                         @elseif ($meeting->can_open_room_now)
                             <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
-                                @csrf @method('PATCH')
+                                @csrf
                                 <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang konsultasi sekarang</button>
                             </form>
                             <p class="admin-room-window-note">Pemohon dapat masuk lebih awal. Jam selesai tetap sesuai jadwal.</p>
                         @else
-                            <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
-                        @endif
-                        @if ($meeting->can_open_room_now)
-                            <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}" class="mt-2">
-                                @csrf
-                                <button class="admin-btn admin-btn-outline admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang lebih awal</button>
-                            </form>
-                        @elseif (!$meeting->room_open)
                             <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
                         @endif
                         @if (!$meeting->approved_by_user_id || (int) $meeting->approved_by_user_id === (int) Auth::id())
@@ -111,22 +105,6 @@
                     </article>
                 @endforeach
             </div>
-            @elseif ($meeting->can_open_room_now)
-            <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
-                @csrf @method('PATCH')
-                <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang konsultasi sekarang</button>
-            </form>
-            <p class="admin-room-window-note">Pemohon dapat masuk lebih awal. Jam selesai tetap sesuai jadwal.</p>
-            @else
-            <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
-            @endif
-            @if (!$meeting->approved_by_user_id || (int) $meeting->approved_by_user_id === (int) Auth::id())
-            <button class="admin-btn admin-btn-outline admin-confirmed-button consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->user?->name ?? 'Pengguna' }}"><i class="fe fe-message-circle"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
-            @endif
-            <button class="admin-btn admin-btn-success admin-confirmed-button" type="button" data-bs-toggle="modal" data-bs-target="#completeMeetingModal" data-meeting-id="{{ $meeting->id }}" data-topic="{{ $meeting->name }}"><i class="fe fe-check"></i> Selesaikan konsultasi</button>
-        </article>
-        @endforeach
-    </div>
     @if ($upcoming->hasPages())<div class="admin-section-pagination">{{ $upcoming->links() }}</div>@endif
     @else
     <div class="admin-panel">
