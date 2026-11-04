@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from update_bps import sync_catalog
+import httpx
+
+from update_bps import BpsRateLimitError, BpsRequestError, _fetch_periods, _fetch_tables, sync_catalog
 
 
 def encoded(value: str) -> str:
@@ -15,6 +17,9 @@ def encoded(value: str) -> str:
 class FakeResponse:
     def __init__(self, payload: dict):
         self.payload = payload
+        self.status_code = 200
+        self.is_error = False
+        self.headers = {}
 
     def raise_for_status(self) -> None:
         return None
@@ -111,6 +116,48 @@ class UpdateBpsTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def test_fetch_tables_waits_for_rate_limit_and_retries_same_page(self) -> None:
+        requests = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request.url.path)
+            if len(requests) == 1:
+                return httpx.Response(429, headers={"Retry-After": "60"})
+            return httpx.Response(200, json={"status": "OK", "data": [{"pages": 1}, [{"id": "test"}]]})
+
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client, patch("update_bps.time.sleep") as sleep:
+            tables = _fetch_tables(client, "test-key", "1600")
+
+        self.assertEqual(tables, [{"id": "test"}])
+        self.assertEqual(requests[0], requests[1])
+        sleep.assert_called_once_with(60)
+
+    def test_fetch_tables_surfaces_long_rate_limit_without_waiting(self) -> None:
+        transport = httpx.MockTransport(lambda request: httpx.Response(429, headers={"Retry-After": "3600"}))
+        with httpx.Client(transport=transport) as client, patch("update_bps.time.sleep") as sleep:
+            with self.assertRaises(BpsRateLimitError) as error:
+                _fetch_tables(client, "test-key", "1600")
+        self.assertEqual(error.exception.retry_after, 3600)
+        sleep.assert_not_called()
+
+    def test_fetch_periods_stops_after_bounded_rate_limit_retries(self) -> None:
+        transport = httpx.MockTransport(lambda request: httpx.Response(429, headers={"Retry-After": "1"}))
+        with httpx.Client(transport=transport) as client, patch("update_bps.time.sleep") as sleep:
+            with self.assertRaises(BpsRateLimitError) as error:
+                _fetch_periods(client, "test-key", "1600", "900")
+        self.assertEqual(error.exception.retry_after, 1)
+        self.assertEqual(sleep.call_count, 5)
+
+    def test_fetch_tables_identifies_dns_failures_without_exposing_request(self) -> None:
+        def fail(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("[Errno 11001] getaddrinfo failed", request=request)
+
+        with httpx.Client(transport=httpx.MockTransport(fail)) as client, patch("update_bps.time.sleep"):
+            with self.assertRaises(BpsRequestError) as error:
+                _fetch_tables(client, "test-secret", "1600")
+        self.assertEqual(error.exception.reason, "transport_dns")
+        self.assertNotIn("test-secret", str(error.exception))
 
     def test_sync_updates_existing_rows_adds_missing_tables_and_keeps_csv_only_rows(self) -> None:
         tables = [

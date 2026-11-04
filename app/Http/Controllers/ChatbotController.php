@@ -65,10 +65,10 @@ class ChatbotController extends Controller
         }
 
         if (function_exists('set_time_limit')) {
-            @set_time_limit(210);
+            @set_time_limit(930);
         }
 
-        $lock = Cache::lock('bps:catalog:refresh', 300);
+        $lock = Cache::lock('bps:catalog:refresh', 1020);
         if (! $lock->get()) {
             return back()->with('error', 'Pembaruan katalog sedang berlangsung. Silakan tunggu hingga selesai.');
         }
@@ -76,9 +76,20 @@ class ChatbotController extends Controller
         $processSucceeded = false;
         try {
             $catalogPath = (string) config('services.bps.catalog_csv', base_path('tabel_bps_sumsel.csv'));
+            $environment = ['BPS_API_KEY' => (string) config('services.bps.api_key')];
+            if (PHP_OS_FAMILY === 'Windows') {
+                // Windows DNS in the Python child requires SystemRoot, which the server may omit.
+                $systemRoot = getenv('SystemRoot');
+                if (! is_string($systemRoot) || $systemRoot === '') {
+                    Log::error('bps.catalog_refresh_missing_windows_systemroot');
+
+                    return back()->with('error', 'Konfigurasi Windows untuk menjalankan Python tidak lengkap. Katalog lama tetap dipertahankan.');
+                }
+                $environment['SystemRoot'] = $systemRoot;
+            }
             $result = Process::path(base_path())
-                ->timeout(180)
-                ->env(['BPS_API_KEY' => (string) config('services.bps.api_key')])
+                ->timeout(900)
+                ->env($environment)
                 ->run([
                     (string) config('services.bps.python_binary', 'python'),
                     base_path('update_bps.py'),
@@ -87,7 +98,47 @@ class ChatbotController extends Controller
                 ]);
 
             if (! $result->successful()) {
-                Log::warning('bps.catalog_refresh_failed', ['exit_code' => $result->exitCode()]);
+                $failure = json_decode(trim($result->errorOutput()), true);
+                if (is_array($failure) && ($failure['error'] ?? null) === 'rate_limited') {
+                    $retryAfter = $failure['retry_after'] ?? null;
+                    if (is_int($retryAfter) && $retryAfter > 0) {
+                        Log::warning('bps.catalog_refresh_rate_limited', ['retry_after' => $retryAfter]);
+
+                        return back()->with(
+                            'error',
+                            "Batas permintaan WebAPI BPS tercapai. Katalog lama tetap dipertahankan; coba lagi setelah {$retryAfter} detik."
+                        );
+                    }
+                }
+                $stderr = trim($result->errorOutput());
+                $diagnostic = ['exit_code' => $result->exitCode()];
+                if (is_array($failure) && ($failure['error'] ?? null) === 'webapi_failed'
+                    && is_string($failure['reason'] ?? null)
+                    && preg_match('/^(http_\d{3}|transport_[A-Za-z]+|invalid_json|api_status)$/', $failure['reason'])) {
+                    $diagnostic['reason'] = $failure['reason'];
+                } elseif (preg_match('/ModuleNotFoundError: No module named [\'"]([A-Za-z0-9_.-]+)[\'"]/', $stderr, $match)) {
+                    $diagnostic['reason'] = 'missing_python_module';
+                    $diagnostic['module'] = $match[1];
+                } elseif (preg_match('/^\[Errno (\d+)\]/', $stderr, $match)) {
+                    $diagnostic['reason'] = 'filesystem_error';
+                    $diagnostic['errno'] = (int) $match[1];
+                } elseif (preg_match('/^WebAPI BPS gagal memuat katalog tabel pada halaman (\d+)\.$/u', $stderr, $match)) {
+                    $diagnostic['reason'] = 'catalog_page_fetch_failed';
+                    $diagnostic['page'] = (int) $match[1];
+                } elseif (preg_match('/^WebAPI BPS gagal memuat periode tabel dinamis (\d+)\.$/u', $stderr, $match)) {
+                    $diagnostic['reason'] = 'period_fetch_failed';
+                    $diagnostic['variable_id'] = $match[1];
+                } else {
+                    $diagnostic['reason'] = 'unclassified';
+                }
+                Log::warning('bps.catalog_refresh_failed', $diagnostic);
+
+                if (($diagnostic['reason'] ?? null) === 'transport_dns') {
+                    return back()->with(
+                        'error',
+                        'Nama server WebAPI BPS tidak dapat ditemukan melalui DNS. Periksa koneksi dan pengaturan DNS; katalog lama tetap dipertahankan.'
+                    );
+                }
 
                 return back()->with(
                     'error',

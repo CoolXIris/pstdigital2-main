@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-import main
+from chatbot import main
 
 
 class ChatRoutingTests(unittest.TestCase):
@@ -2735,7 +2735,7 @@ class ChatRoutingTests(unittest.TestCase):
         self.assertNotIn("99", reply)
 
     def test_main_topic_word_must_match_but_partial_core_match_survives(self):
-        import bps_tools
+        from chatbot import bps_tools
 
         expectations = {
             "Jumlah Korban yang Diakibatkan Bencana Alam di sumsel terbaru": "bencana",
@@ -2751,7 +2751,7 @@ class ChatRoutingTests(unittest.TestCase):
                 self.assertTrue(matched)
 
     def test_unrelated_topics_have_no_topic_match(self):
-        import bps_tools
+        from chatbot import bps_tools
 
         for question in ("harga bitcoin", "harga mobil listrik di Lahat", "harga tiket pesawat"):
             with self.subTest(question=question):
@@ -2759,7 +2759,7 @@ class ChatRoutingTests(unittest.TestCase):
                 self.assertFalse([item for item in result.get("hasil", []) if item.get("topik_cocok")])
 
     def test_outside_sumsel_area_detection(self):
-        import bps_tools
+        from chatbot import bps_tools
 
         for question in ("penduduk DKI Jakarta", "jumlah sekolah di Bandung", "kemiskinan Jawa Timur 2024", "PDRB Papua"):
             with self.subTest(question=question):

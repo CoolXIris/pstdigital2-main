@@ -8,7 +8,7 @@ import httpx
 
 import bps_data_store
 import bps_csv_catalog
-import bps_tools
+from chatbot import bps_tools
 from mysql_test_adapter import MySQLStorageTestConnection
 
 

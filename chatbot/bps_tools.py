@@ -18,10 +18,8 @@ from lxml.etree import LxmlError
 import pandas as pd
 
 import bps_csv_catalog
-import bps_csv_search
 import bps_data_store
-import sinonim
-import sumber_link
+from chatbot import bps_csv_search, sinonim, sumber_link
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -127,7 +125,7 @@ _MONTH_WORDS = {
 
 
 def _load_canonical_indicators() -> dict[str, dict[str, Any]]:
-    path = Path(__file__).resolve().parent / "config" / "bps_indicators.json"
+    path = Path(__file__).resolve().parent.parent / "config" / "bps_indicators.json"
     with path.open(encoding="utf-8") as source:
         configuration = json.load(source)
 

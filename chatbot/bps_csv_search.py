@@ -8,7 +8,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any, Iterable
 
-import sinonim
+from chatbot import sinonim
 
 
 logger = logging.getLogger(__name__)

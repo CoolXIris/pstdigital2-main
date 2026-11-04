@@ -34,8 +34,12 @@ Install the Python service dependencies and start the API from the project root:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8001
+python -m uvicorn chatbot.main:app --host 127.0.0.1 --port 8001
 ```
+
+Run this command from the project root, not from the `chatbot` directory. If
+the terminal is already in `chatbot`, run `cd ..` first. The old
+`uvicorn main:app` command cannot find the `chatbot` package from there.
 
 Set the same strong `GEMINI_CHAT_API_TOKEN` in Laravel and the Python process,
 and set `GEMINI_API_KEY` for the Python process. `GEMINI_MODEL` defaults to
@@ -107,11 +111,23 @@ metadata is stored separately in MySQL. Run the Laravel migration after
 deploying to create the BPS storage tables.
 
 The CSV-generation utility is separate from chatbot runtime lookup and may be
-used by the catalog-maintenance workflow to refresh the CSV.
+used by the catalog-maintenance workflow to refresh the CSV. Catalog refresh
+honors short WebAPI rate-limit delays and may take several minutes; keep the
+admin page open until it finishes. If the quota requires a longer wait, the
+existing catalog is preserved and the admin is shown when to retry.
 
 Unresolved data requests are emitted by the Python service as structured
 `BPS_QUERY_UNRESOLVED` warning log events. The logged question is length-limited
 and email addresses and phone numbers are redacted.
+
+## Consultation rooms
+
+After updating, run `php artisan migrate` on the intended application database.
+Confirmed consultation rooms allow the requester, the approving admin, and up to
+two additional admin or super-admin accounts invited by that approver. Each
+account may join from one active browser session at a time. For existing
+consultations without an approving account, staff cannot enter the room or
+invite others until an approver is assigned.
 
 ## Learning Laravel
 

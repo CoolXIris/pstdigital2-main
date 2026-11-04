@@ -85,6 +85,7 @@ class AdminManagementPagesTest extends BaseTestCase
 
         Process::assertRan(fn ($process, $result) => str_contains(implode(' ', $process->command), 'update_bps.py')
             && $process->environment['BPS_API_KEY'] === 'bps-test-secret'
+            && (PHP_OS_FAMILY !== 'Windows' || $process->environment['SystemRoot'] === getenv('SystemRoot'))
             && $result->successful());
     }
 
@@ -140,6 +141,38 @@ class AdminManagementPagesTest extends BaseTestCase
             ->post(route('admin.chatbot.catalog.refresh'))
             ->assertRedirect(route('admin.chatbot'))
             ->assertSessionHas('error', 'WebAPI BPS gagal memperbarui katalog. Data katalog yang tersimpan tetap dipertahankan; silakan coba lagi.');
+    }
+
+    public function test_bps_catalog_refresh_reports_rate_limit_without_exposing_process_output(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Process::fake([
+            '*update_bps.py*' => Process::result('', json_encode([
+                'error' => 'rate_limited',
+                'retry_after' => 3600,
+            ]), 1),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.chatbot.catalog.refresh'))
+            ->assertRedirect()
+            ->assertSessionHas('error', 'Batas permintaan WebAPI BPS tercapai. Katalog lama tetap dipertahankan; coba lagi setelah 3600 detik.');
+    }
+
+    public function test_bps_catalog_refresh_reports_dns_failure(): void
+    {
+        config(['services.bps.api_key' => 'bps-test-secret']);
+        Process::fake([
+            '*update_bps.py*' => Process::result('', json_encode([
+                'error' => 'webapi_failed',
+                'reason' => 'transport_dns',
+            ]), 1),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.chatbot.catalog.refresh'))
+            ->assertRedirect()
+            ->assertSessionHas('error', 'Nama server WebAPI BPS tidak dapat ditemukan melalui DNS. Periksa koneksi dan pengaturan DNS; katalog lama tetap dipertahankan.');
     }
 
     public function test_admin_can_edit_delete_and_export_user_profile_fields(): void
@@ -3633,21 +3666,32 @@ class AdminManagementPagesTest extends BaseTestCase
         /** @var User $requester */
         $requester = User::factory()->create();
         $requester->assignRole('user');
+        $requester->update([
+            'pekerjaan' => 'Peneliti',
+            'jenis_kelamin' => 'Laki-laki',
+            'tanggal_lahir' => '1990-01-01',
+            'asal_prov' => 'Sumatera Selatan',
+            'asal_kab' => 'Palembang',
+            'no_hp' => '08123456789',
+            'pendidikan' => 'S1',
+        ]);
         /** @var Authenticatable $authenticatedRequester */
         $authenticatedRequester = $requester;
         $meeting = $this->createMeeting([
             'user_id' => $requester->id,
             'status' => 2,
             'assigned_staff' => 'Petugas 1',
+            'approved_by_user_id' => $this->admin->id,
             'tanggal' => '2026-10-15',
             'start_time' => '09:00:00',
             'end_time' => '10:00:00',
         ]);
-
-        Carbon::setTestNow(Carbon::parse('2026-10-15 09:30:00', 'Asia/Jakarta'));
         Carbon::setTestNow(Carbon::parse('2026-10-15 08:59:00', 'Asia/Jakarta'));
         $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting))->assertForbidden();
         Carbon::setTestNow(Carbon::parse('2026-10-15 09:30:00', 'Asia/Jakarta'));
+        $requesterSession = \Illuminate\Support\Str::random(40);
+        $staffSession = \Illuminate\Support\Str::random(40);
+        $this->withCookie(config('session.cookie'), $requesterSession);
         $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting))
             ->assertOk()
             ->assertSee('Ruang Konsultasi')
@@ -3659,19 +3703,23 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->postJson(route('konsultasi.messages.send', $meeting), ['body' => 'Pesan uji saat meeting'])
             ->assertCreated()
             ->assertJsonPath('message.body', 'Pesan uji saat meeting');
-        $this->actingAs($this->admin)->getJson(route('konsultasi.messages', $meeting))
+        $this->actingAs($this->admin)->withCookie(config('session.cookie'), $staffSession)->getJson(route('konsultasi.messages', $meeting))
             ->assertOk()
             ->assertJsonPath('messages.0.body', 'Pesan uji saat meeting');
-        $this->actingAs($authenticatedRequester);
+        $this->actingAs($authenticatedRequester)->withCookie(config('session.cookie'), $requesterSession);
         preg_match('/data-room-session="([^"]+)"/', $roomResponse->getContent(), $sessionMatch);
         $roomSession = $sessionMatch[1];
         $sdp = "v=0\r\na=ssrc:1048995972 msid:- 43d84ad7-224e-45a2-8e40-6589d611248a\r\n";
-        $this->post(route('konsultasi.signals.send', $meeting), ['session_id' => $roomSession, 'type' => 'description', 'payload' => ['type' => 'offer', 'sdp' => $sdp]])->assertCreated();
-
-        $staffRoomResponse = $this->actingAs($this->admin)->get(route('konsultasi.room', $meeting));
+        $staffRoomResponse = $this->actingAs($this->admin)->withCookie(config('session.cookie'), $staffSession)->get(route('konsultasi.room', $meeting));
         preg_match('/data-room-session="([^"]+)"/', $staffRoomResponse->getContent(), $staffSessionMatch);
         $this->assertSame($roomSession, $staffSessionMatch[1]);
-        $this->actingAs($this->admin)->get(route('konsultasi.signals.poll', [$meeting, 'after' => 0, 'session_id' => $roomSession]))
+        $this->actingAs($authenticatedRequester)->withCookie(config('session.cookie'), $requesterSession)->post(route('konsultasi.signals.send', $meeting), [
+            'session_id' => $roomSession,
+            'recipient_user_id' => $this->admin->id,
+            'type' => 'description',
+            'payload' => ['type' => 'offer', 'sdp' => $sdp],
+        ])->assertCreated();
+        $this->actingAs($this->admin)->withCookie(config('session.cookie'), $staffSession)->get(route('konsultasi.signals.poll', [$meeting, 'after' => 0, 'session_id' => $roomSession]))
             ->assertOk()
             ->assertJsonPath('signals.0.type', 'description')
             ->assertJsonPath('signals.0.payload.sdp', $sdp);
@@ -3689,14 +3737,14 @@ class AdminManagementPagesTest extends BaseTestCase
             'updated_at' => now(),
         ]);
         Meeting::whereKey($meeting->id)->update(['room_last_seen_at' => now()->subMinutes(5)]);
-        $newRoomResponse = $this->actingAs($authenticatedRequester)->get(route('konsultasi.room', $meeting));
+        $newRoomResponse = $this->actingAs($authenticatedRequester)->withCookie(config('session.cookie'), $requesterSession)->get(route('konsultasi.room', $meeting));
         preg_match('/data-room-session="([^"]+)"/', $newRoomResponse->getContent(), $newSessionMatch);
         $this->assertNotSame($roomSession, $newSessionMatch[1]);
-        $this->assertSame(0, DB::table('meeting_signals')->where('meeting_id', $meeting->id)->count());
+        $this->assertSame(0, DB::table('meeting_signals')->where('meeting_id', $meeting->id)->where('session_id', $newSessionMatch[1])->count());
 
         /** @var User $otherUser */
         $otherUser = User::factory()->create();
-        $otherUser->assignRole('user');
+        $otherUser->assignRole('admin');
         /** @var Authenticatable $authenticatedOther */
         $authenticatedOther = $otherUser;
         $this->actingAs($authenticatedOther)->get(route('konsultasi.room', $meeting))->assertForbidden();

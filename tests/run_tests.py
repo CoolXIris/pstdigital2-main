@@ -79,7 +79,7 @@ def _table_type(case: dict[str, Any]) -> str:
 
 
 def _catalog_candidates(question: str, *, limit: int = 3) -> list[dict[str, Any]]:
-    import bps_tools
+    from chatbot import bps_tools
 
     result = bps_tools.cari_variabel(question)
     candidates = result.get("hasil") or []
@@ -326,7 +326,7 @@ def _restore_instrumentation(originals: list[Any]) -> None:
     import bps_csv_catalog
     import bps_data_store
     import httpx
-    import main
+    from chatbot import main
 
     for name, original in reversed(originals):
         if name == "main.get_client":
@@ -459,7 +459,7 @@ def run(
     os.environ["GEMINI_DEBUG"] = "1"
     logging.disable(logging.CRITICAL)
     from judge import judge_response
-    import main
+    from chatbot import main
 
     budget = CallBudget(budget_file, gemini_limit, bps_limit)
     train_cases = read_jsonl(TESTS_DIR / "questions.jsonl") if split in {"train", "all"} else []

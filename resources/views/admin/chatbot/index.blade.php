@@ -24,7 +24,7 @@
     <div class="admin-panel-head">
         <div>
             <h2 class="admin-panel-title">Katalog data BPS</h2>
-            <p class="admin-panel-subtitle">Sinkronkan judul, topik, tahun, ID, dan tautan dari WebAPI. Baris lama yang tidak lagi muncul di API tetap disimpan.</p>
+            <p class="admin-panel-subtitle">Sinkronkan judul, topik, tahun, ID, dan tautan dari WebAPI. Baris lama yang tidak lagi muncul di API tetap disimpan. Pembaruan dapat memakan beberapa menit jika batas permintaan WebAPI tercapai; jangan tutup halaman selama proses berlangsung.</p>
         </div>
         <form method="POST" action="{{ route('admin.chatbot.catalog.refresh') }}" onsubmit="if (!confirm('Sinkronkan katalog tabel dari WebAPI BPS sekarang?')) return false; const button = this.querySelector('button'); button.disabled = true; button.querySelector('span').textContent = 'Menyinkronkan...';">
             @csrf

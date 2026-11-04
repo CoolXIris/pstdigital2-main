@@ -67,6 +67,8 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::post('admin/konsultasi/{meeting}/open-room', [KonsultasiAdminController::class, 'openRoomNow'])->name('admin.konsultasi.open-room');
     Route::put('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'updateHistory'])->name('admin.konsultasi.history.update');
     Route::delete('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'deleteHistory'])->name('admin.konsultasi.history.destroy');
+    Route::post('admin/konsultasi/{meeting}/room-invites', [KonsultasiAdminController::class, 'inviteRoomStaff'])
+        ->name('admin.konsultasi.room-invites.store');
     Route::get('admin/chatbot', [ChatbotController::class, 'management'])->name('admin.chatbot');
     Route::post('admin/chatbot/catalog/refresh', [ChatbotController::class, 'refreshBpsCatalog'])->name('admin.chatbot.catalog.refresh');
     Route::post('admin/chatbot/test', [ChatbotController::class, 'testMessage'])->name('admin.chatbot.test');

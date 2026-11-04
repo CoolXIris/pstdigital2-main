@@ -1,8 +1,8 @@
 import unittest
 import json
 
-from sumber_link import hapus_link_model, link_konten, link_tabel, slug_judul, susun_sumber
-import main
+from chatbot.sumber_link import hapus_link_model, link_konten, link_tabel, slug_judul, susun_sumber
+from chatbot import main
 
 
 class SumberLinkTests(unittest.TestCase):

@@ -19,12 +19,73 @@ from urllib.parse import quote
 import httpx
 from dotenv import load_dotenv
 
-from sumber_link import BASE, slug_judul
+from chatbot.sumber_link import BASE, slug_judul
 
 API_BASE = "https://webapi.bps.go.id/v1/api"
 SOURCE_BY_TYPE = {"Tabel Statis": "1", "Tabel Dinamis": "2", "SIMDASI": "3"}
 TYPE_BY_SOURCE = {source: table_type for table_type, source in SOURCE_BY_TYPE.items()}
 CSV_PATH = Path(__file__).resolve().parent / "tabel_bps_sumsel.csv"
+MAX_RATE_LIMIT_WAIT = 90
+MAX_RATE_LIMIT_RETRIES = 5
+
+
+class BpsRateLimitError(RuntimeError):
+    def __init__(self, retry_after: int):
+        super().__init__("Batas permintaan WebAPI BPS tercapai.")
+        self.retry_after = retry_after
+
+
+class BpsRequestError(RuntimeError):
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def _fetch_payload(client: httpx.Client, url: str, error_message: str) -> dict:
+    failures = 0
+    rate_limit_retries = 0
+    while True:
+        try:
+            response = client.get(url)
+            if response.status_code == 429:
+                retry_header = response.headers.get("retry-after", "")
+                retry_after = max(1, int(retry_header)) if retry_header.isdecimal() else 60
+                if retry_after > MAX_RATE_LIMIT_WAIT or rate_limit_retries >= MAX_RATE_LIMIT_RETRIES:
+                    raise BpsRateLimitError(retry_after)
+                rate_limit_retries += 1
+                time.sleep(retry_after)
+                continue
+            if response.is_error:
+                reason = f"http_{response.status_code}"
+                candidate = None
+            else:
+                try:
+                    candidate = response.json()
+                    reason = "api_status"
+                except ValueError:
+                    candidate = None
+                    reason = "invalid_json"
+            if isinstance(candidate, dict) and candidate.get("status") == "OK":
+                return candidate
+        except httpx.RequestError as exc:
+            detail = str(exc).casefold()
+            if "certificate_verify_failed" in detail:
+                reason = "transport_certificate"
+            elif any(text in detail for text in ("getaddrinfo", "name or service not known", "11001")):
+                reason = "transport_dns"
+            elif any(text in detail for text in ("10061", "connection refused")):
+                reason = "transport_refused"
+            elif any(text in detail for text in ("10013", "permission denied", "access permissions")):
+                reason = "transport_permission"
+            elif any(text in detail for text in ("timed out", "10060")):
+                reason = "transport_timeout"
+            else:
+                reason = f"transport_{type(exc).__name__}"
+
+        failures += 1
+        if failures >= 3:
+            raise BpsRequestError(error_message, reason)
+        time.sleep(0.5 * failures)
 
 
 def _title_key(value: object) -> str:
@@ -49,21 +110,7 @@ def _fetch_tables(client: httpx.Client, api_key: str, domain: str) -> list[dict[
         if page > 1:
             path += f"/page/{page}"
         url = f"{API_BASE}/{path}/key/{quote(api_key, safe='')}/"
-        payload = None
-        for attempt in range(3):
-            try:
-                response = client.get(url)
-                response.raise_for_status()
-                candidate = response.json()
-                if candidate.get("status") == "OK":
-                    payload = candidate
-                    break
-            except (httpx.HTTPError, ValueError):
-                pass
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-        if payload is None:
-            raise RuntimeError(f"WebAPI BPS gagal memuat katalog tabel pada halaman {page}.")
+        payload = _fetch_payload(client, url, f"WebAPI BPS gagal memuat katalog tabel pada halaman {page}.")
 
         data = payload.get("data")
         if not (
@@ -93,21 +140,7 @@ def _fetch_periods(
         if page > 1:
             path += f"/page/{page}"
         url = f"{API_BASE}/{path}/key/{quote(api_key, safe='')}/"
-        payload = None
-        for attempt in range(3):
-            try:
-                response = client.get(url)
-                response.raise_for_status()
-                candidate = response.json()
-                if candidate.get("status") == "OK":
-                    payload = candidate
-                    break
-            except (httpx.HTTPError, ValueError):
-                pass
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-        if payload is None:
-            raise RuntimeError(f"WebAPI BPS gagal memuat periode tabel dinamis {variable_id}.")
+        payload = _fetch_payload(client, url, f"WebAPI BPS gagal memuat periode tabel dinamis {variable_id}.")
 
         data = payload.get("data")
         if not (
@@ -401,6 +434,12 @@ def main() -> int:
                 api_key,
                 args.domain,
             )
+    except BpsRateLimitError as exc:
+        print(json.dumps({"error": "rate_limited", "retry_after": exc.retry_after}), file=sys.stderr)
+        return 1
+    except BpsRequestError as exc:
+        print(json.dumps({"error": "webapi_failed", "reason": exc.reason}), file=sys.stderr)
+        return 1
     except (OSError, RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

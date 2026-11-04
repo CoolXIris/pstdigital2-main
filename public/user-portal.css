@@ -145,8 +145,37 @@
 .portal-room-control:hover { background: #344b68; }
 .portal-room-control.is-muted { color: #fff; background: #b64d4d; }
 .portal-room-control.portal-room-hangup { width: 46px; color: #fff; background: #bb4141; border-radius: 22px; }
+.portal-room-stage { height: min(72vh, 720px); min-height: 450px; }
+.portal-room-gallery { position: absolute; inset: 0 0 116px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; }
+.portal-room-gallery[data-count="1"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.portal-room-camera-strip { display: contents; }
+.portal-room-tile { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #263951; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; }
+.portal-room-tile video { display: block; width: 100%; height: 100%; object-fit: cover; background: #102039; }
+.portal-room-tile.is-local video { transform: scaleX(-1); }
+.portal-room-tile > span { position: absolute; right: 8px; bottom: 8px; max-width: calc(100% - 16px); overflow: hidden; padding: 4px 7px; color: #fff; background: rgba(5,15,28,.72); border-radius: 4px; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.portal-room-gallery[data-count="2"] .portal-room-tile:not(.is-local) { position: absolute; inset: 8px; }
+.portal-room-gallery[data-count="2"] .portal-room-tile.is-local { position: absolute; z-index: 2; right: 20px; bottom: 20px; width: clamp(120px, 24%, 230px); aspect-ratio: 16/10; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+.portal-room-gallery[data-count="3"] .portal-room-tile:nth-last-child(2) { grid-column: 1 / -1; width: 50%; justify-self: center; }
+.portal-room-gallery .portal-room-placeholder { z-index: 1; inset: 0; pointer-events: none; }
+.portal-room-screen-stage[hidden] { display: none; }
+.portal-room-gallery.has-screen-share { display: flex; flex-direction: column; gap: 8px; }
+.portal-room-gallery.has-screen-share .portal-room-camera-strip { display: flex; flex: 0 0 116px; order: 0; gap: 8px; min-height: 0; }
+.portal-room-gallery.has-screen-share .portal-room-tile { width: calc(25% - 6px); height: 100%; flex: 1 1 0; }
+.portal-room-gallery.has-screen-share[data-count="2"] .portal-room-tile:not(.is-local) { position: relative; inset: auto; }
+.portal-room-gallery.has-screen-share .portal-room-tile.is-local { position: relative; inset: auto; width: auto; aspect-ratio: auto; }
+.portal-room-gallery.has-screen-share .portal-room-screen-stage { position: relative; display: flex; min-height: 0; flex: 1 1 auto; order: 1; align-items: center; justify-content: center; overflow: hidden; background: #050a12; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; }
+.portal-room-screen-stage video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.portal-room-screen-stage > span { position: absolute; right: 10px; bottom: 10px; padding: 5px 8px; color: #fff; background: rgba(5,15,28,.72); border-radius: 4px; font-size: 11px; }
+.portal-room-invite { margin: 12px 0; padding: 11px; color: #42546a; background: #f4f8fc; border: 1px solid #dce6f0; border-radius: 6px; font-size: 11px; }
+.portal-room-invite summary { color: var(--portal-blue); cursor: pointer; font-weight: 700; }
+.portal-room-invite p, .portal-room-invite small { display: block; margin: 8px 0; color: #6b7c90; font-size: 10px; line-height: 1.5; }
+.portal-room-invite form { display: grid; gap: 8px; margin-top: 9px; }
+.portal-room-invite label { display: flex; align-items: center; gap: 7px; }
+.portal-room-invite .portal-btn { justify-content: center; width: 100%; padding: 8px; }
+.portal-room-invited { display: grid; gap: 4px; margin: 8px 0; }
+.portal-room-invited span { color: #42546a; }
 .portal-room-stage:fullscreen { display: flex; width: 100vw; height: 100vh; min-height: 100vh; flex-direction: column; border: 0; border-radius: 0; }
-.portal-room-stage:fullscreen > #remote-video { width: 100vw; height: calc(100vh - 61px); min-height: 0; flex: 1; }
+.portal-room-stage:fullscreen .portal-room-gallery { inset: 0 0 116px; }
 .portal-room-aside { padding: 17px; background: #fff; border: 1px solid var(--portal-line); border-radius: 7px; }
 .portal-room-aside h2 { margin: 0 0 14px; color: var(--portal-ink); font-size: 13px; font-weight: 600; }
 .portal-room-aside dl { margin: 0; }
@@ -257,8 +286,8 @@
     .portal-chat-history { max-height: none; }
     .portal-chat-history-list { max-height: 250px; }
     .portal-chat-note { margin-top: 9px; }
-    .portal-room-stage { min-height: 58vh; }
-    .portal-room-stage > #remote-video { min-height: 58vh; height: 58vh; }
+    .portal-room-stage { height: 58vh; min-height: 380px; }
+    .portal-room-gallery.has-screen-share .portal-room-camera-strip { flex-basis: 84px; }
     .portal-room-aside { display: block; }
 }
 

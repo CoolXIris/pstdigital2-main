@@ -19,9 +19,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, Field
 
-import bps_tools
-import sumber_link
-import bps_csv_search
+from chatbot import bps_csv_search, bps_tools, sumber_link
 
 load_dotenv()
 

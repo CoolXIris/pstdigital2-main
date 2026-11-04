@@ -4,8 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import bps_tools
-import bps_csv_search
+from chatbot import bps_csv_search, bps_tools
 import bps_data_store
 from mysql_test_adapter import MySQLStorageTestConnection
 
@@ -687,7 +686,7 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(bps_tools.nama_indikator_utama(), list(expected))
 
     def test_golden_questions_route_to_the_expected_indicator_and_region(self):
-        import main
+        from chatbot import main
 
         with open("tests/Fixtures/bps-golden-questions.json", encoding="utf-8") as source:
             cases = json.load(source)
@@ -739,7 +738,7 @@ class BpsToolsTests(unittest.TestCase):
         self.assertEqual(result["wilayah_cakupan"], "Provinsi Sumatera Selatan")
 
     def test_unresolved_query_log_redacts_contact_details(self):
-        import main
+        from chatbot import main
 
         with self.assertLogs(main.logger, level="WARNING") as captured:
             main._record_unresolved_question(
@@ -755,7 +754,7 @@ class BpsToolsTests(unittest.TestCase):
         self.assertNotIn("081234567890", captured.output[0])
 
     def test_unresolved_query_log_records_a_cleaned_search_keyword(self):
-        import main
+        from chatbot import main
 
         with self.assertLogs(main.logger, level="WARNING") as captured:
             main._record_unresolved_question(
