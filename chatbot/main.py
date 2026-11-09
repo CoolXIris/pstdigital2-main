@@ -7,17 +7,16 @@ import re
 import threading
 import time
 from collections import deque
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from flask import Flask, jsonify, request as flask_request
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from chatbot import bps_csv_search, bps_tools, sumber_link
 
@@ -30,6 +29,19 @@ for noisy in ("httpx", "httpcore", "google_genai"):
 logger = logging.getLogger(__name__)
 
 
+class HTTPException(Exception):
+    def __init__(
+        self,
+        status_code: int,
+        detail: Any = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(str(detail))
+        self.status_code = status_code
+        self.detail = detail
+        self.headers = headers or {}
+
+
 def _warm_loop() -> None:
     while True:
         try:
@@ -39,15 +51,39 @@ def _warm_loop() -> None:
         time.sleep(15 * 60)
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    tool_names = [getattr(tool, "__name__", type(tool).__name__) for tool in bps_tools.TOOLS]
-    logger.info("BPS tools terdaftar: %s", ", ".join(tool_names))
-    threading.Thread(target=_warm_loop, daemon=True).start()
-    yield
+_warm_lock = threading.Lock()
+_warm_started = False
 
 
-app = FastAPI(title="BPS Sumatera Selatan Gemini Chat API", lifespan=lifespan)
+def _ensure_warm_thread() -> None:
+    global _warm_started
+    if _warm_started:
+        return
+    with _warm_lock:
+        if _warm_started:
+            return
+        tool_names = [getattr(tool, "__name__", type(tool).__name__) for tool in bps_tools.TOOLS]
+        logger.info("BPS tools terdaftar: %s", ", ".join(tool_names))
+        threading.Thread(target=_warm_loop, daemon=True).start()
+        _warm_started = True
+
+
+app = Flask(__name__)
+application = app
+
+
+@app.before_request
+def _before_request() -> None:
+    _ensure_warm_thread()
+
+
+@app.errorhandler(HTTPException)
+def _handle_http_exception(exc: HTTPException):
+    response = jsonify({"detail": exc.detail})
+    response.status_code = exc.status_code
+    for key, value in (exc.headers or {}).items():
+        response.headers[key] = value
+    return response
 WIB = timezone(timedelta(hours=7))
 _recent: deque[float] = deque()
 _rate_lock = threading.Lock()
@@ -3016,8 +3052,23 @@ def _format_static_table_fallback(data: dict, keyword: str) -> str:
 
 
 @app.post("/api/chat")
-def chat_endpoint(request: ChatRequest, authorization: str | None = Header(default=None)) -> dict:
-    verify_token(authorization)
+def chat_endpoint(
+    request: ChatRequest | None = None,
+    authorization: str | None = None,
+) -> dict:
+    if request is None:
+        if authorization is None:
+            authorization = flask_request.headers.get("Authorization")
+        verify_token(authorization)
+        payload = flask_request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="Payload JSON tidak valid.")
+        try:
+            request = ChatRequest.model_validate(payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    else:
+        verify_token(authorization)
     if not allow_request():
         raise HTTPException(
             status_code=429,
@@ -4154,3 +4205,11 @@ def chat_endpoint(request: ChatRequest, authorization: str | None = Header(defau
     if os.getenv("GEMINI_DEBUG") == "1":
         result["tool_calls"] = extract_tool_calls(tool_records)
     return result
+
+
+if __name__ == "__main__":
+    _ensure_warm_thread()
+    app.run(
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "8001")),
+    )

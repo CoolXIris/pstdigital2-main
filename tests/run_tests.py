@@ -351,7 +351,7 @@ def _run_case(
     retries: int,
     answer_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from fastapi import HTTPException
+    HTTPException = main_module.HTTPException
     from judge import judge_response
 
     before = counters.copy()

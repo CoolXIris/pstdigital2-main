@@ -1,1 +1,1 @@
-"""FastAPI chatbot service and its runtime modules."""
+"""Flask WSGI chatbot service and its runtime modules."""

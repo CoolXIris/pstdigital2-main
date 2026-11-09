@@ -23,7 +23,7 @@ Laravel is accessible, powerful, and provides tools required for large, robust a
 
 ## Gemini chatbot API
 
-The Laravel chatbot calls the private FastAPI service configured by
+The Laravel chatbot calls the private Flask WSGI service configured by
 `GEMINI_CHAT_API_URL`. Keep `GEMINI_API_KEY` and the shared
 `GEMINI_CHAT_API_TOKEN` on the server; do not expose either value in browser code
 or commit populated values to source control.
@@ -34,12 +34,12 @@ Install the Python service dependencies and start the API from the project root:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m uvicorn chatbot.main:app --host 127.0.0.1 --port 8001
+python -m chatbot.main
 ```
 
-Run this command from the project root, not from the `chatbot` directory. If
-the terminal is already in `chatbot`, run `cd ..` first. The old
-`uvicorn main:app` command cannot find the `chatbot` package from there.
+For cPanel / Niagahoster (**Setup Python App** / Phusion Passenger WSGI), set:
+- **Application Startup File**: `passenger_wsgi.py`
+- **Application Entry Point**: `application`
 
 Set the same strong `GEMINI_CHAT_API_TOKEN` in Laravel and the Python process,
 and set `GEMINI_API_KEY` for the Python process. `GEMINI_MODEL` defaults to
