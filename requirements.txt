@@ -5,4 +5,4 @@ python-dotenv
 PyMySQL>=1.1,<2
 pandas>=2.0
 lxml>=5.0
-tabulate>=0.9python -m chatbot.main
+tabulate>=0.9
