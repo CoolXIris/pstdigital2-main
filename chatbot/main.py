@@ -4131,12 +4131,12 @@ def chat_endpoint(
             )
     except genai_errors.APIError as exc:
         code = getattr(exc, "code", None)
-        logger.warning("Gemini API error, code=%s", code)
+        logger.warning("Gemini API error, code=%s: %s", code, exc)
         if canonical_fallback:
             return answer_with_verified_sources(canonical_fallback)
         raise HTTPException(
             status_code=429 if code == 429 else 502,
-            detail="Gemini tidak dapat memproses pesan saat ini.",
+            detail=f"Gemini API rate limit atau kuota tercapai ({code}). Silakan coba sesaat lagi.",
         ) from None
     except Exception as exc:
         logger.exception("Gemini request failed")

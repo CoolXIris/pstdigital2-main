@@ -77,7 +77,7 @@ class KonsultasiController extends Controller
                 'description' => $validated['deskripsi'],
                 'tanggal' => $validated['tanggal'],
                 'start_time' => $validated['waktu_mulai'],
-                'end_time' => $endTime,
+                'end_time' => $expectedEndTime,
                 'google_event_id' => null,
                 'google_meet_link' => null,
                 'status' => 0

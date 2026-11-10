@@ -72,7 +72,7 @@
             <span class="portal-eyebrow">Detail sesi</span>
             <h2>{{ $meeting->name }}</h2>
             <dl>
-                <div><dt>Pemohon</dt><dd>{{ $meeting->user?->name }}</dd></div>
+                <div><dt>Pengguna</dt><dd>{{ $meeting->user?->name }}</dd></div>
                 <div><dt>Petugas utama</dt><dd>{{ $meeting->assigned_staff }}</dd></div>
                 <div><dt>Jadwal</dt><dd>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}<br>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</dd></div>
             </dl>
