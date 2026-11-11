@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exports\DashboardReviewsExport;
 use App\Exports\UsersExport;
+use App\Mail\ConsultationMeetingNotice;
 use App\Models\ConsultationStaff;
 use App\Models\Meeting;
 use App\Models\User;
@@ -75,6 +76,25 @@ class AdminManagementPagesTest extends BaseTestCase
     {
         $this->assertStringNotContainsString('${APP_NAME}', config('mail.from.name'));
         $this->assertStringNotContainsString('$APP_NAME', config('mail.from.name'));
+
+        config([
+            'app.name' => 'PST Digital',
+            'mail.from.address' => 'noreply@example.org',
+            'mail.from.name' => '${APP_NAME}',
+        ]);
+        $notice = new ConsultationMeetingNotice(
+            'approved',
+            'user',
+            'Pengguna',
+            'Data Pertanian',
+            'Rabu, 11 November 2026',
+            '13:00 - 13:45 WIB',
+            'Petugas 1',
+            'https://example.org/konsultasi',
+        );
+
+        $this->assertSame('noreply@example.org', $notice->envelope()->from->address);
+        $this->assertSame('PST Digital', $notice->envelope()->from->name);
     }
 
     public function test_landing_page_renders_for_guests_and_users_with_incomplete_profiles(): void

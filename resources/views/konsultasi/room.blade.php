@@ -64,6 +64,7 @@
             <button class="portal-room-control" id="toggle-camera" type="button" aria-label="Matikan kamera"><i class="bi bi-camera-video-fill"></i></button>
             <button class="portal-room-control" id="share-screen" type="button" aria-label="Bagikan layar"><i class="bi bi-display"></i></button>
             <button class="portal-room-control" id="toggle-fullscreen" type="button" aria-label="Layar penuh"><i class="bi bi-fullscreen"></i></button>
+            <button class="portal-room-control" id="toggle-picture-in-picture" type="button" aria-label="Buka jendela konsultasi mengambang" title="Buka jendela konsultasi mengambang"><i class="bi bi-window"></i></button>
             <button class="portal-room-control portal-room-hangup" id="leave-room" type="button" aria-label="Keluar ruang"><i class="bi bi-telephone-x-fill"></i></button>
         </div>
     </section>
@@ -86,6 +87,7 @@
             </div>
         </dl>
         <p class="text-muted small">Untuk menyertakan suara, pilih tab browser saat berbagi layar lalu aktifkan opsi berbagi audio tab.</p>
+        <p class="text-muted small">Klik ikon jendela pada kontrol ruang sebelum berpindah tab untuk menampilkan room di jendela kecil. Fitur ini tersedia di Chrome atau Edge terbaru dan perlu dibuka lewat klik pengguna.</p>
 
         @if ($canManageRoomInvites)
             <details class="portal-room-invite">
@@ -149,6 +151,6 @@
 @endsection
 
 @section('scripts')
-<script src="{{ asset('consultation-room.js') }}?v=10" defer></script>
+<script src="{{ asset('consultation-room.js') }}?v=12" defer></script>
 @include('konsultasi.partials.text-chat-script')
 @endsection

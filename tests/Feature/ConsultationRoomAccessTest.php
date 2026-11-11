@@ -45,7 +45,9 @@ class ConsultationRoomAccessTest extends TestCase
         ]);
 
         $this->actingAs($approver)->get(route('konsultasi.room', $meeting))
-            ->assertOk()->assertSee('data-can-moderate="true"', false);
+            ->assertOk()
+            ->assertSee('data-can-moderate="true"', false)
+            ->assertSee('id="toggle-picture-in-picture"', false);
         $this->actingAs($invited)->get(route('konsultasi.room', $meeting))
             ->assertOk()->assertSee('data-can-moderate="true"', false);
         $this->actingAs(User::findOrFail($meeting->user_id))->get(route('konsultasi.room', $meeting))

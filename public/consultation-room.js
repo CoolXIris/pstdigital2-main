@@ -123,6 +123,10 @@
     let moderationNoticeTimer = null;
     let roomEndTimer = null;
     const peers = new Map();
+    const pictureInPictureButton = document.getElementById('toggle-picture-in-picture');
+    let pictureInPictureWindow = null;
+    let pictureInPictureTimer = null;
+    let pictureInPictureTiles = new Map();
     const screenQualitySelect = document.getElementById('screen-share-quality');
     const screenQualityStatus = document.getElementById('screen-share-quality-status');
     const screenProfiles = {
@@ -429,6 +433,207 @@
         return { tile, video, pinButton, mediaIndicators, cameraAvatar };
     };
 
+    const pictureInPictureSources = () => {
+        const activeSharer = [...peers.values()].find((peer) => peer.screenStream);
+        const activeScreenStream = screenStream || activeSharer?.screenStream;
+        const sources = [];
+        if (activeScreenStream?.getVideoTracks().some((track) => track.readyState === 'live')) {
+            sources.push({
+                id: 'screen',
+                stream: activeScreenStream,
+                label: screenStream ? 'Berbagi layar · Anda' : `Berbagi layar · ${activeSharer.name}`,
+                featured: true
+            });
+        }
+
+        const hasLiveCamera = (stream) => Boolean(stream?.getVideoTracks().some(
+            (track) => track.readyState === 'live' && track.enabled
+        ));
+        sources.push({
+            id: `participant-${currentUserId}`,
+            stream: hasLiveCamera(localStream) ? localStream : null,
+            label: 'Anda',
+            initials: (room.dataset.currentUserName || 'Anda').trim().charAt(0).toUpperCase(),
+            cameraOff: !hasLiveCamera(localStream),
+            local: true,
+            featured: false
+        });
+        for (const [id, peer] of peers) {
+            const cameraStream = peer.cameraStream || peer.video.srcObject;
+            const cameraEnabled = peer.deviceState.video && hasLiveCamera(cameraStream);
+            sources.push({
+                id: `participant-${id}`,
+                stream: cameraEnabled ? cameraStream : null,
+                label: peer.name,
+                initials: (peer.name || '?').trim().charAt(0).toUpperCase() || '?',
+                cameraOff: !cameraEnabled,
+                local: false,
+                featured: false
+            });
+        }
+
+        return sources;
+    };
+
+    const updatePictureInPictureWindow = () => {
+        if (!pictureInPictureWindow || pictureInPictureWindow.closed) return;
+
+        const doc = pictureInPictureWindow.document;
+        const sources = pictureInPictureSources();
+        const activeIds = new Set(sources.map((source) => source.id));
+
+        for (const [id, tile] of pictureInPictureTiles) {
+            if (!activeIds.has(id)) {
+                tile.remove();
+                pictureInPictureTiles.delete(id);
+            }
+        }
+
+        for (const source of sources) {
+            let tile = pictureInPictureTiles.get(source.id);
+            if (!tile) {
+                tile = doc.createElement('article');
+                tile.className = [
+                    'pst-pip-tile',
+                    source.featured ? 'is-featured' : 'is-participant',
+                    source.local ? 'is-local' : ''
+                ].filter(Boolean).join(' ');
+                const video = doc.createElement('video');
+                video.autoplay = true;
+                video.playsInline = true;
+                video.muted = true;
+                const avatar = doc.createElement('div');
+                avatar.className = 'pst-pip-camera-off';
+                const label = doc.createElement('span');
+                tile.append(video, avatar, label);
+                doc.querySelector('.pst-pip-gallery').append(tile);
+                pictureInPictureTiles.set(source.id, tile);
+            }
+            const video = tile.querySelector('video');
+            if (video.srcObject !== source.stream) {
+                video.srcObject = source.stream;
+                if (source.stream) video.play().catch(() => {});
+            }
+            video.hidden = !source.stream;
+            const avatar = tile.querySelector('.pst-pip-camera-off');
+            avatar.hidden = !source.cameraOff;
+            if (source.cameraOff) avatar.textContent = source.initials;
+            tile.querySelector('span').textContent = source.cameraOff
+                ? `${source.label} · Kamera mati`
+                : source.label;
+        }
+
+        let emptyState = doc.querySelector('.pst-pip-empty');
+        if (sources.length === 0 && !emptyState) {
+            emptyState = doc.createElement('p');
+            emptyState.className = 'pst-pip-empty';
+            emptyState.textContent = 'Menunggu video peserta...';
+            doc.querySelector('.pst-pip-gallery').append(emptyState);
+        } else if (sources.length > 0) {
+            emptyState?.remove();
+        }
+
+        doc.querySelector('.pst-pip-status').textContent = status.textContent;
+        for (const [action, controlId] of [
+            ['audio', 'toggle-mic'],
+            ['video', 'toggle-camera']
+        ]) {
+            const mainControl = document.getElementById(controlId);
+            const pipControl = doc.querySelector(`[data-pip-action="${action}"]`);
+            const label = mainControl.getAttribute('aria-label');
+            pipControl.textContent = label;
+            pipControl.classList.toggle('is-muted', mainControl.classList.contains('is-muted'));
+        }
+    };
+
+    const syncPictureInPictureButton = () => {
+        if (!pictureInPictureButton) return;
+        const active = Boolean(pictureInPictureWindow && !pictureInPictureWindow.closed);
+        pictureInPictureButton.classList.toggle('is-muted', active);
+        pictureInPictureButton.setAttribute('aria-pressed', String(active));
+        pictureInPictureButton.setAttribute(
+            'aria-label',
+            active ? 'Tutup jendela konsultasi mengambang' : 'Buka jendela konsultasi mengambang'
+        );
+        pictureInPictureButton.title = active
+            ? 'Jendela konsultasi mengambang aktif'
+            : 'Buka jendela konsultasi mengambang';
+    };
+
+    const openPictureInPictureWindow = async () => {
+        const requestWindow = window.documentPictureInPicture?.requestWindow;
+        if (!requestWindow) {
+            status.textContent = 'Jendela mengambang tidak didukung browser ini. Gunakan Chrome atau Microsoft Edge versi terbaru.';
+            return;
+        }
+
+        try {
+            pictureInPictureWindow = await requestWindow.call(window.documentPictureInPicture, {
+                width: 480,
+                height: 360
+            });
+            const doc = pictureInPictureWindow.document;
+            doc.title = 'PST Digital · Konsultasi';
+            doc.head.innerHTML = `
+                <meta charset="utf-8">
+                <style>
+                    * { box-sizing: border-box; }
+                    body { display: flex; flex-direction: column; height: 100vh; margin: 0; padding: 9px; overflow: hidden; color: #17253b; background: #f3f6fa; font: 13px Arial, sans-serif; }
+                    header { display: flex; flex: 0 0 auto; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 7px; }
+                    header strong { font-size: 13px; }
+                    .pst-pip-status { overflow: hidden; color: #52657d; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+                    .pst-pip-gallery { display: grid; flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(62px, 1fr); align-content: start; gap: 7px; min-height: 0; overflow: auto; }
+                    .pst-pip-tile { position: relative; min-width: 0; min-height: 62px; overflow: hidden; background: #182b42; border-radius: 7px; }
+                    .pst-pip-tile.is-featured { grid-column: 1 / -1; height: min(34vh, 170px); min-height: 92px; }
+                    .pst-pip-tile.is-participant { aspect-ratio: 16 / 9; }
+                    .pst-pip-tile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+                    .pst-pip-tile.is-local video { transform: scaleX(-1); }
+                    .pst-pip-camera-off { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 38px; aspect-ratio: 1; color: #fff; background: #52749f; border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); font-size: 18px; font-weight: 600; }
+                    .pst-pip-camera-off[hidden], .pst-pip-tile video[hidden] { display: none; }
+                    .pst-pip-tile span { position: absolute; right: 5px; bottom: 5px; left: 5px; overflow: hidden; padding: 4px 6px; color: #fff; background: #101923b8; border-radius: 4px; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+                    .pst-pip-empty { grid-column: 1 / -1; padding: 30px 8px; color: #52657d; text-align: center; }
+                    .pst-pip-controls { display: flex; flex: 0 0 auto; justify-content: center; gap: 8px; padding-top: 8px; }
+                    .pst-pip-controls button { min-width: 92px; padding: 8px 10px; color: #fff; background: #263951; border: 0; border-radius: 18px; cursor: pointer; font-size: 11px; }
+                    .pst-pip-controls button.is-muted { background: #b64d4d; }
+                    .pst-pip-controls button[data-pip-action="leave"] { min-width: 72px; background: #bb4141; }
+                    .pst-pip-controls button:focus-visible { outline: 2px solid #1769aa; outline-offset: 2px; }
+                    @media (max-height: 270px) { body { padding: 5px; } header { margin-bottom: 4px; } .pst-pip-controls { padding-top: 4px; } .pst-pip-controls button { padding: 5px 7px; } }
+                </style>`;
+            doc.body.innerHTML = `
+                <header><strong>PST Digital · Konsultasi</strong><span class="pst-pip-status"></span></header>
+                <main class="pst-pip-gallery"></main>
+                <footer class="pst-pip-controls" aria-label="Kontrol konsultasi">
+                    <button type="button" data-pip-action="audio"></button>
+                    <button type="button" data-pip-action="video"></button>
+                    <button type="button" data-pip-action="leave">Keluar</button>
+                </footer>`;
+            for (const [action, controlId] of [
+                ['audio', 'toggle-mic'],
+                ['video', 'toggle-camera'],
+                ['leave', 'leave-room']
+            ]) {
+                doc.querySelector(`[data-pip-action="${action}"]`).addEventListener('click', () => {
+                    document.getElementById(controlId).click();
+                });
+            }
+            pictureInPictureTiles = new Map();
+            pictureInPictureWindow.addEventListener('pagehide', () => {
+                if (pictureInPictureTimer) window.clearInterval(pictureInPictureTimer);
+                pictureInPictureTimer = null;
+                pictureInPictureWindow = null;
+                pictureInPictureTiles.clear();
+                syncPictureInPictureButton();
+            }, { once: true });
+            updatePictureInPictureWindow();
+            pictureInPictureTimer = window.setInterval(updatePictureInPictureWindow, 1000);
+            syncPictureInPictureButton();
+        } catch (error) {
+            pictureInPictureWindow = null;
+            syncPictureInPictureButton();
+            status.textContent = `Jendela mengambang tidak dapat dibuka: ${error.message}`;
+        }
+    };
+
     const updateScreenLayout = () => {
         const activeSharer = [...peers.values()].find((peer) => peer.screenStream);
         const localSharing = Boolean(screenStream);
@@ -479,6 +684,7 @@
             peer.pinButton.textContent = id === pinnedParticipantId ? 'Lepas sematan' : 'Sematkan';
             peer.pinButton.setAttribute('aria-pressed', id === pinnedParticipantId ? 'true' : 'false');
         }
+        updatePictureInPictureWindow();
     };
     unpinCameraButton.addEventListener('click', () => {
         pinnedParticipantId = null;
@@ -768,6 +974,11 @@
         if (screenQualityTimer) window.clearInterval(screenQualityTimer);
         if (roomEndTimer) window.clearInterval(roomEndTimer);
         if (moderationNoticeTimer) window.clearTimeout(moderationNoticeTimer);
+        if (pictureInPictureTimer) window.clearInterval(pictureInPictureTimer);
+        pictureInPictureTimer = null;
+        pictureInPictureWindow?.close();
+        pictureInPictureWindow = null;
+        syncPictureInPictureButton();
         const leaveController = new AbortController();
         const leaveTimeout = window.setTimeout(() => leaveController.abort(), 1500);
         try {
@@ -1040,6 +1251,13 @@
             status.textContent = 'Mode layar penuh tidak tersedia pada browser ini.';
         }
     });
+    pictureInPictureButton.addEventListener('click', () => {
+        if (pictureInPictureWindow && !pictureInPictureWindow.closed) {
+            pictureInPictureWindow.close();
+            return;
+        }
+        openPictureInPictureWindow();
+    });
     document.getElementById('leave-room').addEventListener('click', () => finishRoom('Anda keluar dari ruang konsultasi.'));
     window.addEventListener('beforeunload', () => {
         polling = false;
@@ -1047,6 +1265,8 @@
         screenStream?.getTracks().forEach((track) => track.stop());
         if (screenQualityTimer) window.clearInterval(screenQualityTimer);
         if (roomEndTimer) window.clearInterval(roomEndTimer);
+        if (pictureInPictureTimer) window.clearInterval(pictureInPictureTimer);
+        pictureInPictureWindow?.close();
         for (const peer of peers.values()) peer.connection.close();
     });
 
