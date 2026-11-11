@@ -13,8 +13,59 @@
 
 namespace App\Models{
 /**
- * 
- *
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\ChatbotMessage> $messages
+ * @property-read int|null $messages_count
+ * @property-read \App\Models\User|null $user
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotConversation newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotConversation newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotConversation query()
+ */
+	class ChatbotConversation extends \Eloquent {}
+}
+
+namespace App\Models{
+/**
+ * @property-read \App\Models\ChatbotKnowledgeSource|null $source
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotKnowledgeChunk newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotKnowledgeChunk newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotKnowledgeChunk query()
+ */
+	class ChatbotKnowledgeChunk extends \Eloquent {}
+}
+
+namespace App\Models{
+/**
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\ChatbotKnowledgeChunk> $chunks
+ * @property-read int|null $chunks_count
+ * @property-read \App\Models\User|null $uploader
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotKnowledgeSource newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotKnowledgeSource newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotKnowledgeSource query()
+ */
+	class ChatbotKnowledgeSource extends \Eloquent {}
+}
+
+namespace App\Models{
+/**
+ * @property-read \App\Models\ChatbotConversation|null $conversation
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotMessage newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotMessage newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ChatbotMessage query()
+ */
+	class ChatbotMessage extends \Eloquent {}
+}
+
+namespace App\Models{
+/**
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ConsultationStaff newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ConsultationStaff newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ConsultationStaff query()
+ */
+	class ConsultationStaff extends \Eloquent {}
+}
+
+namespace App\Models{
+/**
  * @property int $id
  * @property string $name
  * @property int $status
@@ -57,8 +108,31 @@ namespace App\Models{
 
 namespace App\Models{
 /**
- * 
- *
+ * @property int $id
+ * @property string $token
+ * @property string $name
+ * @property string $group_id
+ * @property string|null $created_by
+ * @property string|null $updated_by
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereCreatedBy($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereGroupId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereName($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereToken($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|TelegramBot whereUpdatedBy($value)
+ */
+	class TelegramBot extends \Eloquent {}
+}
+
+namespace App\Models{
+/**
  * @property-read \Illuminate\Database\Eloquent\Collection|\Spatie\Permission\Models\Role[] $roles
  * @property-read \Illuminate\Database\Eloquent\Collection|\Spatie\Permission\Models\Permission[] $permissions
  * @method static \Illuminate\Database\Eloquent\Builder|User role($roles, $guard = null)

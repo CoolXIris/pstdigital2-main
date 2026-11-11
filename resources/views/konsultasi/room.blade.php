@@ -88,35 +88,35 @@
         <p class="text-muted small">Untuk menyertakan suara, pilih tab browser saat berbagi layar lalu aktifkan opsi berbagi audio tab.</p>
 
         @if ($canManageRoomInvites)
-        <details class="portal-room-invite">
-            <summary><i class="bi bi-person-plus"></i> Tambah petugas (maksimal 2)</summary>
-            <p>Pilih satu atau dua akun petugas admin. Setelah disimpan, tombol bergabung tersedia pada halaman mereka.</p>
-            <div class="portal-room-invited" data-room-invited-list @if ($invitedUsers->isEmpty()) hidden @endif>
-                @if ($invitedUsers->isNotEmpty())
-                <strong>Petugas yang diundang:</strong>
-                @foreach ($invitedUsers as $invitedUser)
-                <span>{{ $invitedUser->name }}</span>
-                @endforeach
-                @endif
-            </div>
-            @if ($availableStaff->isNotEmpty() && $invitedUsers->count() < 2)
-                <form method="POST" action="{{ route('admin.konsultasi.room-invites.store', $meeting) }}"
-                data-room-invite-form data-max-invites="{{ 2 - $invitedUsers->count() }}"
-                data-total-invites="{{ $invitedUsers->count() }}">
-                @csrf
-                @foreach ($availableStaff as $staffUser)
-                <label><input type="checkbox" name="staff_user_ids[]" value="{{ $staffUser->id }}"> {{ $staffUser->name }}</label>
-                @endforeach
-                @error('staff_user_ids')<small class="text-danger">{{ $message }}</small>@enderror
-                <button class="portal-btn portal-btn-primary" type="submit">Undang petugas</button>
-                <small data-room-invite-status role="status" aria-live="polite"></small>
-                </form>
+            <details class="portal-room-invite">
+                <summary><i class="bi bi-person-plus"></i> Tambah petugas (maksimal 2)</summary>
+                <p>Pilih satu atau dua akun petugas admin. Setelah disimpan, tombol bergabung tersedia pada halaman mereka.</p>
+                <div class="portal-room-invited" data-room-invited-list @if ($invitedUsers->isEmpty()) hidden @endif>
+                    @if ($invitedUsers->isNotEmpty())
+                        <strong>Petugas yang diundang:</strong>
+                        @foreach ($invitedUsers as $invitedUser)
+                            <span>{{ $invitedUser->name }}</span>
+                        @endforeach
+                    @endif
+                </div>
+                @if ($availableStaff->isNotEmpty() && $invitedUsers->count() < 2)
+                    <form method="POST" action="{{ route('admin.konsultasi.room-invites.store', $meeting) }}"
+                        data-room-invite-form data-max-invites="{{ 2 - $invitedUsers->count() }}"
+                        data-total-invites="{{ $invitedUsers->count() }}">
+                        @csrf
+                        @foreach ($availableStaff as $staffUser)
+                            <label><input type="checkbox" name="staff_user_ids[]" value="{{ $staffUser->id }}"> {{ $staffUser->name }}</label>
+                        @endforeach
+                        @error('staff_user_ids')<small class="text-danger">{{ $message }}</small>@enderror
+                        <button class="portal-btn portal-btn-primary" type="submit">Undang petugas</button>
+                        <small data-room-invite-status role="status" aria-live="polite"></small>
+                    </form>
                 @elseif ($invitedUsers->count() >= 2)
-                <small data-room-invite-capacity>Batas dua petugas tambahan sudah tercapai.</small>
+                    <small data-room-invite-capacity>Batas dua petugas tambahan sudah tercapai.</small>
                 @else
-                <small>Tidak ada akun petugas lain yang tersedia.</small>
+                    <small>Tidak ada akun petugas lain yang tersedia.</small>
                 @endif
-        </details>
+            </details>
         @endif
 
         <div class="portal-room-chat-entry">
