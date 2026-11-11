@@ -201,6 +201,13 @@ def get_client() -> genai.Client:
     return _client
 
 
+def _gemini_model() -> str:
+    model = os.getenv("GEMINI_MODEL", "").strip()
+    if not model:
+        raise HTTPException(status_code=503, detail="GEMINI_MODEL belum dikonfigurasi.")
+    return model
+
+
 class Turn(BaseModel):
     prompt: str = Field(max_length=4000)
     response: str = Field(max_length=6000)
@@ -744,7 +751,7 @@ def _generate_without_tools(contents: list[types.Content], instruction: str):
     final_contents = list(contents)
     final_contents.append(types.Content(role="user", parts=[types.Part(text=instruction)]))
     return get_client().models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+        model=_gemini_model(),
         contents=final_contents,
         config=types.GenerateContentConfig(
             system_instruction=build_instructions(),
@@ -781,7 +788,7 @@ def _generate_with_manual_tools(
             ),
         )
     response = None if hit_limit else get_client().models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+            model=_gemini_model(),
         contents=pending_contents,
         config=initial_config,
     )
@@ -827,7 +834,7 @@ def _generate_with_manual_tools(
             hit_limit = True
             break
         response = get_client().models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+            model=_gemini_model(),
             contents=pending_contents,
             config=config,
         )
@@ -3341,8 +3348,12 @@ def chat_endpoint(
             ),
         }
         canonical_tool_call = " + ".join(
-            f"cari_variabel(kata_kunci='{item['keyword']}') -> "
-            f"ambil_data(var_id={item['candidate']['var_id']})"
+            (
+                f"cari_variabel(kata_kunci='{item['keyword']}') -> "
+                f"ambil_data(var_id={item['candidate']['var_id']})"
+            )
+            if item.get("candidate") and isinstance(item["candidate"], dict) and "var_id" in item["candidate"]
+            else f"cari_variabel(kata_kunci='{item.get('keyword', '')}')"
             for item in multi_topic_intents
         )
         canonical_fallback = _format_multi_topic_fallback(
@@ -4101,7 +4112,7 @@ def chat_endpoint(
     try:
         if canonical_data is not None:
             response = get_client().models.generate_content(
-                model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+                model=_gemini_model(),
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=build_instructions(),
@@ -4122,13 +4133,15 @@ def chat_endpoint(
                 )
         else:
             response = get_client().models.generate_content(
-                model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+                model=_gemini_model(),
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=build_instructions(),
                     temperature=_chat_temperature(),
                 ),
             )
+    except HTTPException:
+        raise
     except genai_errors.APIError as exc:
         code = getattr(exc, "code", None)
         logger.warning("Gemini API error, code=%s: %s", code, exc)

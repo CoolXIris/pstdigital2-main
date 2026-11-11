@@ -11,7 +11,10 @@ from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pymysql
+from dotenv import load_dotenv
 from pymysql.cursors import DictCursor
+
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 _REGION_ALIAS_GROUPS = {
