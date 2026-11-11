@@ -37,7 +37,7 @@ gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
 bps_key = os.getenv("BPS_API_KEY", "").strip()
 chat_token = os.getenv("GEMINI_CHAT_API_TOKEN", "").strip()
 chat_url = os.getenv("GEMINI_CHAT_API_URL", "http://127.0.0.1:8001/api/chat").strip()
-model = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest").strip()
+model = os.getenv("GEMINI_MODEL", "").strip()
 db_host = os.getenv("DB_HOST", "127.0.0.1")
 db_name = os.getenv("DB_DATABASE", "")
 db_user = os.getenv("DB_USERNAME", "")
@@ -46,7 +46,7 @@ print(f"  - GEMINI_API_KEY       : {'[OK] Terisi' if gemini_key else '[GAGAL] KO
 print(f"  - BPS_API_KEY          : {'[OK] Terisi' if bps_key else '[GAGAL] KOSONG'}")
 print(f"  - GEMINI_CHAT_API_TOKEN: {'[OK] Terisi' if chat_token else '[GAGAL] KOSONG'}")
 print(f"  - GEMINI_CHAT_API_URL  : {chat_url}")
-print(f"  - GEMINI_MODEL         : {model}")
+print(f"  - GEMINI_MODEL         : {model or '[GAGAL] KOSONG'}")
 print(f"  - Target MySQL         : {db_user}@{db_host}/{db_name}")
 
 # -------------------------------------------------------------

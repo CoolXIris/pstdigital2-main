@@ -42,8 +42,9 @@ For cPanel / Niagahoster (**Setup Python App** / Phusion Passenger WSGI), set:
 - **Application Entry Point**: `application`
 
 Set the same strong `GEMINI_CHAT_API_TOKEN` in Laravel and the Python process,
-and set `GEMINI_API_KEY` for the Python process. `GEMINI_MODEL` defaults to
-`gemini-flash-lite-latest`. For a separately hosted service, set
+and set `GEMINI_API_KEY` and `GEMINI_MODEL` for the Python process. The model
+is read from `GEMINI_MODEL` in the environment; there is no hard-coded fallback.
+For a separately hosted service, set
 `GEMINI_CHAT_API_URL` to its private or HTTPS `/api/chat` URL.
 
 ## Canonical BPS indicators
