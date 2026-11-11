@@ -443,11 +443,18 @@
         const screenSource = localSharing ? screenStream : activeSharer?.screenStream || null;
         if (screenSource) {
             if (screenVideo.srcObject !== screenSource) screenVideo.srcObject = screenSource;
+            screenVideo.muted = localSharing;
+            screenVideo.controls = !localSharing;
             screenLabel.textContent = localSharing
                 ? 'Berbagi layar · Anda'
                 : `Berbagi layar · ${activeSharer.name}`;
+            screenVideo.play().catch(() => {
+                if (!localSharing) status.textContent = 'Klik video berbagi layar untuk mengaktifkan audionya.';
+            });
         } else {
             if (screenVideo.srcObject) screenVideo.srcObject = null;
+            screenVideo.muted = false;
+            screenVideo.controls = false;
             screenLabel.textContent = '';
         }
         if (pinnedCamera) {
@@ -549,6 +556,8 @@
         }
         const activeScreenTrack = screenStream?.getVideoTracks()[0] || null;
         const screenSender = activeScreenTrack ? connection.addTrack(activeScreenTrack, screenStream) : null;
+        const activeScreenAudioTrack = screenStream?.getAudioTracks()[0] || null;
+        const screenAudioSender = activeScreenAudioTrack ? connection.addTrack(activeScreenAudioTrack, screenStream) : null;
 
         const peer = {
             id,
@@ -567,8 +576,9 @@
             videoTransceiver,
             screenStream: null,
             screenSender,
-            screenStreamId: null,
-            screenTrackId: null,
+            screenAudioSender,
+            screenStreamId: screenStream?.id || null,
+            screenTrackId: activeScreenTrack?.id || null,
             receivedVideoStreams: new Map(),
             cameraStream: null,
             initialized: false,
@@ -578,7 +588,7 @@
             ignoreOffer: false,
             settingRemoteAnswer: false,
             answeringRemoteOffer: false,
-            negotiationPending: Boolean(screenSender),
+            negotiationPending: Boolean(screenSender || screenAudioSender),
             remoteDescriptionReady: false,
             pendingCandidates: [],
             operationChain: Promise.resolve(),
@@ -597,7 +607,7 @@
         };
         connection.ontrack = (event) => {
             const incomingStream = event.streams?.[0];
-            if (incomingStream) peer.receivedVideoStreams.set(event.track.id, incomingStream);
+            if (incomingStream && event.track.kind === 'video') peer.receivedVideoStreams.set(event.track.id, incomingStream);
             if (incomingStream && (incomingStream.id === peer.screenStreamId || event.track.id === peer.screenTrackId)) {
                 peer.screenStream = incomingStream;
                 peer.cameraStream = [...peer.receivedVideoStreams.entries()]
@@ -884,9 +894,10 @@
         screenQualityTimer = null;
         activeScreen.getTracks().forEach((track) => track.stop());
         await Promise.all([...peers.values()].map((peer) => {
-            if (!peer.screenSender) return Promise.resolve();
-            peer.connection.removeTrack(peer.screenSender);
+            if (peer.screenSender) peer.connection.removeTrack(peer.screenSender);
+            if (peer.screenAudioSender) peer.connection.removeTrack(peer.screenAudioSender);
             peer.screenSender = null;
+            peer.screenAudioSender = null;
             return Promise.resolve();
         }));
         await sendMediaState({ source: 'camera' });
@@ -906,14 +917,21 @@
         try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({
                 video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 60 } },
-                audio: false
+                audio: true
             });
             const screenTrack = screenStream.getVideoTracks()[0];
+            const screenAudioTrack = screenStream.getAudioTracks()[0] || null;
+            await sendMediaState({ source: 'screen', stream_id: screenStream.id, track_id: screenTrack.id });
             await Promise.all([...peers.values()].map((peer) => {
                 peer.screenSender = peer.connection.addTrack(screenTrack, screenStream);
+                peer.screenAudioSender = screenAudioTrack
+                    ? peer.connection.addTrack(screenAudioTrack, screenStream)
+                    : null;
                 return Promise.resolve();
             }));
-            await sendMediaState({ source: 'screen', stream_id: screenStream.id, track_id: screenTrack.id });
+            if (!screenAudioTrack) {
+                status.textContent = 'Audio tidak tertangkap. Pilih tab browser dan aktifkan opsi berbagi audio tab.';
+            }
             if (selectedScreenQuality === 'auto') automaticScreenProfile = '1080p30';
             await applyScreenQuality();
             screenQualityTimer = window.setInterval(adaptScreenQuality, 5000);
@@ -922,9 +940,17 @@
             updateScreenLayout();
             screenTrack.addEventListener('ended', () => stopScreenShare().catch((error) => { status.textContent = error.message; }), { once: true });
         } catch (error) {
-            screenStream?.getTracks().forEach((track) => track.stop());
-            screenStream = null;
-            status.textContent = error.name === 'NotAllowedError' ? 'Izin berbagi layar dibatalkan.' : 'Berbagi layar tidak tersedia.';
+            if (screenStream) {
+                try {
+                    await stopScreenShare();
+                } catch (cleanupError) {
+                    status.textContent = `Berbagi layar gagal: ${error.message}. Pembersihan media juga gagal: ${cleanupError.message}`;
+                    return;
+                }
+            }
+            status.textContent = error.name === 'NotAllowedError'
+                ? 'Izin berbagi layar dibatalkan.'
+                : `Berbagi layar tidak tersedia: ${error.message}`;
         }
     });
     screenQualitySelect.addEventListener('change', async () => {

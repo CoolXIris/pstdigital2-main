@@ -55,6 +55,28 @@ class AdminManagementPagesTest extends BaseTestCase
         $this->actingAs($this->admin)->get(route('users.index'))->assertOk();
     }
 
+    public function test_google_login_uses_the_configured_callback_url(): void
+    {
+        config([
+            'services.google.client_id' => 'google-test-client',
+            'services.google.redirect' => 'https://pst.example/google_callback',
+        ]);
+
+        $response = $this->get(route('google_login'));
+        $response->assertRedirect();
+        parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $query);
+
+        $this->assertSame('https://pst.example/google_callback', $query['redirect_uri']);
+        $this->assertContains('https://www.googleapis.com/auth/calendar', explode(' ', $query['scope']));
+        $this->assertNotContains('https://www.googleapis.com/auth/meetings.space.settings', explode(' ', $query['scope']));
+    }
+
+    public function test_mail_sender_name_does_not_expose_an_unresolved_app_name_placeholder(): void
+    {
+        $this->assertStringNotContainsString('${APP_NAME}', config('mail.from.name'));
+        $this->assertStringNotContainsString('$APP_NAME', config('mail.from.name'));
+    }
+
     public function test_landing_page_renders_for_guests_and_users_with_incomplete_profiles(): void
     {
         $this->withoutVite();
@@ -2106,6 +2128,7 @@ class AdminManagementPagesTest extends BaseTestCase
             'status' => 2,
             'assigned_staff' => $staff->name,
             'assigned_staff_id' => $staff->id,
+            'room_provider' => Meeting::ROOM_PROVIDER_WEBRTC,
         ]);
 
         $this->actingAs($this->admin)
@@ -2118,6 +2141,102 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertSessionHas('message');
 
         $this->assertDatabaseHas('meeting', ['id' => $meeting->id, 'status' => 1, 'assigned_staff' => $staff->name]);
+    }
+
+    public function test_approving_google_meet_creates_a_calendar_conference_for_the_consultation_agenda(): void
+    {
+        $staff = ConsultationStaff::query()->firstOrFail();
+        $requester = User::factory()->create();
+        $requester->assignRole('user');
+        $meeting = $this->createMeeting(['user_id' => $requester->id]);
+        User::query()->whereKey($this->admin->id)->update(['google_access_token' => 'google-access-token']);
+
+        Http::fake([
+            'www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'id' => str_repeat('a', 40),
+                'conferenceData' => [
+                    'entryPoints' => [
+                        ['entryPointType' => 'video', 'uri' => 'https://meet.google.com/abc-defg-hij'],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->patch(route('admin.konsultasi.status', $meeting), [
+                'action' => 'confirm',
+                'assigned_staff' => $staff->name,
+                'room_provider' => Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('message', fn (string $message) => str_contains($message, 'Google Meet berhasil dibuat'));
+
+        $this->assertDatabaseHas('meeting', [
+            'id' => $meeting->id,
+            'status' => 2,
+            'room_provider' => Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            'google_event_id' => str_repeat('a', 40),
+            'google_meet_link' => 'https://meet.google.com/abc-defg-hij',
+        ]);
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'conferenceDataVersion=1')
+            && $request['summary'] === 'Konsultasi Statistik: '.$meeting->name
+            && $request['description'] !== ''
+            && str_contains($request->url(), 'sendUpdates=none')
+            && $request['conferenceData']['createRequest']['conferenceSolutionKey']['type'] === 'hangoutsMeet'
+            && empty($request['attendees']));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'meet.googleapis.com'));
+    }
+
+    public function test_failed_google_meet_creation_can_be_retried_by_the_approver(): void
+    {
+        $meeting = $this->createMeeting([
+            'status' => 2,
+            'room_provider' => Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            'approved_by_user_id' => $this->admin->id,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.konsultasi.google-meet.retry', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('error', fn (string $message) => str_contains($message, 'Hubungkan akun Google'));
+
+        User::query()->whereKey($this->admin->id)->update(['google_access_token' => 'google-access-token']);
+        Http::fake([
+            'www.googleapis.com/calendar/v3/calendars/primary/events*' => Http::response([
+                'id' => str_repeat('b', 40),
+                'hangoutLink' => 'https://meet.google.com/xyz-abcd-efg',
+            ]),
+        ]);
+
+        $this->actingAs($this->admin)
+            ->post(route('admin.konsultasi.google-meet.retry', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('message');
+
+        $this->assertDatabaseHas('meeting', [
+            'id' => $meeting->id,
+            'google_meet_link' => 'https://meet.google.com/xyz-abcd-efg',
+        ]);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'meet.googleapis.com'));
+    }
+
+    public function test_existing_google_meet_link_is_available_without_restricting_google_access(): void
+    {
+        $meeting = $this->createMeeting([
+            'status' => 2,
+            'room_provider' => Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            'approved_by_user_id' => $this->admin->id,
+            'google_event_id' => str_repeat('d', 40),
+            'google_meet_link' => 'https://meet.google.com/abc-defg-hij',
+            'tanggal' => '2026-10-15',
+            'start_time' => '10:00:00',
+            'end_time' => '11:00:00',
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-10-15 10:30:00', 'Asia/Jakarta'));
+        $this->actingAs($this->admin)->get(route('konsultasi.room', $meeting))
+            ->assertRedirect('https://meet.google.com/abc-defg-hij');
+        Http::assertNothingSent();
+        Carbon::setTestNow();
     }
 
     public function test_a_staff_member_cannot_be_assigned_to_overlapping_confirmed_meetings(): void
@@ -2485,7 +2604,7 @@ class AdminManagementPagesTest extends BaseTestCase
             ->assertOk()
             ->assertJsonPath(
                 'reply',
-                "Tautan sumber BPS tersedia pada bagian Sumber. "
+                'Tautan sumber BPS tersedia pada bagian Sumber. '
                     ."Pertumbuhan ekonomi Sumatera Selatan 5,1 persen.\n\n"
                     ."Sumber:\n- [Pertumbuhan ekonomi](https://sumsel.bps.go.id/id/statistics-table?subject=565)"
             );
@@ -2761,7 +2880,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $user = User::factory()->create();
         $user->assignRole('user');
         $oldCacheKey = 'chatbot:ai:'.sha1(
-            mb_strtolower(trim($question)).'|'.sha1(''). '|'.sha1(serialize([]))
+            mb_strtolower(trim($question)).'|'.sha1('').'|'.sha1(serialize([]))
         );
         Cache::put($oldCacheKey, 'Jawaban lama dari cache versi sebelumnya.', now()->addMinutes(20));
 
@@ -2827,6 +2946,7 @@ class AdminManagementPagesTest extends BaseTestCase
             if (str_contains($request->url(), '127.0.0.1:8001/api/chat')) {
                 return Http::response(['reply' => 'Saat ini chatbot BPS Sumsel sedang menerima banyak permintaan. Coba lagi nanti.'], 200);
             }
+
             return Http::response(['status' => 'ERROR'], 404);
         });
 
@@ -3280,7 +3400,7 @@ class AdminManagementPagesTest extends BaseTestCase
         $question = 'Tingkat pengangguran Sumatera Selatan terbaru?';
         $unverifiedReply = 'Maaf, data tersebut belum dapat diverifikasi dari WebAPI BPS saat ini.';
         $cacheKey = 'chatbot:ai:'.sha1(
-            mb_strtolower(trim($question)).'|'.sha1(''). '|'.sha1(serialize([]))
+            mb_strtolower(trim($question)).'|'.sha1('').'|'.sha1(serialize([]))
         );
         Cache::put($cacheKey, $unverifiedReply, now()->addMinutes(20));
 

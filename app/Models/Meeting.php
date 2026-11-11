@@ -10,9 +10,14 @@ class Meeting extends Model
 {
     //
 
+    public const ROOM_PROVIDER_WEBRTC = 'webrtc';
+
+    public const ROOM_PROVIDER_GOOGLE_MEET = 'google_meet';
+
     protected $table = 'meeting';
 
     protected $guarded = [];
+
     protected $casts = [
         'room_opened_at' => 'immutable_datetime',
     ];
@@ -34,12 +39,21 @@ class Meeting extends Model
             }
         }
 
+        if ($this->room_provider === self::ROOM_PROVIDER_GOOGLE_MEET) {
+            return filled($this->google_meet_link) && $now->betweenIncluded($start, $end);
+        }
+
         return $now->betweenIncluded($start, $end);
     }
 
     public function canBeOpenedEarly(?Carbon $at = null): bool
     {
-        if ((int) $this->status !== 2 || $this->room_opened_at) {
+        if ((int) $this->status !== 2
+            || $this->room_opened_at) {
+            return false;
+        }
+
+        if ($this->room_provider === self::ROOM_PROVIDER_GOOGLE_MEET && ! filled($this->google_meet_link)) {
             return false;
         }
 
