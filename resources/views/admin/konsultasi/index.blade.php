@@ -81,22 +81,34 @@
                         <span class="admin-badge admin-badge-green"><i class="fe fe-check-circle"></i> Terkonfirmasi</span>
                         <h3>{{ $meeting->user?->name ?? 'Pengguna dihapus' }}</h3>
                         <p class="admin-confirmed-topic">{{ $meeting->name }}</p>
-                        <div class="admin-confirmed-detail"><span><i class="fe fe-calendar"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('D, d M Y') }}</span><span><i class="fe fe-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span><span><i class="fe fe-user"></i>{{ $meeting->assigned_staff ?: 'Petugas belum ditentukan' }}</span></div>
+                        <div class="admin-confirmed-detail"><span><i class="fe fe-calendar"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('D, d M Y') }}</span><span><i class="fe fe-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span><span><i class="fe fe-user"></i>{{ $meeting->assigned_staff ?: 'Petugas belum ditentukan' }}</span><span><i class="fe fe-video"></i>{{ $meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET ? 'Google Meet' : 'WebRTC PST Digital' }}</span></div>
                         @if ($meeting->room_open)
-                            <div class="admin-room-actions">
-                                <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kapasitas ruang...</span>
-                                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" data-room-join-form hidden>
-                                    <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button>
+                            @if ($meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET)
+                                <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" target="_blank" rel="noopener">
+                                    <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk Google Meet</button>
                                 </form>
-                            </div>
-                        @elseif ($meeting->can_open_room_now)
+                            @else
+                                <div class="admin-room-actions">
+                                    <span class="admin-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite"><i class="fe fe-refresh-cw"></i> Memeriksa kapasitas ruang...</span>
+                                    <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" data-room-join-form hidden>
+                                        <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Masuk ruang konsultasi</button>
+                                    </form>
+                                </div>
+                            @endif
+                        @elseif ($meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET && !$meeting->google_meet_link && (int) $meeting->approved_by_user_id === (int) Auth::id())
+                            <form method="POST" action="{{ route('admin.konsultasi.google-meet.retry', $meeting) }}">
+                                @csrf
+                                <button class="admin-btn admin-btn-outline admin-confirmed-button" type="submit"><i class="fe fe-refresh-cw"></i> Buat Google Meet</button>
+                            </form>
+                            <p class="admin-room-window-note">Hubungkan akun Google petugas dengan akses Google Calendar untuk membuat meeting.</p>
+                        @elseif ($meeting->can_open_room_now && ($meeting->room_provider !== \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET || (int) $meeting->approved_by_user_id === (int) Auth::id()))
                             <form method="POST" action="{{ route('admin.konsultasi.open-room', $meeting) }}">
                                 @csrf
-                                <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> Buka ruang konsultasi sekarang</button>
+                                <button class="admin-btn admin-btn-primary admin-confirmed-button" type="submit"><i class="fe fe-video"></i> {{ $meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET ? 'Buka Google Meet sekarang' : 'Buka ruang konsultasi sekarang' }}</button>
                             </form>
                             <p class="admin-room-window-note">Pemohon dapat masuk lebih awal. Jam selesai tetap sesuai jadwal.</p>
                         @else
-                            <p class="admin-room-window-note">Ruang aktif pada tanggal dan jam sesi.</p>
+                            <p class="admin-room-window-note">{{ $meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET ? 'Google Meet aktif pada tanggal dan jam sesi.' : 'Ruang aktif pada tanggal dan jam sesi.' }}</p>
                         @endif
                         @if (!$meeting->approved_by_user_id || (int) $meeting->approved_by_user_id === (int) Auth::id())
                             <button class="admin-btn admin-btn-outline admin-confirmed-button consultation-chat-open" type="button" data-consultation-chat data-chat-url="{{ route('konsultasi.messages', $meeting) }}" data-chat-status-url="{{ route('konsultasi.messages.status', $meeting) }}" data-chat-topic="{{ $meeting->name }}" data-chat-person="{{ $meeting->user?->name ?? 'Pengguna' }}"><i class="fe fe-message-circle"></i> Chat<span class="consultation-chat-unread-dot" hidden aria-hidden="true"></span></button>
@@ -233,6 +245,13 @@
                     <div class="mt-3"><label class="form-label" for="assigned-staff">Petugas PST yang melayani</label><select class="form-select" id="assigned-staff" name="assigned_staff" required>
                             <option value="">Pilih petugas tersedia</option>@foreach ($staff as $staffName)<option value="{{ $staffName }}">{{ $staffName }}</option>@endforeach
                         </select><small class="form-text" id="staff-availability-note">Petugas dengan jadwal bentrok tidak dapat dipilih.</small></div>
+                    <div class="mt-3"><label class="form-label" for="room-provider">Layanan ruang konsultasi</label>
+                        <select class="form-select" id="room-provider" name="room_provider" required>
+                            <option value="webrtc">Ruang PST Digital (WebRTC)</option>
+                            <option value="google_meet">Google Meet</option>
+                        </select>
+                        <small class="form-text">Google Meet dibuat di kalender akun petugas yang menyetujui. Pastikan akun Google telah terhubung.</small>
+                    </div>
                     <div class="admin-approval-warning" id="no-staff-warning" hidden><i class="fe fe-alert-circle"></i><span>Semua petugas sudah memiliki jadwal yang bertabrakan pada waktu ini.</span></div>
                 </div>
                 <div class="modal-footer"><button class="admin-btn admin-btn-outline" type="button" data-bs-dismiss="modal">Kembali</button><button class="admin-btn admin-btn-success" id="approve-submit" type="submit"><i class="fe fe-check"></i> Konfirmasi &amp; tugaskan petugas</button></div>
@@ -326,6 +345,7 @@
         const modal = document.getElementById('approveMeetingModal');
         const form = document.getElementById('approve-meeting-form');
         const select = document.getElementById('assigned-staff');
+        const roomProvider = document.getElementById('room-provider');
         const warning = document.getElementById('no-staff-warning');
         const submit = document.getElementById('approve-submit');
         const endpointBase = form.dataset.endpointBase;
@@ -347,6 +367,7 @@
                 option.textContent = `${option.value}${option.disabled ? ' · sudah terjadwal' : ' · tersedia'}`;
             });
             select.value = '';
+            roomProvider.value = 'webrtc';
             warning.hidden = available.length > 0;
             submit.disabled = available.length === 0;
         });

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Meeting;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -67,6 +68,63 @@ class ConsultationRoomAccessTest extends TestCase
 
         $this->actingAs($requester)->get(route('konsultasi.room', $meeting))->assertForbidden();
         $this->getJson(route('konsultasi.presence', $meeting))->assertOk()->assertJsonPath('can_join', false);
+    }
+
+    public function test_google_meet_redirect_is_only_available_to_room_participants_during_the_scheduled_slot(): void
+    {
+        $approver = $this->admin();
+        $meeting = $this->meeting($approver);
+        $meeting->update([
+            'tanggal' => '2026-10-15',
+            'start_time' => '10:00:00',
+            'end_time' => '11:00:00',
+            'room_provider' => Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            'google_meet_link' => 'https://meet.google.com/abc-defg-hij',
+            'room_opened_at' => Carbon::parse('2026-10-15 08:00:00', 'Asia/Jakarta'),
+        ]);
+        $requester = User::findOrFail($meeting->user_id);
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 10:30:00', 'Asia/Jakarta'));
+        $this->actingAs($requester)->get(route('konsultasi.room', $meeting))
+            ->assertRedirect('https://meet.google.com/abc-defg-hij');
+
+        $this->actingAs($approver)->get(route('konsultasi.room', $meeting))
+            ->assertRedirect('https://meet.google.com/abc-defg-hij');
+        $this->actingAs($this->admin())->get(route('konsultasi.room', $meeting))->assertForbidden();
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 11:01:00', 'Asia/Jakarta'));
+        $this->actingAs($requester)->get(route('konsultasi.room', $meeting))->assertForbidden();
+
+        Carbon::setTestNow();
+    }
+
+    public function test_google_meet_can_be_opened_early_by_its_approver_until_the_scheduled_end(): void
+    {
+        $approver = $this->admin();
+        $meeting = $this->meeting($approver);
+        $meeting->update([
+            'tanggal' => '2026-10-15',
+            'start_time' => '09:00:00',
+            'end_time' => '10:00:00',
+            'room_provider' => Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            'google_meet_link' => 'https://meet.google.com/abc-defg-hij',
+            'room_opened_at' => null,
+        ]);
+        $requester = User::findOrFail($meeting->user_id);
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 08:30:00', 'Asia/Jakarta'));
+        $this->actingAs($this->admin())->post(route('admin.konsultasi.open-room', $meeting))->assertForbidden();
+        $this->actingAs($approver)->post(route('admin.konsultasi.open-room', $meeting))
+            ->assertRedirect()
+            ->assertSessionHas('message');
+
+        $this->assertTrue($meeting->fresh()->isRoomOpen());
+        $this->actingAs($requester)->get(route('konsultasi.room', $meeting))
+            ->assertRedirect('https://meet.google.com/abc-defg-hij');
+
+        Carbon::setTestNow(Carbon::parse('2026-10-15 10:01:00', 'Asia/Jakarta'));
+        $this->actingAs($requester)->get(route('konsultasi.room', $meeting))->assertForbidden();
+        Carbon::setTestNow();
     }
 
     public function test_expired_room_rejects_polling_and_releases_all_participant_seats(): void

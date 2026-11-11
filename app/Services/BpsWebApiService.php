@@ -3854,7 +3854,7 @@ class BpsWebApiService
         $signature = (string) filemtime($path).':'.(string) filesize($path);
         $cacheKey = 'bps-csv-catalog:'.sha1($path.':'.$signature);
 
-        return Cache::remember($cacheKey, now()->addMinutes(10), function () use ($path): array {
+        return Cache::store('file')->remember($cacheKey, now()->addMinutes(10), function () use ($path): array {
             $rows = $this->readCatalogCsv($path, [
                 'kategori_subjek', 'subjek', 'id_subjek', 'judul', 'id_tabel',
                 'jenis_tabel', 'tahun', 'link_json',

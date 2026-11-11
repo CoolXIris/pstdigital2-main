@@ -53,7 +53,6 @@ Route::get('/google_login', [AuthController::class, 'redirectToGoogle'])->name('
 Route::get('/google_callback', [AuthController::class, 'handleGoogleCallback']);
 Route::get('logout', [AuthController::class, 'logout'])->name('logout');
 
-
 Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::get('dashboard', [HomeController::class, 'index'])->name('dashboard');
     Route::get('dashboard/reviews/export', [HomeController::class, 'exportReviews'])->name('dashboard.reviews.export');
@@ -64,6 +63,8 @@ Route::group(['middleware' => ['auth', 'role:admin|super_admin']], function () {
     Route::get('admin/konsultasi/riwayat/export', [KonsultasiAdminController::class, 'exportHistory'])->name('admin.konsultasi.history.export');
     Route::patch('admin/konsultasi/{meeting}/status', [KonsultasiAdminController::class, 'updateStatus'])
         ->name('admin.konsultasi.status');
+    Route::post('admin/konsultasi/{meeting}/google-meet/retry', [KonsultasiAdminController::class, 'retryGoogleMeet'])
+        ->name('admin.konsultasi.google-meet.retry');
     Route::post('admin/konsultasi/{meeting}/open-room', [KonsultasiAdminController::class, 'openRoomNow'])->name('admin.konsultasi.open-room');
     Route::put('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'updateHistory'])->name('admin.konsultasi.history.update');
     Route::delete('admin/konsultasi/{meeting}/history', [KonsultasiAdminController::class, 'deleteHistory'])->name('admin.konsultasi.history.destroy');

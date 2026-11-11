@@ -1,5 +1,9 @@
 <?php
 
+$appUrl = rtrim((string) env('APP_URL', 'http://localhost'), '/');
+$googleRedirect = (string) env('GOOGLE_REDIRECT_URI', '');
+$googleRedirect = str_replace(['${APP_URL}', '$APP_URL'], $appUrl, $googleRedirect);
+
 return [
 
     /*
@@ -37,7 +41,7 @@ return [
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
-        'redirect' => env('GOOGLE_REDIRECT_URI') ?: env('APP_URL').'/google_callback',
+        'redirect' => $googleRedirect !== '' ? $googleRedirect : $appUrl.'/google_callback',
     ],
     'gemini' => [
         'chat_url' => env('GEMINI_CHAT_API_URL', 'http://127.0.0.1:8001/api/chat'),

@@ -76,6 +76,7 @@
                 <div><dt>Petugas utama</dt><dd>{{ $meeting->assigned_staff }}</dd></div>
                 <div><dt>Jadwal</dt><dd>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('d M Y') }}<br>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</dd></div>
             </dl>
+            <p class="text-muted small">Untuk menyertakan suara, pilih tab browser saat berbagi layar lalu aktifkan opsi berbagi audio tab.</p>
 
             @if ($canManageRoomInvites)
                 <details class="portal-room-invite">
