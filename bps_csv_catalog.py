@@ -37,7 +37,7 @@ _REQUIRED_COLUMNS = {
 _EDITORIAL_LIST_TTL = 60 * 60
 _EDITORIAL_DETAIL_TTL = 24 * 60 * 60
 _EDITORIAL_MODELS = {"pressrelease", "publication", "news", "infographic"}
-_http = httpx.Client(timeout=25.0)
+_http = httpx.Client(timeout=8.0)
 _lock = threading.Lock()
 _catalog_cache: tuple[tuple[str, int, int, int, int], list[dict[str, str]]] | None = None
 

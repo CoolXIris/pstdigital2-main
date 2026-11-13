@@ -86,7 +86,7 @@ except Exception as exc:
 print("\n[4] Menguji pipeline internal Python (Gemini + BPS Tools)...")
 try:
     from chatbot import main
-    req = main.ChatRequest(question="berapa IPM Sumatera Selatan 2024?")
+    req = main.ChatRequest(question="berapa TPT sumsel terbaru")
     res = main.chat_endpoint(req, authorization=f"Bearer {chat_token}")
     reply = res.get("reply") or res.get("data") or ""
     print("  -> [OK] Python backend mandiri BERHASIL memproses dan merangkum data:")
