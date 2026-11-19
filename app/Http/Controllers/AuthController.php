@@ -33,7 +33,6 @@ class AuthController extends Controller
             ->scopes([
                 'https://www.googleapis.com/auth/calendar',
                 'https://www.googleapis.com/auth/drive.file',
-                // 'https://www.googleapis.com/auth/meetings',
             ])
             ->with([
                 'access_type' => 'offline', // Minta refresh_token
@@ -48,11 +47,11 @@ class AuthController extends Controller
             $user = User::where('email', $googleUser->getEmail())->first();
 
             // dd($googleUser, $googleUser->refreshToken);
-            if (!$user) {
+            if (! $user) {
                 $user = User::create([
                     'google_id' => $googleUser->getId(),
                     'name' => $googleUser->getName(),
-                    'last_login' => new DateTime(),
+                    'last_login' => new DateTime,
                     'email' => $googleUser->getEmail(),
                     'picture' => $googleUser->avatar,
                     'google_access_token' => $googleUser->token,
@@ -61,7 +60,7 @@ class AuthController extends Controller
                 ]);
                 $user->syncRoles('user');
             } else {
-                $user->last_login = new DateTime();
+                $user->last_login = new DateTime;
                 $user->name = $googleUser->getName();
                 $user->picture = $googleUser->avatar;
                 $user->google_access_token = $googleUser->token;
@@ -113,6 +112,7 @@ class AuthController extends Controller
                 : redirect('profile')->with('error', 'Ada isian profil yang belum lengkap.');
         }
     }
+
     public function auth_user()
     {
         $user = User::where('email', 'irfansyahahmad26@gmail.com')->first();

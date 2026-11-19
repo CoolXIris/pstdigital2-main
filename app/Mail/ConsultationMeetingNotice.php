@@ -4,6 +4,7 @@ namespace App\Mail;
 
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -28,8 +29,15 @@ class ConsultationMeetingNotice extends Mailable
         $subject = $this->noticeType === 'reminder'
             ? 'Pengingat: konsultasi dimulai sekitar 10 menit lagi'
             : 'Sesi konsultasi Anda telah disetujui';
+        $senderName = (string) config('mail.from.name', config('app.name', 'PST Digital'));
+        if ($senderName === '' || str_contains($senderName, '${APP_NAME}') || str_contains($senderName, '$APP_NAME')) {
+            $senderName = (string) config('app.name', 'PST Digital');
+        }
 
-        return new Envelope(subject: $subject.' - '. $this->topic);
+        return new Envelope(
+            from: new Address((string) config('mail.from.address'), $senderName),
+            subject: $subject.' - '.$this->topic,
+        );
     }
 
     public function content(): Content

@@ -10,8 +10,11 @@ from typing import Any
 from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
 
 import httpx
+from dotenv import load_dotenv
 
 import bps_data_store
+
+load_dotenv()
 
 
 logger = logging.getLogger(__name__)

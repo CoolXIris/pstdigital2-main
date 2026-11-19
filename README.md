@@ -42,8 +42,9 @@ For cPanel / Niagahoster (**Setup Python App** / Phusion Passenger WSGI), set:
 - **Application Entry Point**: `application`
 
 Set the same strong `GEMINI_CHAT_API_TOKEN` in Laravel and the Python process,
-and set `GEMINI_API_KEY` for the Python process. `GEMINI_MODEL` defaults to
-`gemini-flash-lite-latest`. For a separately hosted service, set
+and set `GEMINI_API_KEY` and `GEMINI_MODEL` for the Python process. The model
+is read from `GEMINI_MODEL` in the environment; there is no hard-coded fallback.
+For a separately hosted service, set
 `GEMINI_CHAT_API_URL` to its private or HTTPS `/api/chat` URL.
 
 ## Canonical BPS indicators
@@ -128,6 +129,20 @@ two additional admin or super-admin accounts invited by that approver. Each
 account may join from one active browser session at a time. For existing
 consultations without an approving account, staff cannot enter the room or
 invite others until an approver is assigned.
+
+Google Meet rooms require the Google Calendar API and the approving staff
+member's Google Calendar authorization. The app creates a Calendar event with a
+Meet link but does not change Meet access settings or invite the requester by
+email. The application only exposes its join button to authorized consultation
+participants during the scheduled slot; the approver can open the slot early.
+Google Meet opens in a new tab so the application page remains available after
+leaving the call. Because the Meet itself is public, anyone who obtains its link
+may also try to join directly; the app cannot enforce its schedule or participant
+authorization after redirecting to Google Meet.
+
+WebRTC screen sharing requests tab audio when the browser supports it. To share
+sound, choose a browser tab and enable its audio-sharing option in the browser's
+screen picker.
 
 ## Learning Laravel
 

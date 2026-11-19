@@ -43,14 +43,19 @@
                 <span><i class="bi bi-calendar3"></i>{{ \Illuminate\Support\Carbon::parse($meeting->tanggal)->translatedFormat('l, d F Y') }}</span>
                 <span><i class="bi bi-clock"></i>{{ substr($meeting->start_time, 0, 5) }}–{{ substr($meeting->end_time, 0, 5) }} WIB</span>
                 <span><i class="bi bi-person-badge"></i>{{ $meeting->assigned_staff ?: 'Petugas ditentukan saat persetujuan' }}</span>
+                <span><i class="bi bi-camera-video"></i>{{ $meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET ? 'Google Meet' : 'WebRTC PST Digital' }}</span>
             </div>
             @if ($isConfirmed)
                 <div class="portal-meeting-actions" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
 
                     <!-- Bagian 1: Teks Status (Otomatis menetap di paling kiri) -->
-                    <span class="portal-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite">
-                        <i class="bi bi-arrow-repeat"></i> Status ruang belum tersedia
-                    </span>
+                    @if ($meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET)
+                        <span class="portal-room-presence"><i class="bi bi-camera-video"></i> Google Meet sesuai jadwal</span>
+                    @else
+                        <span class="portal-room-presence" data-presence-url="{{ route('konsultasi.presence', $meeting) }}" aria-live="polite">
+                            <i class="bi bi-arrow-repeat"></i> Status ruang belum tersedia
+                        </span>
+                    @endif
 
                     <!-- Bagian 2: Grup Tombol (Otomatis bersanding menetap di paling kanan) -->
                     <div class="portal-meeting-presence-chat" style="display: flex; gap: 10px; align-items: center;">
@@ -62,9 +67,9 @@
 
                         <!-- Tombol Masuk / Status Ruang -->
                         @if ($meeting->room_open)
-                            <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" style="margin: 0;">
+                            <form method="GET" action="{{ route('konsultasi.room', $meeting) }}" style="margin: 0;" @if ($meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET) target="_blank" rel="noopener" @endif>
                                 <button class="portal-btn portal-btn-primary portal-meeting-join" type="submit">
-                                    <i class="bi bi-camera-video-fill"></i> Masuk ruang meeting
+                                    <i class="bi bi-camera-video-fill"></i> {{ $meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET ? 'Masuk Google Meet' : 'Masuk ruang meeting' }}
                                 </button>
                             </form>
                         @else
@@ -75,7 +80,18 @@
 
                     </div>
                 </div>
-                @unless ($meeting->room_open)<p class="portal-meeting-hint"><i class="bi bi-clock me-1"></i>Tombol masuk aktif pada tanggal dan rentang waktu sesi.</p>@endunless
+                @unless ($meeting->room_open)
+                    <p class="portal-meeting-hint"><i class="bi bi-clock me-1"></i>
+                        @if ($meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET && !$meeting->google_meet_link)
+                            Tautan Google Meet sedang disiapkan petugas.
+                        @else
+                            Tombol masuk aktif pada tanggal dan rentang waktu sesi.
+                        @endif
+                    </p>
+                @endunless
+                @if ($meeting->room_open && $meeting->room_provider === \App\Models\Meeting::ROOM_PROVIDER_GOOGLE_MEET)
+                    <p class="portal-meeting-hint"><i class="bi bi-info-circle me-1"></i>Google Meet dibuka di tab baru; halaman konsultasi ini tetap tersedia setelah Anda keluar dari meeting.</p>
+                @endif
             @else
                 <p class="portal-meeting-hint"><i class="bi bi-info-circle me-1"></i>Admin sedang meninjau permintaan Anda.</p>
             @endunless

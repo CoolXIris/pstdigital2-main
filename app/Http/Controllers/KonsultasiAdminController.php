@@ -11,16 +11,16 @@ use App\Services\ConsultationDocumentationService;
 use App\Services\ConsultationGoogleCalendarService;
 use App\Services\ConsultationMeetingNotificationService;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -88,10 +88,14 @@ class KonsultasiAdminController extends Controller
         $validated = $request->validate([
             'action' => ['required', Rule::in(['confirm', 'complete', 'cancel'])],
             'assigned_staff' => ['required_if:action,confirm', 'nullable', Rule::in(ConsultationStaff::query()->pluck('name')->all())],
+            'room_provider' => ['sometimes', 'nullable', Rule::in([
+                Meeting::ROOM_PROVIDER_WEBRTC,
+                Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            ])],
             'cancellation_reason' => ['required_if:action,cancel', 'nullable', 'string', 'min:10', 'max:1000'],
             'ringkasan' => ['required_if:action,complete', 'nullable', 'string', 'min:10', 'max:5000'],
-            'documentation' => [Rule::requiredIf(fn () => $request->input('action') === 'complete' && !$request->filled('documentation_url')), 'nullable', 'file', 'mimes:jpg,jpeg,png,webp,mp4,webm,mov', 'max:25600'],
-            'documentation_url' => [Rule::requiredIf(fn () => $request->input('action') === 'complete' && !$request->hasFile('documentation')), 'nullable', 'url', 'max:2048'],
+            'documentation' => [Rule::requiredIf(fn () => $request->input('action') === 'complete' && ! $request->filled('documentation_url')), 'nullable', 'file', 'mimes:jpg,jpeg,png,webp,mp4,webm,mov', 'max:25600'],
+            'documentation_url' => [Rule::requiredIf(fn () => $request->input('action') === 'complete' && ! $request->hasFile('documentation')), 'nullable', 'url', 'max:2048'],
         ]);
 
         $storedDocumentation = null;
@@ -141,6 +145,9 @@ class KonsultasiAdminController extends Controller
 
                     $lockedMeeting->assigned_staff = $staffName;
                     $lockedMeeting->assigned_staff_id = $staffMember->id;
+                    $lockedMeeting->room_provider = $validated['room_provider'] ?? Meeting::ROOM_PROVIDER_WEBRTC;
+                    $lockedMeeting->google_event_id = null;
+                    $lockedMeeting->google_meet_link = null;
                     $lockedMeeting->approved_by_user_id = $approver->id;
                     $lockedMeeting->approved_by_name = $approver->name;
                     $lockedMeeting->approved_by_email = $approver->email;
@@ -166,7 +173,7 @@ class KonsultasiAdminController extends Controller
                     return;
                 }
 
-                if (!in_array((int) $lockedMeeting->status, [0, 2], true)) {
+                if (! in_array((int) $lockedMeeting->status, [0, 2], true)) {
                     throw ValidationException::withMessages(['action' => 'Konsultasi ini sudah ditutup.']);
                 }
                 $lockedMeeting->update([
@@ -192,7 +199,9 @@ class KonsultasiAdminController extends Controller
             $confirmedMeeting = $meeting->fresh();
             $this->notifyConfirmed($confirmedMeeting);
             $notifications->sendApprovalNotifications($confirmedMeeting);
-            $calendarStatus = $calendar->createForApprover($confirmedMeeting);
+            $calendarStatus = $confirmedMeeting->room_provider === Meeting::ROOM_PROVIDER_GOOGLE_MEET
+                ? $calendar->createMeetForApprover($confirmedMeeting)
+                : $calendar->createForApprover($confirmedMeeting);
         }
 
         $message = match ($validated['action']) {
@@ -202,14 +211,43 @@ class KonsultasiAdminController extends Controller
         };
 
         if ($validated['action'] === 'confirm') {
-            $message .= match ($calendarStatus) {
-                'created' => ' Pengingat Google Calendar berhasil dibuat untuk petugas yang menyetujui.',
-                'already_created' => ' Pengingat Google Calendar untuk sesi ini sudah tersedia.',
-                default => ' Pengingat Google Calendar belum dapat dibuat. Pastikan akun Google petugas yang menyetujui sudah terhubung dan memiliki akses kalender.',
-            };
+            if ($confirmedMeeting->room_provider === Meeting::ROOM_PROVIDER_GOOGLE_MEET) {
+                $message .= match ($calendarStatus) {
+                    'created' => ' Google Meet berhasil dibuat dan tautan akan aktif sesuai jadwal sesi.',
+                    'already_created' => ' Tautan Google Meet untuk sesi ini sudah tersedia.',
+                    'unavailable' => ' Hubungkan akun Google petugas dengan akses Google Calendar, lalu coba kembali.',
+                    default => ' Google Meet belum berhasil dibuat. Pastikan Google Calendar API aktif dan akun petugas sudah terhubung, lalu coba kembali.',
+                };
+            } else {
+                $message .= match ($calendarStatus) {
+                    'created' => ' Pengingat Google Calendar berhasil dibuat untuk petugas yang menyetujui.',
+                    'already_created' => ' Pengingat Google Calendar untuk sesi ini sudah tersedia.',
+                    default => ' Pengingat Google Calendar belum dapat dibuat. Pastikan akun Google petugas yang menyetujui sudah terhubung dan memiliki akses kalender.',
+                };
+            }
         }
 
         return back()->with('message', $message);
+    }
+
+    public function retryGoogleMeet(Meeting $meeting, ConsultationGoogleCalendarService $calendar): RedirectResponse
+    {
+        abort_unless((int) $meeting->approved_by_user_id === (int) Auth::id(), 403);
+        abort_unless(
+            (int) $meeting->status === 2 && $meeting->room_provider === Meeting::ROOM_PROVIDER_GOOGLE_MEET,
+            404
+        );
+
+        $result = $calendar->createMeetForApprover($meeting);
+
+        $message = match ($result) {
+            'created' => 'Google Meet berhasil dibuat dan tautan akan aktif sesuai jadwal sesi.',
+            'already_created' => 'Tautan Google Meet untuk sesi ini sudah tersedia.',
+            'unavailable' => 'Hubungkan akun Google petugas dengan akses Google Calendar, lalu coba kembali.',
+            default => 'Google Meet belum berhasil dibuat. Pastikan Google Calendar API aktif dan akun petugas sudah terhubung, lalu coba kembali.',
+        };
+
+        return back()->with($result === 'created' || $result === 'already_created' ? 'message' : 'error', $message);
     }
 
     public function openRoomNow(Meeting $meeting): RedirectResponse
@@ -218,6 +256,12 @@ class KonsultasiAdminController extends Controller
             $lockedMeeting = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->firstOrFail();
             if ((int) $lockedMeeting->status !== 2) {
                 throw ValidationException::withMessages(['meeting' => 'Hanya konsultasi terkonfirmasi yang ruangnya dapat dibuka.']);
+            }
+            if ($lockedMeeting->room_provider === Meeting::ROOM_PROVIDER_GOOGLE_MEET) {
+                abort_unless((int) $lockedMeeting->approved_by_user_id === (int) Auth::id(), 403);
+                if (! filled($lockedMeeting->google_meet_link)) {
+                    throw ValidationException::withMessages(['meeting' => 'Google Meet belum siap. Buat meeting terlebih dahulu.']);
+                }
             }
 
             $now = now('Asia/Jakarta');
@@ -404,13 +448,12 @@ class KonsultasiAdminController extends Controller
 
         // Coturn REST credentials are time-limited and generated per room page load.
         $expiresAt = now()->addSeconds((int) config('pst.turn_credential_ttl', 21600))->timestamp;
-        $username = $expiresAt . ':pst-' . $meeting->id . '-' . Auth::id() . '-' . Str::random(8);
+        $username = $expiresAt.':pst-'.$meeting->id.'-'.Auth::id().'-'.Str::random(8);
         $credential = base64_encode(hash_hmac('sha1', $username, $sharedSecret, true));
 
         return array_map(static function (array $server) use ($username, $credential): array {
             $urls = is_array($server['urls'] ?? null) ? $server['urls'] : [$server['urls'] ?? ''];
-            $hasTurnUrl = collect($urls)->contains(static fn ($url): bool =>
-                is_string($url) && preg_match('/^turns?:/i', $url) === 1
+            $hasTurnUrl = collect($urls)->contains(static fn ($url): bool => is_string($url) && preg_match('/^turns?:/i', $url) === 1
             );
 
             if ($hasTurnUrl) {
@@ -423,7 +466,7 @@ class KonsultasiAdminController extends Controller
         }, $iceServers);
     }
 
-    public function room(Meeting $meeting): View
+    public function room(Meeting $meeting): View|RedirectResponse
     {
         $this->authorizeParticipant($meeting);
         $this->ensureRoomOpen($meeting);
@@ -432,6 +475,10 @@ class KonsultasiAdminController extends Controller
             403,
             'Anda telah dikeluarkan dari ruang konsultasi ini.'
         );
+        if ($meeting->room_provider === Meeting::ROOM_PROVIDER_GOOGLE_MEET) {
+            return redirect()->away($meeting->google_meet_link);
+        }
+
         $clientSessionHash = hash('sha256', session()->getId());
         $lastSignalBeforeJoin = (int) DB::table('meeting_signals')->where('meeting_id', $meeting->id)->max('id');
 
@@ -449,7 +496,7 @@ class KonsultasiAdminController extends Controller
                     ->update(['left_at' => now(), 'updated_at' => now()]);
                 DB::table('meeting_signals')->where('meeting_id', $meeting->id)->delete();
             }
-            $leaseExpired = !$lockedMeeting->room_last_seen_at
+            $leaseExpired = ! $lockedMeeting->room_last_seen_at
                 || Carbon::parse($lockedMeeting->room_last_seen_at)->lt(now()->subSeconds(90));
             $existingParticipant = DB::table('meeting_room_participants')
                 ->where('meeting_id', $meeting->id)
@@ -457,7 +504,7 @@ class KonsultasiAdminController extends Controller
                 ->lockForUpdate()
                 ->first();
             $participantIsActive = $existingParticipant
-                && !$existingParticipant->left_at
+                && ! $existingParticipant->left_at
                 && $existingParticipant->last_seen_at
                 && Carbon::parse($existingParticipant->last_seen_at)->gte(now()->subSeconds(30));
             if ($participantIsActive && $existingParticipant->client_session_hash !== $clientSessionHash) {
@@ -475,7 +522,7 @@ class KonsultasiAdminController extends Controller
             );
             abort_if($activeCount >= $roomCapacity, 409, 'Ruang konsultasi sudah penuh. Coba bergabung kembali saat ada peserta keluar.');
 
-            if (!$lockedMeeting->room_session_id || $leaseExpired || $protocolChanged) {
+            if (! $lockedMeeting->room_session_id || $leaseExpired || $protocolChanged) {
                 $lockedMeeting->room_session_id = (string) Str::uuid();
             }
 
@@ -526,7 +573,7 @@ class KonsultasiAdminController extends Controller
     public function signals(Request $request, Meeting $meeting): JsonResponse
     {
         $this->authorizeParticipant($meeting);
-        if (!$meeting->isRoomOpen()) {
+        if (! $meeting->isRoomOpen()) {
             if ($request->isMethod('get')) {
                 DB::table('meeting_room_participants')->where('meeting_id', $meeting->id)
                     ->whereNull('left_at')
@@ -543,7 +590,7 @@ class KonsultasiAdminController extends Controller
                 'after' => ['nullable', 'integer', 'min:0'],
                 'session_id' => ['required', 'uuid'],
             ]);
-            if (!hash_equals((string) $meeting->room_session_id, $validated['session_id'])) {
+            if (! hash_equals((string) $meeting->room_session_id, $validated['session_id'])) {
                 return response()->json([
                     'session_changed' => true,
                     'session_id' => $meeting->room_session_id,
@@ -847,7 +894,7 @@ class KonsultasiAdminController extends Controller
             ->where('meeting_id', $meeting->id)
             ->where('user_id', Auth::id())
             ->first();
-        $participantActive = $participant && !$participant->left_at && $participant->last_seen_at
+        $participantActive = $participant && ! $participant->left_at && $participant->last_seen_at
             && Carbon::parse($participant->last_seen_at)->gte(now()->subSeconds(30));
         $sameClient = $participantActive
             && $participant->client_session_hash === hash('sha256', session()->getId());
@@ -867,7 +914,7 @@ class KonsultasiAdminController extends Controller
                 ->where('last_seen_at', '>=', now()->subSeconds(30))->exists(),
             'participant_count' => $activeCount,
             'capacity' => $capacity,
-            'can_join' => $isAuthorized && !$wasKicked && ($sameClient || (!$participantActive && $activeCount < $capacity)),
+            'can_join' => $isAuthorized && ! $wasKicked && ($sameClient || (! $participantActive && $activeCount < $capacity)),
         ]);
     }
 
@@ -892,7 +939,7 @@ class KonsultasiAdminController extends Controller
 
     private function authorizeMeetingChatParticipant(Meeting $meeting): void
     {
-        $isLegacyAdministrator = !$meeting->approved_by_user_id
+        $isLegacyAdministrator = ! $meeting->approved_by_user_id
             && Auth::user()->hasRole(['admin', 'super_admin']);
         abort_unless($this->isAuthorizedRoomMember($meeting, (int) Auth::id()) || $isLegacyAdministrator, 403);
     }
@@ -905,7 +952,7 @@ class KonsultasiAdminController extends Controller
     private function isRoomModerator(Meeting $meeting, int $userId): bool
     {
         $user = User::find($userId);
-        if (!$user?->hasRole(['admin', 'super_admin'])) {
+        if (! $user?->hasRole(['admin', 'super_admin'])) {
             return false;
         }
 
@@ -919,7 +966,7 @@ class KonsultasiAdminController extends Controller
             return true;
         }
 
-        if (!Auth::user()->hasRole(['admin', 'super_admin'])) {
+        if (! Auth::user()->hasRole(['admin', 'super_admin'])) {
             return false;
         }
 
@@ -978,11 +1025,11 @@ class KonsultasiAdminController extends Controller
 
     private function notifyConfirmed(Meeting $meeting): void
     {
-        if (!\Illuminate\Support\Facades\Schema::hasTable('telegram_bot')) {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('telegram_bot')) {
             return;
         }
         $telegram = TelegramBot::first();
-        if (!$telegram?->token || !$telegram?->group_id) {
+        if (! $telegram?->token || ! $telegram?->group_id) {
             return;
         }
 

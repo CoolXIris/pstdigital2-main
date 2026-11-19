@@ -5,6 +5,17 @@ from chatbot import main
 
 
 class ChatRoutingTests(unittest.TestCase):
+    def test_gemini_model_comes_from_environment(self):
+        with patch.dict("os.environ", {"GEMINI_MODEL": "custom-gemini-model"}):
+            self.assertEqual(main._gemini_model(), "custom-gemini-model")
+
+    def test_gemini_model_requires_environment_configuration(self):
+        with patch.dict("os.environ", {"GEMINI_MODEL": ""}):
+            with self.assertRaises(main.HTTPException) as raised:
+                main._gemini_model()
+
+        self.assertEqual(raised.exception.status_code, 503)
+
     def test_greetings_do_not_route_to_data_tools(self):
         self.assertTrue(main.GREETING_ONLY.fullmatch("halo, terima kasih"))
         self.assertTrue(main.GREETING_ONLY.fullmatch("terima kasih"))

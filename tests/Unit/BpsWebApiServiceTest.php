@@ -9,6 +9,42 @@ use Tests\TestCase;
 
 class BpsWebApiServiceTest extends TestCase
 {
+    public function test_csv_catalog_cache_uses_file_store_when_default_cache_is_database(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'bps-catalog-');
+        if ($path === false) {
+            $this->fail('Unable to create a temporary BPS catalog.');
+        }
+
+        $headers = [
+            'kategori_subjek', 'subjek', 'id_subjek', 'judul', 'id_tabel',
+            'jenis_tabel', 'tahun', 'link_json',
+        ];
+        $row = [
+            'Demografi', 'Penduduk', '1', 'Jumlah Penduduk', '262',
+            'Tabel Dinamis', '2026', 'https://example.test/data.json',
+        ];
+        file_put_contents($path, implode(',', $headers).PHP_EOL.implode(',', $row).PHP_EOL);
+
+        $signature = (string) filemtime($path).':'.(string) filesize($path);
+        $cacheKey = 'bps-csv-catalog:'.sha1($path.':'.$signature);
+        Cache::store('file')->forget($cacheKey);
+        config([
+            'cache.default' => 'database',
+            'services.bps.catalog_csv' => $path,
+        ]);
+
+        try {
+            $rows = $this->invokePrivate(new BpsWebApiService, 'csvCatalogRows');
+
+            $this->assertCount(1, $rows);
+            $this->assertTrue(Cache::store('file')->has($cacheKey));
+        } finally {
+            Cache::store('file')->forget($cacheKey);
+            unlink($path);
+        }
+    }
+
     public function test_average_wage_question_does_not_match_average_commodity_price_table(): void
     {
         $service = new BpsWebApiService;
